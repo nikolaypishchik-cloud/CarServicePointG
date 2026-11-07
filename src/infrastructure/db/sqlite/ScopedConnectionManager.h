@@ -8,7 +8,8 @@ class ScopedSqliteConnection
 public:
     ScopedSqliteConnection(const QString& dbPath,
                            const QString& purpose,
-                           QString* errorText = nullptr);
+                           QString* errorText = nullptr,
+                           bool readOnly = false);
     ~ScopedSqliteConnection();
 
     ScopedSqliteConnection(const ScopedSqliteConnection&) = delete;

@@ -107,11 +107,12 @@ bool hasOtherOpenConnectionsForPath(const QString& dbPath, const QString& exclud
 
 ScopedSqliteConnection::ScopedSqliteConnection(const QString& dbPath,
                                                const QString& purpose,
-                                               QString* errorText)
+                                               QString* errorText, bool readOnly)
     : m_connectionName(makeScopedConnectionName(purpose))
 {
     QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), m_connectionName);
     db.setDatabaseName(dbPath);
+    if(readOnly) db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
     DbThreadConnectionSupport::registerConnectionName(m_connectionName, dbPath);
     if (!db.open()) {
         if (errorText) *errorText = db.lastError().text().trimmed();

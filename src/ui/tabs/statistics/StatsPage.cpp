@@ -1111,6 +1111,10 @@ void StatsPage::reloadData()
         if(cancel->load() || scopeKey!=AccessControlService::currentScopeKey() || from!=m_from->date() || to!=m_to->date())return;
         setProperty("statisticsError",result->error);
         if(!result->error.isEmpty()) {
+            m_loadedParts.clear();
+            for(const auto* key:{"events","filteredEvents","teamRows","partRows","performanceStaff","performanceOrders","performanceStock"})setProperty(key,QVariantList());
+            for(auto* model:{m_dashboardModel,m_activityModel,m_teamModel,m_partsModel})model->setSnapshot({});
+            updateSummary(0,0,0,0);
             m_summary->setText(result->error);
             if(performance) {
                 m_overview->setPlainText(result->error);

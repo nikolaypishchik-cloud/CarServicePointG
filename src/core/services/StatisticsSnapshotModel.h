@@ -25,6 +25,7 @@ struct StatisticsRowItem {
 };
 
 struct StatisticsSnapshot {
+    QString error;
     QDate from;
     QDate to;
     double revenueLabor = 0.0;
