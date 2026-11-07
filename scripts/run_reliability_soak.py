@@ -6,6 +6,7 @@ from ctypes import wintypes
 from uuid import uuid4
 from datetime import datetime, timezone
 from pathlib import Path
+from check_runtime_package import check
 from run_qt_test import diagnostic_error
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -66,7 +67,17 @@ def main():
     parser=argparse.ArgumentParser();parser.add_argument('--pilot',action='store_true')
     parser.add_argument('--minutes',type=int,choices=range(120,181),default=120)
     parser.add_argument('--audit-dir',type=Path,default=BASE)
+    parser.add_argument('--package-dir',type=Path,default=ROOT/'dist',
+                        help='Verified distribution or staged package under build-single-instance-audit')
     args=parser.parse_args()
+    package=args.package_dir.resolve()
+    build=(ROOT/'build-single-instance-audit').resolve()
+    if package!=(ROOT/'dist').resolve() and not package.is_relative_to(build):
+        parser.error('--package-dir must be dist or a staged package under build-single-instance-audit')
+    try:
+        check(package)
+    except (OSError, ValueError) as error:
+        parser.error(f'Runtime package verification failed: {error}')
     base=args.audit_dir.resolve()
     if not base.is_relative_to((ROOT/'build-single-instance-audit').resolve()):
         parser.error('--audit-dir must be inside build-single-instance-audit')
@@ -82,9 +93,11 @@ def main():
     try:
         out.mkdir()
         runtime=base/'runtime';runtime.mkdir(exist_ok=True)
-        manifest=json.loads((ROOT/'dist/runtime-manifest.json').read_text(encoding='utf-8'))
+        manifest=json.loads((package/'runtime-manifest.json').read_text(encoding='utf-8'))
         for rel,info in manifest['files'].items():
-            source=ROOT/'dist'/rel;target=runtime/rel
+            source=(package/rel).resolve();target=(runtime/rel).resolve()
+            if not source.is_relative_to(package) or not target.is_relative_to(runtime):
+                raise RuntimeError('Invalid runtime manifest path: '+rel)
             if not target.exists() or target.stat().st_size!=info['size']:
                 target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
             if sha(target)!=info['sha256']:raise RuntimeError('Runtime hash mismatch: '+rel)
@@ -107,7 +120,7 @@ def main():
             'native_desktop': desktop_name,
             'settings':'QSettings IniFormat under temporary fixture directory',
             'network':'Qt application HTTP proxy 127.0.0.1:9; no live opt-ins',
-            'test_exe_sha256':sha(exe),'production_exe_sha256':sha(ROOT/'dist/CarServicePointG.exe')})
+            'package':str(package),'test_exe_sha256':sha(exe),'production_exe_sha256':sha(runtime/'CarServicePointG.exe')})
         state.update(phase='running',started_at=stamp());write(out/'status.json',state)
         rounds=1 if args.pilot else 1000000
         for cycle in range(rounds):

@@ -155,7 +155,7 @@
   "scripts/run_period_report_graph.sh": "bd6131b25b6c4392308157d88ab00368d657f3e7d990ed1b48ee68b0113537b0",
   "scripts/run_purchase_acceptance.py": "1b59f6cb1c5e6144705780637f9481774504a4213da18ab099c76e8413fcac03",
   "scripts/run_qt_test.py": "eac6b79d51dbd9b5c45294b4e4d26915c209774947c800daaa557365ac9bb857",
-  "scripts/run_reliability_soak.py": "6993582d8f12c83c5ab5e8ef5774f9dfde45b5a2f140a1b2d9de673ba0f8c60b",
+  "scripts/run_reliability_soak.py": "372d0335717e6a56f2e597d8cdcec0cf2112998ed7ef58ec49b2b0953a9cc369",
   "scripts/run_report_detail_reads.sh": "880dff3b4dfb8486e49b0dcfb3c01dbe67c4abd43c65d2734db508dc58403d21",
   "scripts/run_splash_audit.ps1": "2b8f1a801bc019ce7ad2b3bb35f6722de7a170fc95f68e1724bf65f383fcf770",
   "scripts/run_statistics_read_failures.sh": "38eef809fd9007f3dbef93b01b01556d30b905a5b652366f9c20ca5cc5a3a901",
