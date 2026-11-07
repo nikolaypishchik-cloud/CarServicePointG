@@ -252,6 +252,7 @@ private slots:
     void migrationPublicationCrashRecovery();
     void migrationReservesArchivedOrderKeys();
     void migrationServiceRoundTrip_data();
+    void workspaceSchemaPreparationRollback();
     void migrationServiceRoundTrip();
     void migrationJournalRejectsCorruption();
     void migrationProfileSettings_data();
@@ -1398,6 +1399,40 @@ void ReportsOrdersTests::migrationReservesArchivedOrderKeys()
     error.clear();
     QVERIFY(!MigrationOrderKeys::plan(db,"audited_source",&keys,&error));
     QVERIFY(!error.isEmpty());
+}
+
+void ReportsOrdersTests::workspaceSchemaPreparationRollback()
+{
+    const auto connection = QUuid::createUuid().toString();
+    const auto cleanup = qScopeGuard([&] { QSqlDatabase::removeDatabase(connection); });
+    auto db = QSqlDatabase::addDatabase("QSQLITE", connection);
+    db.setDatabaseName(":memory:");
+    QVERIFY(db.open());
+    QSqlQuery query(db);
+    QVERIFY(query.exec("CREATE TABLE caller_marker(id INTEGER PRIMARY KEY)"));
+    QVERIFY(query.exec("CREATE TABLE work_orders(number INTEGER PRIMARY KEY,"
+                       "discount_mode TEXT GENERATED ALWAYS AS ('fixed') VIRTUAL)"));
+    QVERIFY(db.transaction());
+    QVERIFY(query.exec("INSERT INTO caller_marker VALUES(1)"));
+    QVERIFY(!ensureWorkspaceSchema(db));
+    QVERIFY(!db.tables().contains("masters"));
+    QVERIFY(query.exec("SELECT id FROM caller_marker"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 1);
+    query.finish();
+    QVERIFY(query.exec("DROP TABLE work_orders"));
+    QVERIFY(query.exec("CREATE TABLE additional_expenses(id INTEGER PRIMARY KEY)"));
+    QVERIFY(!ensureWorkspaceSchema(db));
+    QVERIFY(!db.tables().contains("work_order_service_attachments"));
+    QVERIFY(!db.tables().contains("work_order_part_attachments"));
+    QVERIFY(query.exec("DROP TABLE additional_expenses"));
+    QVERIFY(ensureWorkspaceSchema(db));
+    QVERIFY(db.tables().contains("masters"));
+    QVERIFY(db.rollback());
+    QVERIFY(!db.tables().contains("masters"));
+    QVERIFY(query.exec("SELECT COUNT(*) FROM caller_marker"));
+    QVERIFY(query.next());
+    QCOMPARE(query.value(0).toInt(), 0);
 }
 
 void ReportsOrdersTests::migrationServiceRoundTrip_data()

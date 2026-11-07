@@ -3,6 +3,7 @@
 
 #include "infrastructure/db/sqlite/DbBootstrapModulePrelude.h"
 #include "core/diagnostics/RuntimeLoggingControl.h"
+#include "core/repository/RepositoryWriteBoundary.h"
 #include "core/services/AdditionalExpenseService.h"
 #include "infrastructure/db/sqlite/DbBootstrapEnsureSchema.h"
 
@@ -14,9 +15,17 @@ bool Database::ensureSchema()
 bool ensureWorkspaceSchema(QSqlDatabase d)
 {
     if (!d.isValid() || !d.isOpen()) return false;
+    QString preparationError;
+    RepositoryWriteBoundary preparation(d, &preparationError);
+    if (!preparation.started()) {
+        qWarning() << "Workspace schema preparation failed:" << preparationError;
+        return false;
+    }
+    bool columnsReady = true;
     const auto ensureColumn = [&](const QString& table, const QString& column, const QString& ddl) {
         QString error;
         if (ensureColumnForDb(d, table, column, ddl, &error)) return true;
+        columnsReady = false;
         qWarning() << error;
         return false;
     };
@@ -320,6 +329,11 @@ if (!q.exec(
     ensureColumn("work_order_parts", "pricing_updated_at", "pricing_updated_at TEXT NOT NULL DEFAULT ''");
     ensureColumn("work_order_parts", "pricing_calc_version", "pricing_calc_version INTEGER NOT NULL DEFAULT 2");
 
+    // Identity repair configures foreign keys outside the preparation savepoint.
+    if (!columnsReady || !preparation.finish()) {
+        qWarning() << "Workspace schema preparation failed:" << preparationError;
+        return false;
+    }
     q.exec("UPDATE work_order_parts SET purchase_price = ROUND(price / (1.0 + markup_percent / 100.0), 2) WHERE purchase_price <= 0 AND price > 0 AND markup_percent > 0 AND COALESCE(manual_markup_override,0) = 0");
     q.exec("UPDATE work_order_parts SET purchase_price = price WHERE purchase_price <= 0 AND price > 0 AND (COALESCE(markup_percent,0) <= 0 OR COALESCE(manual_markup_override,0) <> 0)");
     q.exec("UPDATE work_order_parts SET purchase_amount = ROUND(purchase_price * COALESCE(NULLIF(qty,0),1), 2) WHERE purchase_amount <= 0 AND purchase_price > 0");
@@ -330,13 +344,15 @@ if (!q.exec(
     q.exec("UPDATE work_order_parts SET markup_source='legacy' WHERE COALESCE(pricing_updated_at,'')='' AND COALESCE(manual_markup_override,0) = 0 AND (COALESCE(markup_source,'')='' OR COALESCE(markup_source,'policy')='policy')");
     q.exec("UPDATE work_order_parts SET markup_source='policy' WHERE COALESCE(markup_source,'')=''");
     q.exec("UPDATE work_order_parts SET pricing_updated_at=datetime('now') WHERE COALESCE(pricing_updated_at,'')=''");
-    // Repair identity once, transactionally, before dependent records are rebuilt.
     QString identityError;
     if (!OrderIdentityService::ensureCanonicalIdentityIndexes(d, &identityError)) {
         qWarning() << "canonical identity migration stopped:" << identityError;
         return false;
     }
-    q.exec("UPDATE work_orders SET works_sum=COALESCE((SELECT SUM(COALESCE(s.amount, COALESCE(s.qty,1)*COALESCE(s.price,0))) FROM work_order_services s WHERE ((TRIM(COALESCE(s.order_uid,''))<>'' AND TRIM(COALESCE(s.order_uid,''))=TRIM(COALESCE(work_orders.order_uid,''))) OR (TRIM(COALESCE(s.order_uid,''))='' AND COALESCE(s.order_number,0)=COALESCE(work_orders.number,0)))),0), parts_sum=COALESCE((SELECT SUM(COALESCE(p.amount, COALESCE(p.qty,1)*COALESCE(p.price,0))) FROM work_order_parts p WHERE ((TRIM(COALESCE(p.order_uid,''))<>'' AND TRIM(COALESCE(p.order_uid,''))=TRIM(COALESCE(work_orders.order_uid,''))) OR (TRIM(COALESCE(p.order_uid,''))='' AND COALESCE(p.order_number,0)=COALESCE(work_orders.number,0)))),0)");
+    if (!q.exec("UPDATE work_orders SET works_sum=COALESCE((SELECT SUM(COALESCE(s.amount, COALESCE(s.qty,1)*COALESCE(s.price,0))) FROM work_order_services s WHERE ((TRIM(COALESCE(s.order_uid,''))<>'' AND TRIM(COALESCE(s.order_uid,''))=TRIM(COALESCE(work_orders.order_uid,''))) OR (TRIM(COALESCE(s.order_uid,''))='' AND COALESCE(s.order_number,0)=COALESCE(work_orders.number,0)))),0), parts_sum=COALESCE((SELECT SUM(COALESCE(p.amount, COALESCE(p.qty,1)*COALESCE(p.price,0))) FROM work_order_parts p WHERE ((TRIM(COALESCE(p.order_uid,''))<>'' AND TRIM(COALESCE(p.order_uid,''))=TRIM(COALESCE(work_orders.order_uid,''))) OR (TRIM(COALESCE(p.order_uid,''))='' AND COALESCE(p.order_number,0)=COALESCE(work_orders.number,0)))),0)")) {
+        qWarning() << "Workspace order totals failed:" << q.lastError().text();
+        return false;
+    }
     q.exec("CREATE INDEX IF NOT EXISTS idx_work_order_services_order_uid ON work_order_services(order_uid)");
     q.exec("CREATE INDEX IF NOT EXISTS idx_work_order_services_order_uid_id ON work_order_services(order_uid, id)");
     q.exec("CREATE INDEX IF NOT EXISTS idx_work_order_services_order_number ON work_order_services(order_number)");
@@ -356,6 +372,11 @@ if (!q.exec(
         qWarning() << "Failed to normalize active outsource_jobs table to order_uid schema";
     }
 
+    RepositoryWriteBoundary dependentTables(d, &preparationError);
+    if (!dependentTables.started()) {
+        qWarning() << "Dependent table preparation failed:" << preparationError;
+        return false;
+    }
     // attachment tables used by work/parts dialog
     if (!q.exec(
             "CREATE TABLE IF NOT EXISTS work_order_service_attachments ("
@@ -669,6 +690,10 @@ if (!q.exec(
         return false;
     }
 
+    if (!columnsReady || !dependentTables.finish()) {
+        qWarning() << "Dependent table preparation failed:" << preparationError;
+        return false;
+    }
     if (!ensureLocalRegistryMirrorSchema(d) || !ensureWorkspaceOrderStateSchema(d)) {
         qCritical() << "Workspace routing schema preparation failed";
         return false;
