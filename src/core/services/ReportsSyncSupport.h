@@ -2,6 +2,7 @@
 
 #include <QList>
 #include <QString>
+#include <QSqlDatabase>
 
 struct PayrollOrderRow {
     QString dateStart;
@@ -50,11 +51,13 @@ namespace ReportsSyncSupport {
 
 using ::ExpensesSavePayload;
 
-QString payrollWorksTextForMaster(const QString& orderNumber, const QString& masterId, double payrollPercent);
-QList<PayrollOrderRow> collectPayrollOrdersForMaster(const QString& masterId, const QString& df, const QString& dt);
+QString payrollWorksTextForMaster(const QString& orderNumber, const QString& masterId, double payrollPercent, QString* error = nullptr);
+QList<PayrollOrderRow> collectPayrollOrdersForMaster(const QString& masterId, const QString& df, const QString& dt, QString* error = nullptr);
+QList<PayrollOrderRow> collectPayrollOrdersForMaster(QSqlDatabase db, const QString& masterId, const QString& df, const QString& dt, QString* error);
 bool setPayrollOrderAbsent(const QString& masterId, int orderNumber, bool absent, QString* errorMessage = nullptr);
 bool setPayrollOrderDeleted(const QString& masterId, int orderNumber, bool deleted, QString* errorMessage = nullptr);
 bool saveExpensesRecord(const QString& df, const QString& dt, const ExpensesSavePayload& payload, QString* errorMessage = nullptr);
-QList<ElectricityPeriodRow> loadElectricityPeriods();
+QList<ElectricityPeriodRow> loadElectricityPeriods(QString* error = nullptr);
+QList<ElectricityPeriodRow> loadElectricityPeriods(QSqlDatabase db, QString* error);
 
 } // namespace ReportsSyncSupport

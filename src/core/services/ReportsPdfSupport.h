@@ -107,15 +107,15 @@ PartFinancials resolvePartFinancialsForReports(const ReportMarkupSnapshot& snaps
                                                double storedPurchasePrice,
                                                double storedMarkupPercent,
                                                bool manualMarkupOverride, int pricingCalcVersion);
-PartPeriodTotals collectClosedPartFinancialTotalsForReports(const QString& df, const QString& dt);
+PartPeriodTotals collectClosedPartFinancialTotalsForReports(const QString& df, const QString& dt, QString* error = nullptr);
 
 QList<PeriodPdfRow> collectPeriodPdfRows(const QString& df, const QString& dt,
                                          double& partsTotal, double& worksTotal, double& partsMargin,
-                                         double& outsourceMargin, double& salaryTotal, double& expensesTotal);
+                                         double& outsourceMargin, double& salaryTotal, double& expensesTotal, QString* error = nullptr);
 QMap<QString, QList<PartPdfRow>> collectPartsPdfGroups(const QString& df, const QString& dt);
 QMap<QString, QList<OutsourcePdfRow>> collectOutsourceGroups(const QString& df, const QString& dt,
                                                              int& count, double& repairTotal, double& clientTotal);
-QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& dt);
+QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& dt, QString* error = nullptr, bool includeWorkText = true);
 QMap<QString,double> loadMarkupMapForReports(const QString& key);
 bool isMotorOilName(QString name);
 
