@@ -1,5 +1,6 @@
 """Read-only schema/count inventory; never emits row contents."""
 import json, sqlite3, sys
+from contextlib import closing
 from pathlib import Path
 
 def quote(value):
@@ -8,7 +9,7 @@ def quote(value):
 def inventory(root):
     out = {}
     for path in sorted(Path(root).glob('*.db')):
-        with sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True) as db:
+        with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as db:
             tables = {}
             for name, sql in db.execute("SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall():
                 tables[name] = {'count': db.execute('SELECT COUNT(*) FROM ' + quote(name)).fetchone()[0],

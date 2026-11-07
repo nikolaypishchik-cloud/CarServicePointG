@@ -4,6 +4,7 @@ Fivefold means rows in the business tables below, not file bytes. Configuration,
 staff, external supplier snapshots and historical synchronization logs are shared.
 """
 import argparse, hashlib, json, sqlite3
+from contextlib import closing
 from pathlib import Path
 from performance_dataset_inventory import inventory, quote
 
@@ -40,7 +41,7 @@ def prepare(source, dest, factor):
     report = {'factor':factor, 'stride':STRIDE, 'files':{}, 'shared':'configuration, staff, supplier snapshots, sync and audit logs; calendar dates'}
     for path in source.glob('*.db'):
         target = dest / path.name
-        with sqlite3.connect(path.as_uri()+'?mode=ro',uri=True) as src, sqlite3.connect(target) as db:
+        with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as src, closing(sqlite3.connect(target)) as db:
             src.backup(db)
             db.execute('PRAGMA foreign_keys=OFF')
             base_fk = len(db.execute('PRAGMA foreign_key_check').fetchall())
@@ -81,6 +82,8 @@ def prepare(source, dest, factor):
             after_fk=len(db.execute('PRAGMA foreign_key_check').fetchall())
             if after_fk > base_fk*factor: raise ValueError(f'New FK problems: {path.name}, {base_fk} -> {after_fk}')
             report['files'][path.name]={'scaled_tables':scaled,'baseline_fk_violations':base_fk,'scaled_fk_violations':after_fk,'integrity':'ok'}
+            if db.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()[0]:
+                raise ValueError('Dataset checkpoint incomplete: '+path.name)
         report['files'][path.name]['bytes']=target.stat().st_size
         report['files'][path.name]['sha256']=hashlib.sha256(target.read_bytes()).hexdigest()
     (dest/'dataset-manifest.json').write_text(json.dumps(report,indent=2),encoding='utf-8')

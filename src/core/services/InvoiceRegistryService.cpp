@@ -168,9 +168,6 @@ QVector<RegisteredInvoice> load(QSqlDatabase db, QString* error) {
         invoice.totalCents += documented;
         invoice.paidCents += qMin(documented, debt.paidCents);
         invoice.parts.append(debt);
-        invoice.orders.insert(row.orderNumber, row.orderDisplay.isEmpty() ? QString::number(row.orderNumber) : row.orderDisplay);
-        const QString vehicle = (row.plate + " " + PlateUtils::normalizePlate(row.plate) + " " + row.carModel).simplified();
-        if (!vehicle.isEmpty() && !invoice.vehicles.contains(vehicle)) invoice.vehicles.append(vehicle);
     }
     if(!AccessControlService::currentOrderScope(db).restricted && db.tables().contains("workshop_inventory_purchases")) {
         QSet<qint64> issued;
@@ -266,18 +263,16 @@ QVector<RegisteredInvoice> load(QSqlDatabase db, QString* error) {
                 hasDistribution=true;invoice.distribution.append(slice);
                 if(slice.partId) {
                     distributedParts.insert(issuedKey(slice.partId,slice.orderNumber));
-                    invoice.orders.insert(slice.orderNumber,QString::number(slice.orderNumber));
-                    for(const auto& row:rows) if(row.id==slice.partId && row.orderNumber==slice.orderNumber) {
-                        invoice.orders[slice.orderNumber]=row.orderDisplay.isEmpty()?QString::number(row.orderNumber):row.orderDisplay;
-                        const auto vehicle=(row.plate+" "+PlateUtils::normalizePlate(row.plate)+" "+row.carModel).simplified();
-                        if(!vehicle.isEmpty() && !invoice.vehicles.contains(vehicle))invoice.vehicles.append(vehicle);
-                    }
                 }
             }
             if(!hasDistribution)invoice.distribution.append({debt.id,debt.totalCents,0,0,debt.quantity});
         }
     }
     // The receipt owns the liability. Issued parts are destinations, not a second purchase.
+    QHash<int,QVector<qsizetype>> rowsByPartId;
+    rowsByPartId.reserve(rows.size());
+    for (qsizetype i=0;i<rows.size();++i)
+        rowsByPartId[rows[i].id].append(i);
     for(auto it=groups.begin();it!=groups.end();) {
         auto& invoice=it.value();
         for(int index=invoice.parts.size()-1;index>=0;--index) {
@@ -287,12 +282,21 @@ QVector<RegisteredInvoice> load(QSqlDatabase db, QString* error) {
             invoice.totalCents-=amount;invoice.paidCents-=qMin(amount,part.paidCents);invoice.parts.removeAt(index);
         }
         if(invoice.parts.isEmpty()) {it=groups.erase(it);continue;}
-        invoice.orders.clear();invoice.vehicles.clear();
-        for(const auto& row:rows) {
-            bool included=false;
-            for(const auto& part:invoice.parts)if(part.source=="part" && part.id==row.id && part.orderUid==row.orderUid)included=true;
-            for(const auto& slice:invoice.distribution)if(slice.partId==row.id && slice.orderNumber==row.orderNumber)included=true;
-            if(!included)continue;
+        QVector<qsizetype> positions;
+        for (const auto& part:invoice.parts) {
+            if (part.source!="part") continue;
+            for (const auto pos:rowsByPartId.value(part.id))
+                if (rows[pos].orderUid==part.orderUid) positions.append(pos);
+        }
+        for (const auto& slice:invoice.distribution) {
+            for (const auto pos:rowsByPartId.value(slice.partId))
+                if (rows[pos].orderNumber==slice.orderNumber) positions.append(pos);
+        }
+        // A row may match both keys. Visit it once, in the original source order.
+        std::sort(positions.begin(),positions.end());
+        positions.erase(std::unique(positions.begin(),positions.end()),positions.end());
+        for (const auto pos:positions) {
+            const auto& row=rows[pos];
             invoice.orders.insert(row.orderNumber,row.orderDisplay.isEmpty()?QString::number(row.orderNumber):row.orderDisplay);
             const auto vehicle=(row.plate+" "+PlateUtils::normalizePlate(row.plate)+" "+row.carModel).simplified();
             if(!vehicle.isEmpty() && !invoice.vehicles.contains(vehicle))invoice.vehicles.append(vehicle);
