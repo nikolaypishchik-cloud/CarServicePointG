@@ -14,6 +14,7 @@
 #include "infrastructure/db/sqlite/DbCanonicalRewritePrimaryImportSupport.h"
 #include "infrastructure/db/sqlite/DbCanonicalRewriteAncillaryImportSupport.h"
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
+#include "infrastructure/db/sqlite/DbWorkspaceOrderStateSupport.h"
 #include "infrastructure/db/sqlite/RuntimeDbPreflightValidator.h"
 #include <QCryptographicHash>
 #include <QScopeGuard>
@@ -24,19 +25,17 @@
 #include "runtime/AppRuntime.h"
 
 namespace {
-bool seedWorkspace(const QString& destination, bool* copied, QString* error)
+bool snapshotStore(const QString& runtime, const QString& sealed, const QString& destination, bool* copied, QString* error)
 {
-    const QString active = AppRuntime::activeDbFilePath();
     *copied = false;
-    if (!QFileInfo::exists(active)) {
-        const auto sealed = AppRuntime::sealedActiveDbFilePath();
+    if (!QFileInfo::exists(runtime)) {
         if (!QFileInfo::exists(sealed)) return true;
         if (!EncryptedStorage::exportPlaintextDatabase(sealed,destination,error)) return false;
     } else {
         const auto name = QUuid::createUuid().toString();
         auto input = QSqlDatabase::addDatabase("QSQLITE",name);
         const auto close = qScopeGuard([&]{input.close(); input={}; QSqlDatabase::removeDatabase(name);});
-        input.setDatabaseName(active);
+        input.setDatabaseName(runtime);
         input.setConnectOptions("QSQLITE_OPEN_READONLY");
         if (!input.open()) return NativeSnapshotMetadata::fail(error,input.lastError().text());
         QSqlQuery copy(input);
@@ -45,22 +44,15 @@ bool seedWorkspace(const QString& destination, bool* copied, QString* error)
         if (!copy.exec()) return NativeSnapshotMetadata::fail(error,copy.lastError().text());
     }
     *copied = true;
-    return RuntimeDbPreflightValidator::validateFile(destination, RuntimeDbPreflightValidator::DbRole::Workspace,error);
+    return true;
 }
 
 bool retainPreviousArchive(const QString& temporary, const QString& role, const QString& runtime, const QString& sealed, QString* mergeSource, QString* error)
 {
-    if(!QFileInfo::exists(runtime) && !QFileInfo::exists(sealed))return true;
     const auto copy=QDir(temporary).filePath("previous-"+role+".db");
-    if(QFileInfo::exists(runtime)) {
-        const auto name=QUuid::createUuid().toString();
-        auto db=QSqlDatabase::addDatabase("QSQLITE",name);
-        const auto close=qScopeGuard([&]{db.close();db={};QSqlDatabase::removeDatabase(name);});
-        db.setDatabaseName(runtime);db.setConnectOptions("QSQLITE_OPEN_READONLY");
-        if(!db.open())return NativeSnapshotMetadata::fail(error,db.lastError().text());
-        QSqlQuery q(db);q.prepare("VACUUM INTO ?");q.addBindValue(copy);
-        if(!q.exec())return NativeSnapshotMetadata::fail(error,q.lastError().text());
-    } else if(!EncryptedStorage::exportPlaintextDatabase(sealed,copy,error))return false;
+    bool present = false;
+    if (!snapshotStore(runtime, sealed, copy, &present, error)) return false;
+    if (!present) return true;
     auto hash=[](const QString& path){QFile file(path);QCryptographicHash digest(QCryptographicHash::Sha256);
         if(!file.open(QIODevice::ReadOnly) || !digest.addData(&file))return QByteArray();return digest.result();};
     const auto digest=hash(copy);
@@ -79,7 +71,8 @@ bool retainPreviousArchive(const QString& temporary, const QString& role, const 
 bool prepareWorkspace(const QString& path, const QString& source, const QString& archive, const QString& identity, QString* error)
 {
     bool copied = false;
-    if (!seedWorkspace(path,&copied,error)) return false;
+    if (!snapshotStore(AppRuntime::activeDbFilePath(), AppRuntime::sealedActiveDbFilePath(), path, &copied, error)
+        || (copied && !RuntimeDbPreflightValidator::validateFile(path, RuntimeDbPreflightValidator::DbRole::Workspace, error))) return false;
     const auto name = QUuid::createUuid().toString();
     auto db = QSqlDatabase::addDatabase("QSQLITE", name);
     const auto close = qScopeGuard([&]{ db.close(); db = {}; QSqlDatabase::removeDatabase(name); });
@@ -87,6 +80,13 @@ bool prepareWorkspace(const QString& path, const QString& source, const QString&
     if (!db.open()) return NativeSnapshotMetadata::fail(error, db.lastError().text());
     if (!ensureWorkspaceSchema(db)) return NativeSnapshotMetadata::fail(error, "Cannot initialize migration workspace");
     const auto temporary=QFileInfo(path).absolutePath();
+    const QString previousRegistry = QDir(temporary).filePath(QStringLiteral("previous-registry.db"));
+    bool registryPresent = false;
+    if (!snapshotStore(AppRuntime::registryDbFilePath(), AppRuntime::sealedRegistryDbFilePath(),
+                       previousRegistry, &registryPresent, error)) return false;
+    if (registryPresent
+        && (!validateStartupRegistryIdentity(db, previousRegistry, error)
+            || !HistoricalRecordStore::captureFile(previousRegistry, path, AppRuntime::registryDbFilePath(), error))) return false;
     QMap<QString,QString> previousSources;
     QSet<QString> previousPaths;
     int storeIndex=0;

@@ -1914,6 +1914,19 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     QCOMPARE(q.value(1).toInt(),2024); QCOMPARE(q.value(2).toInt(),3); QVERIFY(!q.next());
     if(retainedStores) {
         const QDir receipts(QDir(AppRuntime::securityDir()).filePath("migration_retained_stores"));
+        QList<HistoricalRecordStore::Source> versions;
+        QVERIFY2(HistoricalRecordStore::sources(Database::db(), {}, &versions, &error), qPrintable(error));
+        int registryVersions = 0;
+        for (const auto& version : versions) {
+            if (version.origin != AppRuntime::registryDbFilePath()) continue;
+            ++registryVersions;
+            QList<HistoricalRecordStore::Record> rows;
+            QVERIFY2(HistoricalRecordStore::read(Database::db(), version.id, "retention_sentinel", {}, {}, 0, 2, &rows, &error), qPrintable(error));
+            QCOMPARE(rows.size(), 1);
+            QCOMPARE(rows.first().values.at(0).toString(), QStringLiteral("registry-old-uid"));
+            QCOMPARE(rows.first().values.at(1).toLongLong(), 7250);
+        }
+        QCOMPARE(registryVersions, 1);
         bool matched=false;
         for(const auto& dir:receipts.entryList(QDir::Dirs|QDir::NoDotAndDotDot)) {
             if(dir.startsWith('.'))continue;
