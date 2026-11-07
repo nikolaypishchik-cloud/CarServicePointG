@@ -1,5 +1,6 @@
 #pragma once
 
+#include "infrastructure/db/sqlite/MigrationOrderKeys.h"
 #include <QMap>
 #include <QSet>
 #include <QSqlDatabase>
@@ -27,4 +28,4 @@ bool clearCanonicalRewriteWorkspaceTargets(QSqlDatabase database, QString* error
 // Called within the enclosing rewrite transaction, before completion is recorded.
 bool recordCanonicalRewriteCorrespondence(QSqlDatabase database, const QString& sourceIdentity,
     const QString& sourceSchema, const CanonicalRewriteSourceSchema& schema, QString* errorText,
-    const QMap<qint64,qint64>& orderKeys = {});
+    const MigrationOrderKeys::Map& orderKeys = {});

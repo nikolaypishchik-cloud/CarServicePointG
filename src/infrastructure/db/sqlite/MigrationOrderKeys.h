@@ -11,7 +11,9 @@
 #include <limits>
 
 namespace MigrationOrderKeys {
-using Map = QMap<qint64,qint64>;
+struct Map : QMap<qint64,qint64> {
+    QMap<QString,QMap<qint64,qint64>> children;
+};
 inline bool fail(QString* error,const QString& message)
 {
     if (error) *error = message;
@@ -20,6 +22,7 @@ inline bool fail(QString* error,const QString& message)
 inline bool plan(QSqlDatabase workspace,const QString& attached,Map* mapping,QString* error)
 {
     mapping->clear();
+    mapping->children.clear();
     const QString orders=sqlQuoteIdent(attached)+".work_orders";
     QSqlQuery q(workspace);
     if (!q.exec("SELECT MAX(number) FROM (SELECT number FROM main.work_orders UNION ALL SELECT number FROM "+orders+")") || !q.next())
@@ -33,7 +36,26 @@ inline bool plan(QSqlDatabase workspace,const QString& attached,Map* mapping,QSt
         if (key<=0 || mapping->contains(key)) return fail(error,"Invalid source order key");
         mapping->insert(key,++high);
     }
-    return !q.lastError().isValid() || fail(error,q.lastError().text());
+    if (q.lastError().isValid()) return fail(error,q.lastError().text());
+    for (const QString& table : QStringList{"work_order_services","work_order_parts"}) {
+        if (SqliteSchemaInspection::tableAbsent(workspace,attached,table)) continue;
+        const auto keyColumn=tableColumnsForDb(workspace,table,attached).contains("id") ? QStringLiteral("id") : QStringLiteral("rowid");
+        const auto source="(SELECT "+keyColumn+" AS id FROM "+sqlQuoteIdent(attached)+"."+sqlQuoteIdent(table)+")";
+        const auto target="main."+sqlQuoteIdent(table);
+        if (!q.exec("SELECT MAX(id) FROM (SELECT id FROM "+source+" UNION ALL SELECT id FROM "+target+")") || !q.next())
+            return fail(error,q.lastError().text());
+        qint64 next=q.value(0).toLongLong();
+        if (!q.exec("SELECT s.id FROM "+source+" s JOIN "+target+" t ON t.id=s.id ORDER BY s.id"))
+            return fail(error,q.lastError().text());
+        while(q.next()) {
+            const auto id=q.value(0).toLongLong();
+            if(id<=0 || next>=std::numeric_limits<int>::max() || mapping->children[table].contains(id))
+                return fail(error,"Invalid or exhausted child key in "+table);
+            mapping->children[table].insert(id,++next);
+        }
+        if(q.lastError().isValid()) return fail(error,q.lastError().text());
+    }
+    return true;
 }
 inline bool store(QSqlDatabase db,const QString& identity,const Map& keys,QString* error)
 {
@@ -45,11 +67,19 @@ inline bool store(QSqlDatabase db,const QString& identity,const Map& keys,QStrin
         q.addBindValue(identity);q.addBindValue(it.key());q.addBindValue(it.value());
         if (!q.exec()) return fail(error,q.lastError().text());
     }
+    if (!q.exec("CREATE TABLE IF NOT EXISTS migration_child_key_map(source_identity TEXT NOT NULL,source_table TEXT NOT NULL,source_id INTEGER NOT NULL,target_id INTEGER NOT NULL,PRIMARY KEY(source_identity,source_table,source_id),UNIQUE(source_identity,source_table,target_id))"))
+        return fail(error,q.lastError().text());
+    for(auto table=keys.children.cbegin();table!=keys.children.cend();++table)
+        for(auto it=table.value().cbegin();it!=table.value().cend();++it) {
+            q.prepare("INSERT INTO migration_child_key_map VALUES(?,?,?,?)");
+            q.addBindValue(identity);q.addBindValue(table.key());q.addBindValue(it.key());q.addBindValue(it.value());
+            if(!q.exec()) return fail(error,q.lastError().text());
+        }
     return true;
 }
 inline bool load(QSqlDatabase db,const QString& identity,Map* keys,QString* error)
 {
-    keys->clear(); QSqlQuery q(db);
+    keys->clear(); keys->children.clear(); QSqlQuery q(db);
     if (SqliteSchemaInspection::tableAbsent(db,"main","migration_order_key_map")) return true;
     q.prepare("SELECT source_number,target_number FROM migration_order_key_map WHERE source_identity=? ORDER BY source_number");
     q.addBindValue(identity);
@@ -59,13 +89,25 @@ inline bool load(QSqlDatabase db,const QString& identity,Map* keys,QString* erro
         if (old<=0 || dest<=old || dest>std::numeric_limits<int>::max()) return fail(error,"Invalid persisted order key mapping");
         keys->insert(old,dest);
     }
+    if(q.lastError().isValid()) return fail(error,q.lastError().text());
+    if(SqliteSchemaInspection::tableAbsent(db,"main","migration_child_key_map")) return true;
+    q.prepare("SELECT source_table,source_id,target_id FROM migration_child_key_map WHERE source_identity=?");
+    q.addBindValue(identity);
+    if(!q.exec()) return fail(error,q.lastError().text());
+    while(q.next()) {
+        const auto table=q.value(0).toString();
+        const auto old=q.value(1).toLongLong(), dest=q.value(2).toLongLong();
+        if((table!="work_order_services" && table!="work_order_parts") || old<=0 || dest<=old || dest>std::numeric_limits<int>::max())
+            return fail(error,"Invalid persisted child key mapping");
+        keys->children[table].insert(old,dest);
+    }
     return !q.lastError().isValid() || fail(error,q.lastError().text());
 }
 // The input is an audited private copy. Projection always writes a separate file.
 inline bool project(const QString& input,const QString& output,const Map& keys,QString* error)
 {
     if (!QFile::copy(input,output)) return fail(error,"Cannot copy order projection");
-    if (keys.isEmpty()) return true;
+    if (keys.isEmpty() && keys.children.isEmpty()) return true;
     const QString name=QUuid::createUuid().toString();
     auto db=QSqlDatabase::addDatabase("QSQLITE",name);
     const auto close=qScopeGuard([&]{db.close();db={};QSqlDatabase::removeDatabase(name);});
@@ -128,6 +170,22 @@ inline bool project(const QString& input,const QString& output,const Map& keys,Q
                 q.prepare("UPDATE "+sqlQuoteIdent(child)+" SET "+sqlQuoteIdent(field)+"=? WHERE "+sqlQuoteIdent(field)+"=?");
                 q.addBindValue(it.value());q.addBindValue(it.key());
                 if (!q.exec()) return fail(error,q.lastError().text());
+            }
+        }
+    }
+    for(auto table=keys.children.cbegin();table!=keys.children.cend();++table) {
+        for(auto it=table.value().cbegin();it!=table.value().cend();++it) {
+            const auto keyColumn=tableColumnsForDb(db,table.key()).contains("id") ? QStringLiteral("id") : QStringLiteral("rowid");
+            q.prepare("UPDATE "+sqlQuoteIdent(table.key())+" SET "+keyColumn+"=? WHERE "+keyColumn+"=?");
+            q.addBindValue(it.value());q.addBindValue(it.key());
+            if(!q.exec() || q.numRowsAffected()!=1) return fail(error,"Cannot project child: "+q.lastError().text());
+            if(table.key()!="work_order_services") continue;
+            const QList<QPair<QString,QString>> references={{"work_order_services","parent_id"},{"work_order_parts","service_id"},{"service_masters","service_id"},{"outsource_repairs","service_id"}};
+            for(const auto& ref:references) {
+                if(!tables.contains(ref.first) || !tableColumnsForDb(db,ref.first).contains(ref.second)) continue;
+                q.prepare("UPDATE "+sqlQuoteIdent(ref.first)+" SET "+sqlQuoteIdent(ref.second)+"=? WHERE "+sqlQuoteIdent(ref.second)+"=?");
+                q.addBindValue(it.value());q.addBindValue(it.key());
+                if(!q.exec()) return fail(error,q.lastError().text());
             }
         }
     }

@@ -1199,7 +1199,7 @@ void ReportsOrdersTests::migrationOperationExclusion()
 void ReportsOrdersTests::migrationServiceRoundTrip_data()
 {
     QTest::addColumn<QString>("targetState");
-    for(const auto& state:QStringList{"fresh", "initialized-closed", "initialized-live", "active-transaction", "restore-after-failure", "populated", "populated-key-collision", "populated-conflicting-parent"})
+    for(const auto& state:QStringList{"fresh", "initialized-closed", "initialized-live", "active-transaction", "restore-after-failure", "populated", "populated-key-collision", "populated-child-key-collision", "populated-conflicting-parent"})
         QTest::newRow(qPrintable(state))<<state;
 }
 
@@ -1238,7 +1238,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             "INSERT INTO work_orders VALUES(7,'migration-service-order',2024,3,'2024-06-15','closed',0,0,1)",
             "INSERT INTO masters VALUES(1,'Safety Master')"
         }) QVERIFY2(q.exec(sql),qPrintable(q.lastError().text()));
-        if (targetState=="populated-key-collision" || targetState=="populated-conflicting-parent") {
+        if ((targetState=="populated-key-collision" || targetState=="populated-child-key-collision") || targetState=="populated-conflicting-parent") {
             QVERIFY(q.exec("ALTER TABLE work_order_services ADD COLUMN service_uid TEXT"));
             QVERIFY(q.exec("ALTER TABLE work_order_parts ADD COLUMN service_id INTEGER"));
             QVERIFY(q.exec("INSERT INTO work_order_services VALUES(20,7,'migration-service-order',1,0,0,'Source work','source-service-uid')"));
@@ -1270,6 +1270,10 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
                 "VALUES(%1,'existing-target-order',2023,3,'2023-06-15','open','','','Target car','Target client','m1')").arg(existingKey)),qPrintable(setup.lastError().text()));
             QVERIFY2(setup.exec(QString("INSERT INTO work_order_parts(id,part_uid,order_number,order_uid,name,qty,price,amount) "
                 "VALUES(1001,'existing-target-part',%1,'existing-target-order','Target part',2,19.25,38.50)").arg(existingKey)),qPrintable(setup.lastError().text()));
+            if(targetState=="populated-child-key-collision") {
+                QVERIFY(setup.exec("INSERT INTO work_order_services(id,service_uid,order_uid,order_number,title,qty,price,amount) VALUES(20,'target-service','existing-target-order',7,'Target work',1,12.50,12.50)"));
+                QVERIFY(setup.exec("UPDATE work_order_parts SET id=21,service_id=20 WHERE id=1001"));
+            }
             QVERIFY(setup.exec("INSERT INTO settings(key,value) VALUES('migration.target.sentinel','existing setting')"));
         }
         if(targetState=="initialized-closed") Database::close();
@@ -1335,7 +1339,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     QVERIFY(stages.contains("execute_snapshot")); QVERIFY(stages.contains("execute_import"));
     QVERIFY(stages.contains("execute_reopen_ready"));
     QCOMPARE(result.sourceOrderCount,1); QCOMPARE(result.importedOrderCount,1);
-    QCOMPARE(result.importedPartCount,targetState=="populated-key-collision" ? 1 : 0); QCOMPARE(result.importedMasterCount,1);
+    QCOMPARE(result.importedPartCount,(targetState=="populated-key-collision" || targetState=="populated-child-key-collision") ? 1 : 0); QCOMPARE(result.importedMasterCount,1);
     QVERIFY(QFileInfo::exists(result.snapshotDirPath));
     QVERIFY(source.open(QIODevice::ReadOnly)); QCOMPARE(source.readAll(),original); source.close();
     if (populated) {
@@ -1362,7 +1366,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
         QVERIFY(q.exec("SELECT value FROM settings WHERE key='migration.target.sentinel'"));
         QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("existing setting"));
     }
-    if (targetState=="populated-key-collision") {
+    if ((targetState=="populated-key-collision" || targetState=="populated-child-key-collision")) {
         QVERIFY(q.exec("SELECT number,order_year,order_number FROM work_orders WHERE order_uid='migration-service-order'"));
         QVERIFY(q.next()); const auto mapped=q.value(0).toInt(); QVERIFY(mapped!=7);
         QCOMPARE(q.value(1).toInt(),2024); QCOMPARE(q.value(2).toInt(),3);
@@ -1377,6 +1381,14 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
         sourceStream>>originalRow;targetStream>>targetKey;
         QCOMPARE(sourceStream.status(),QDataStream::Ok); QCOMPARE(targetStream.status(),QDataStream::Ok);
         QCOMPARE(originalRow.value("number").toInt(),7); QCOMPARE(targetKey.value("number").toInt(),mapped);
+    }
+    if(targetState=="populated-child-key-collision") {
+        QVERIFY(q.exec("SELECT p.id,s.id,ROUND(s.amount*100),p.order_uid,s.service_uid FROM work_order_parts p JOIN work_order_services s ON s.id=p.service_id WHERE p.part_uid='existing-target-part'"));
+        QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),21);QCOMPARE(q.value(1).toInt(),20);QCOMPARE(q.value(2).toInt(),1250);
+        QCOMPARE(q.value(3).toString(),QString("existing-target-order"));QCOMPARE(q.value(4).toString(),QString("target-service"));QVERIFY(!q.next());
+        QVERIFY(q.exec("SELECT p.id,s.id,ROUND(p.amount*100),ROUND(s.amount*100) FROM work_order_parts p JOIN work_order_services s ON s.id=p.service_id WHERE p.part_uid='source-part-uid'"));
+        QVERIFY(q.next());QVERIFY(q.value(0).toInt()!=21);QVERIFY(q.value(1).toInt()!=20);
+        QCOMPARE(q.value(2).toInt(),0);QCOMPARE(q.value(3).toInt(),0);QVERIFY(!q.next());
     }
     QVERIFY2(q.exec(populated ? "SELECT order_uid,order_year,order_number FROM work_orders WHERE order_uid='migration-service-order'" : "SELECT order_uid,order_year,order_number FROM work_orders"),qPrintable(q.lastError().text()));
     QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("migration-service-order"));

@@ -137,7 +137,7 @@ QByteArray migrationRecordBytes(const QMap<QString, QVariant>& values)
 }
 
 bool recordCanonicalRewriteCorrespondence(QSqlDatabase database, const QString& sourceIdentity,
-    const QString& sourceSchema, const CanonicalRewriteSourceSchema& schema, QString* errorText, const QMap<qint64,qint64>& orderKeys)
+    const QString& sourceSchema, const CanonicalRewriteSourceSchema& schema, QString* errorText, const MigrationOrderKeys::Map& orderKeys)
 {
     const auto fail = [&](const QString& message) {
         if (errorText) *errorText = QStringLiteral("Canonical correspondence: ") + message;
@@ -189,6 +189,11 @@ bool recordCanonicalRewriteCorrespondence(QSqlDatabase database, const QString& 
                 }
                 if (table.name=="work_orders" && name=="number" && orderKeys.contains(value.toLongLong()))
                     value=orderKeys.value(value.toLongLong());
+                const QString childTable=table.name=="service_masters" && name=="service_id"
+                    ? QStringLiteral("work_order_services") : table.name;
+                if ((name=="id" || (table.name=="service_masters" && name=="service_id"))
+                    && orderKeys.children.value(childTable).contains(value.toLongLong()))
+                    value=orderKeys.children.value(childTable).value(value.toLongLong());
                 targetKey.insert(name, value);
                 predicates << sqlQuoteIdent(name) + " = ?";
             }
