@@ -28,4 +28,5 @@ bool validatePartLocators(int number, const QString &uid, QString *error);
 bool record(QSqlDatabase source, int number, QString *error);
 bool replay(QSqlDatabase source, QString *error);
 bool alreadyDeleted(QSqlDatabase source, int number, QString *error);
+bool checkOpenAllowed(QSqlDatabase source, int number, const QString &uid, QString *error);
 } // namespace OrderDeletionPublication

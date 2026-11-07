@@ -46,7 +46,36 @@ bool journalPresent(QSqlDatabase source, bool *present, QString *error)
     *present = q.next();
     return !q.lastError().isValid() || fail(error, q.lastError().text());
 }
+
+bool protectRetiredHeaders(QSqlDatabase source, QString *error)
+{
+    const QString condition = QStringLiteral(
+        " ON work_orders WHEN EXISTS (SELECT 1 FROM order_deletion_publications "
+        "WHERE internal_number=NEW.number OR order_uid=NEW.order_uid) "
+        "OR EXISTS (SELECT 1 FROM order_creation_reservations r JOIN order_deletion_publications d "
+        "ON d.internal_number=r.internal_number AND d.order_uid=r.order_uid "
+        "WHERE r.order_year=NEW.order_year AND r.order_number=NEW.order_number) "
+        "BEGIN SELECT RAISE(ABORT,'Order identity was retired'); END");
+    QSqlQuery q(source);
+    if (!q.exec("CREATE TRIGGER IF NOT EXISTS retired_order_insert BEFORE INSERT" + condition) ||
+        !q.exec("CREATE TRIGGER IF NOT EXISTS retired_order_update BEFORE UPDATE OF number,order_uid,order_year,order_number" + condition))
+        return fail(error, q.lastError().text());
+    return true;
+}
 } // namespace
+
+bool OrderDeletionPublication::checkOpenAllowed(QSqlDatabase source, int number, const QString &uid, QString *error)
+{
+    bool present = false;
+    if (!journalPresent(source, &present, error)) return false;
+    if (!present) return true;
+    QSqlQuery q(source);
+    if (!execute(q, "SELECT 1 FROM order_deletion_publications WHERE internal_number=? OR order_uid=? LIMIT 1",
+                 {number, uid}, error))
+        return false;
+    if (q.next()) return fail(error, QStringLiteral("Наряд видалено. Його неможливо відкрити для редагування."));
+    return !q.lastError().isValid() || fail(error, q.lastError().text());
+}
 
 bool OrderDeletionPublication::Retirements::load(QSqlDatabase workspace, QString *error)
 {
@@ -163,6 +192,7 @@ bool OrderDeletionPublication::record(QSqlDatabase source, int number, QString *
     if (!q.exec("CREATE TABLE IF NOT EXISTS order_deletion_publications(internal_number INTEGER PRIMARY KEY,"
                 "order_uid TEXT NOT NULL UNIQUE,pending INTEGER NOT NULL CHECK(pending IN (0,1)))"))
         return fail(error, q.lastError().text());
+    if (!protectRetiredHeaders(source, error)) return false;
     if (!execute(q,
                  "INSERT INTO order_deletion_publications SELECT r.internal_number,r.order_uid,1 "
                  "FROM order_creation_reservations r JOIN work_orders w ON w.number=r.internal_number AND "
@@ -211,6 +241,7 @@ bool OrderDeletionPublication::replay(QSqlDatabase source, QString *error)
     if (!present)
         return true;
     QSqlQuery pending(source);
+    if (!protectRetiredHeaders(source, error)) return false;
     if (!pending.exec(
             "SELECT internal_number FROM order_deletion_publications WHERE pending=1 ORDER BY internal_number"))
         return fail(error, pending.lastError().text());

@@ -168,6 +168,9 @@ private slots:
                 QVERIFY(registry.next());QCOMPARE(registry.value(0).toInt(),expected);registry.finish();
             }
             QVERIFY2(Database::runStartupSchemaCheck(&error),qPrintable(error));
+            // An existing journal may predate the retirement guards.
+            QVERIFY(q.exec("DROP TRIGGER IF EXISTS retired_order_insert"));
+            QVERIFY(q.exec("DROP TRIGGER IF EXISTS retired_order_update"));
             QVERIFY2(Database::runStartupRegistryRefresh(&error),qPrintable(error));
             if(qEnvironmentVariableIsSet("CS_TEST_DELETE_HAS_ARCHIVE")){
                 QVERIFY2(rebuildRegistryDerivedState(db,&error),qPrintable(error));
@@ -184,7 +187,31 @@ private slots:
                 QVERIFY(q.exec("DETACH DATABASE conflict_archive"));
                 QVERIFY(!importArchivedRegistryFromDbPath(changed,&error));
                 QVERIFY2(error.contains("retired order"),qPrintable(error));
+                QVERIFY(!importSingleArchivedOrderToActiveFromPath(App::archiveDbFilePath(),1,&error));
+                QVERIFY2(error.contains(QStringLiteral("видалено")), qPrintable(error));
             }
+            for (int number : {1, 91001}) {
+                error.clear();
+                QVERIFY2(!Database::ensureOrderReadyForInteractiveOpen(number,&error),
+                         "Opening a retired or unknown order must not create an editable order");
+                QVERIFY(!error.isEmpty());
+            }
+            error.clear();
+            QVERIFY(!Database::ensureOrderAvailableInActiveByUid("crash-order",&error));
+            QVERIFY(!error.isEmpty());
+            for (const auto& values : {"1,'unrelated-a',9001,2031", "91002,'crash-order',9002,2031",
+                                       "91003,'unrelated-b',1,2026"}) {
+                QVERIFY(!q.exec(QStringLiteral("INSERT INTO work_orders(number,order_uid,order_number,order_year) VALUES(")
+                                + QString::fromLatin1(values) + ')'));
+                QVERIFY2(q.lastError().text().contains("Order identity was retired"), qPrintable(q.lastError().text()));
+            }
+            QVERIFY(q.exec("INSERT INTO work_orders(number,order_uid,order_number,order_year,status,opened_at,"
+                           "plate,plate_norm,car,client,master_id) VALUES(91004,'new-test-order',2,2026,'open',"
+                           "'2026-11-07','','','Synthetic','Synthetic','test-owner')"));
+            QVERIFY(!q.exec("UPDATE work_orders SET order_number=1 WHERE number=91004"));
+            QVERIFY2(q.lastError().text().contains("Order identity was retired"), qPrintable(q.lastError().text()));
+            QVERIFY(q.exec("DELETE FROM work_orders WHERE number=91004 AND order_number=2"));
+            QVERIFY(q.exec("SELECT COUNT(*) FROM work_orders"));QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),0);q.finish();
             QVERIFY2(Database::hardDeleteOrder(1,&error),qPrintable(error));
             QVERIFY(q.exec("SELECT pending FROM order_deletion_publications WHERE internal_number=1"));
             QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),0);q.finish();

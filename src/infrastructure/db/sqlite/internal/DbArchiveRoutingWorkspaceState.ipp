@@ -253,6 +253,7 @@ bool importSingleArchivedOrderToActiveFromPath(const QString& archivePath, int o
         const QString sourceUid = root.value(0).toString();
         const int sourceYear = root.value(1).toInt();
         const int sourceNumber = root.value(2).toInt();
+        if (!OrderDeletionPublication::checkOpenAllowed(d, orderNumber, sourceUid, errorText)) return false;
         if (orderNumber <= 0 || sourceYear <= 0 || sourceNumber <= 0
             || sourceUid.trimmed().isEmpty() || sourceUid != sourceUid.trimmed()) {
             if (errorText) *errorText = QStringLiteral("Archive order UID is invalid");

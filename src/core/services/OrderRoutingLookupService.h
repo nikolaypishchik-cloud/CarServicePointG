@@ -6,7 +6,6 @@
 
 namespace OrderRoutingLookupService {
 
-bool createDraftOrderShellInActive(QSqlDatabase database, int orderNumber, QString* errorText);
 int orderYearFromQueryValue(const QVariant& value);
 QString activeOrderUidForInternalNumber(QSqlDatabase database, int orderNumber);
 int activeInternalNumberForOrderUid(QSqlDatabase database, const QString& orderUid);

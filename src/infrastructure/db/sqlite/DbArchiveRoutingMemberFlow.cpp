@@ -200,6 +200,7 @@ bool Database::ensureOrderAvailableInActiveByUid(const QString& orderUid, QStrin
     const QString uid = orderUid.trimmed();
     if (uid.isEmpty()) return true;
     QSqlDatabase database = db();
+    if (!OrderDeletionPublication::checkOpenAllowed(database, 0, uid, errorText)) return false;
 
     int orderNumber = activeInternalNumberForOrderUid(database, uid);
     if (orderNumber > 0) {
@@ -324,13 +325,6 @@ bool Database::ensureOrderReadyForInteractiveOpen(int orderNumber, QString* erro
     if (orderNumber <= 0) return true;
     if (!ensureConnectionAlive(errorText)) return false;
 
-    QSqlQuery chk(db());
-    chk.prepare(QStringLiteral("SELECT 1 FROM work_orders WHERE number=? LIMIT 1"));
-    chk.addBindValue(orderNumber);
-    if (chk.exec() && chk.next()) {
-        return ensureOrderRuntimeStateForInteractiveOpen(orderNumber, errorText);
-    }
-
     return ensureOrderAvailableInActive(orderNumber, errorText);
 }
 
@@ -338,18 +332,24 @@ bool Database::ensureOrderAvailableInActive(int orderNumber, QString* errorText)
 {
     if (orderNumber <= 0) return true;
     QSqlDatabase database = db();
-    const QString knownUid = resolveOrderUid(orderNumber);
-    if (!knownUid.trimmed().isEmpty()) {
-        return ensureOrderAvailableInActiveByUid(knownUid, errorText);
-    }
+    if (!OrderDeletionPublication::checkOpenAllowed(database, orderNumber, {}, errorText)) return false;
 
     QSqlQuery chk(database);
     chk.prepare("SELECT 1 FROM work_orders WHERE number=? LIMIT 1");
     chk.addBindValue(orderNumber);
-    const bool activeOrder = chk.exec() && chk.next();
-    if (activeOrder) {
+    if (!chk.exec()) {
+        if (errorText) *errorText = chk.lastError().text();
+        return false;
+    }
+    if (chk.next()) {
         return ensureOrderRuntimeStateForInteractiveOpen(orderNumber, errorText);
     }
+    if (chk.lastError().isValid()) {
+        if (errorText) *errorText = chk.lastError().text();
+        return false;
+    }
+    const QString knownUid = resolveOrderUid(orderNumber);
+    if (!knownUid.trimmed().isEmpty()) return ensureOrderAvailableInActiveByUid(knownUid, errorText);
 
     QString importError;
     QString archivedStoragePath;
@@ -389,14 +389,10 @@ bool Database::ensureOrderAvailableInActive(int orderNumber, QString* errorText)
         return finalizeNewOrderWorkspaceState(orderNumber, errorText);
     }
 
-    if (createDraftOrderShellInActive(database, orderNumber, errorText)) {
-        return finalizeNewOrderWorkspaceState(orderNumber, errorText);
-    }
-
     if (errorText) {
         *errorText = !importError.trimmed().isEmpty()
             ? importError
-            : QStringLiteral("Order %1 could not be created in workspace DB").arg(orderNumber);
+            : QStringLiteral("Наряд №%1 не знайдено в робочій БД або архіві.").arg(orderNumber);
     }
     return false;
 }
