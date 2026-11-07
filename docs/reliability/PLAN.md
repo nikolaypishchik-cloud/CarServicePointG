@@ -105,3 +105,5 @@
 Залежності: 01–03 перед достовірними 04–08; 04–07 і виправлення перед фінальним 08; 09–10 на точному фінальному пакеті.
 Не оголошувати випуск готовим за одним лише успішним CTest.
 
+
+DBY-T189 follow-up: obtain Windows results for invoice owner selection, physical archive routing, v1 receipt guards and CSV/PDF review; retain DBY-04/06/07 as IN_PROGRESS until native and full-suite acceptance. Evidence and exact slots: DBY_T189_INVOICE_OWNER.md. Continue scenario-level evidence rather than treating portable owner SQL tests as full import acceptance.

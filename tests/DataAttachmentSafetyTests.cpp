@@ -1,4 +1,8 @@
 #include <QtTest/QtTest>
+#include <QInputDialog>
+#include <QTimer>
+#include "ui/common/dialogs/InvoiceReviewDialog.h"
+#include "ui/tabs/orders/CurrentOrdersPageLocalSupport.h"
 #include <QTemporaryDir>
 #include <QStandardPaths>
 #include <QSettings>
@@ -213,6 +217,119 @@ private slots:
         });
         QVERIFY(finalUnlink.ok);
         QVERIFY(!QFileInfo::exists(path));
+    }
+    void invoiceImportArchiveOwnerRoute() {
+        QString error;
+        sql("INSERT INTO work_orders(number,order_number,order_year,order_uid,opened_at,closed_at,status,plate,car) VALUES(917,917,2024,'invoice-archive-owner','2024-01-01','2024-02-01','closed','TEST 917','Synthetic archived car')");
+        QVERIFY2(Database::refreshOrderRegistry(917,&error),qPrintable(error));
+        QVERIFY2(Database::archiveSingleActiveOrderToArchive(917,&error),qPrintable(error));
+        QSqlQuery absent(db);QVERIFY(absent.exec("SELECT COUNT(*) FROM work_orders WHERE order_uid='invoice-archive-owner'"));QVERIFY(absent.next());QCOMPARE(absent.value(0).toInt(),0);absent.finish();
+        const auto hits=CurrentOrdersInvoiceImportService::findOrderCandidates(917,&error);
+        QVERIFY2(error.isEmpty(),qPrintable(error));QCOMPARE(hits.size(),1);QCOMPARE(hits.first().orderUid,QString("invoice-archive-owner"));
+        auto input=rows();for(auto& row:input){row.orderNumberText="917";row.priceText="10.25";}
+        CurrentOrdersInvoiceAttachmentSpec spec;spec.sourceFilePath=pdfFile("archived-invoice.pdf");spec.invoiceNumber="ARCHIVED-OWNER";
+        CurrentOrdersInvoiceImportResult result;
+        QVERIFY2(CurrentOrdersInvoiceImportService::importRows(input,spec,&result,&error),qPrintable(error));
+        QCOMPARE(result.affectedOrderNumbers,QList<int>{917});QCOMPARE(count("work_order_parts"),2);
+        QVERIFY2(CurrentOrdersInvoiceImportService::importRows(input,spec,&result,&error),qPrintable(error));QCOMPARE(count("work_order_parts"),2);
+        QSqlQuery owner(db);QVERIFY(owner.exec("SELECT DISTINCT order_uid FROM work_order_parts"));QVERIFY(owner.next());QCOMPARE(owner.value(0).toString(),QString("invoice-archive-owner"));QVERIFY(!owner.next());
+    }
+    void invoiceImportVisibleOwnerSelectionAndNoDraft() {
+        addOrder(); QString error;
+        sql("UPDATE work_orders SET order_number=712,order_year=2024 WHERE number=1");
+        sql("INSERT INTO work_orders(number,order_number,order_year,order_uid,opened_at,status) VALUES(712,713,2026,'invoice-physical-owner','2026-01-01','in_progress')");
+        auto input=rows(); for(auto& row:input) {row.orderNumberText="712";row.priceText="10.25";}
+        CurrentOrdersInvoiceAttachmentSpec spec;spec.sourceFilePath=pdfFile("owner-visible.pdf");spec.invoiceNumber="OWNER-1";
+        CurrentOrdersInvoiceImportResult result;
+        auto hits=CurrentOrdersInvoiceImportService::findOrderCandidates(712,&error);
+        QVERIFY2(error.isEmpty(),qPrintable(error));QCOMPARE(hits.size(),1);QCOMPARE(hits.first().orderUid,QString("stage1-order"));
+        QVERIFY2(CurrentOrdersInvoiceImportService::importRows(input,spec,&result,&error),qPrintable(error));
+        QCOMPARE(result.affectedOrderNumbers,QList<int>{1});QCOMPARE(count("work_order_parts"),2);
+        QSqlQuery sums(db);QVERIFY(sums.exec("SELECT SUM(purchase_amount) FROM work_order_parts WHERE order_uid='stage1-order'"));QVERIFY(sums.next());QCOMPARE(qRound64(sums.value(0).toDouble()*100),qint64(6663));
+        QVERIFY2(CurrentOrdersInvoiceImportService::importRows(input,spec,&result,&error),qPrintable(error));QCOMPARE(count("work_order_parts"),2);
+        for(auto& row:input)row.orderNumberText="991234";
+        QVERIFY(!CurrentOrdersInvoiceImportService::importRows(input,spec,&result,&error));QVERIFY(!error.isEmpty());QCOMPARE(count("work_orders"),2);QCOMPARE(count("work_order_parts"),2);
+        for(auto& row:input){row.orderNumberText="712";row.orderUid="deleted-owner";}
+        QVERIFY(!CurrentOrdersInvoiceImportService::importRows(input,spec,&result,&error));QCOMPARE(count("work_order_parts"),2);
+        sql("UPDATE work_orders SET order_number=712 WHERE number=712");
+        for(auto& row:input)row.orderUid.clear();
+        QVERIFY(!CurrentOrdersInvoiceImportService::importRows(input,spec,&result,&error));QVERIFY(error.contains(QString::fromUtf8("кільком")));
+        for(auto& row:input)row.orderUid="stage1-order";
+        QVERIFY2(CurrentOrdersInvoiceImportService::importRows(input,spec,&result,&error),qPrintable(error));QCOMPARE(count("work_order_parts"),2);
+    }
+    void invoiceImportReceiptOwnerAndContentGuards() {
+        addOrder();QString error;sql("UPDATE work_orders SET order_number=714 WHERE number=1");
+        CurrentOrdersInvoiceAttachmentSpec spec;spec.sourceFilePath=pdfFile("owner-receipt.pdf");spec.invoiceNumber="OWNER-RECEIPT";
+        auto input=rows();for(auto& row:input){row.orderUid="stage1-order";row.orderNumberText="714";}
+        QVERIFY2(CurrentOrdersInvoiceImportService::importRows(input,spec,nullptr,&error),qPrintable(error));
+        QSqlQuery receipt(db);QVERIFY(receipt.exec("SELECT value FROM settings WHERE key LIKE 'invoice_import.v1.%'"));QVERIFY(receipt.next());
+        QVERIFY(QJsonDocument::fromJson(receipt.value(0).toString().toUtf8()).isArray());receipt.finish();
+        QSqlQuery attachment(db);QVERIFY(attachment.exec("SELECT file_path FROM work_order_part_attachments LIMIT 1"));QVERIFY(attachment.next());const QString path=attachment.value(0).toString();attachment.finish();
+        const auto original=bytes(path);
+        auto expectRejected=[&] {
+            const QString message=QString::fromUtf8("Власник або вкладення попереднього імпорту змінилися. Повтор заблоковано.");
+            QTest::ignoreMessage(QtCriticalMsg,QRegularExpression("^DB_TRANSACTION_CONTEXT phase= rollback_ok  transactionId= [0-9a-f-]{36}  owner= TransactionRunner  operationId= tx_runner_[0-9]+  connection= carservice_main  threadId= [0-9]+  error= step_failed$"));
+            QTest::ignoreMessage(QtCriticalMsg,QRegularExpression("^DB_TRANSACTION step_failed_rollback connection= carservice_main  transactionId= [0-9a-f-]{36}  rollbackOk= true  error= "+QRegularExpression::escape(message)+"$"));
+            QTest::ignoreMessage(QtCriticalMsg,QRegularExpression("^INVOICE_IMPORT_END trace=INV-[0-9]+ status=failed error="+QRegularExpression::escape(message)+"$"));
+            QVERIFY(!CurrentOrdersInvoiceImportService::importRows(input,spec,nullptr,&error));QCOMPARE(error,message);QCOMPARE(count("work_order_parts"),2);
+        };
+        sql("INSERT INTO work_orders(number,order_number,order_year,order_uid,opened_at,status) VALUES(914,714,2025,'invoice-other-owner','2025-01-01','in_progress')");
+        for(auto& row:input)row.orderUid="invoice-other-owner";
+        expectRejected();QCOMPARE(bytes(path),original);
+        for(auto& row:input){row.orderUid="stage1-order";row.orderNumberText="714";}
+        {QFile changed(path);QVERIFY(changed.open(QIODevice::WriteOnly|QIODevice::Truncate));QCOMPARE(changed.write("changed attachment"),qint64(18));}
+        expectRejected();QCOMPARE(bytes(path),QByteArray("changed attachment"));
+        {QFile repaired(path);QVERIFY(repaired.open(QIODevice::WriteOnly|QIODevice::Truncate));QCOMPARE(repaired.write(original),qint64(original.size()));}
+        QVERIFY2(CurrentOrdersInvoiceImportService::importRows(input,spec,nullptr,&error),qPrintable(error));QCOMPARE(count("work_order_parts"),2);
+        db.close();QVERIFY(db.open());
+        QVERIFY2(CurrentOrdersInvoiceImportService::importRows(input,spec,nullptr,&error),qPrintable(error));QCOMPARE(count("work_order_parts"),2);
+    }
+    void invoiceImportOwnerChangeRollsBack() {
+        addOrder();QString error;auto input=rows();input=input.mid(0,1);
+        const QString message=QString::fromUtf8("Власник наряду змінився. Імпорт скасовано до запису.");
+        QTest::ignoreMessage(QtCriticalMsg,QRegularExpression("^DB_TRANSACTION_CONTEXT phase= rollback_ok  transactionId= [0-9a-f-]{36}  owner= TransactionRunner  operationId= tx_runner_[0-9]+  connection= carservice_main  threadId= [0-9]+  error= step_failed$"));
+        QTest::ignoreMessage(QtCriticalMsg,QRegularExpression("^DB_TRANSACTION step_failed_rollback connection= carservice_main  transactionId= [0-9a-f-]{36}  rollbackOk= true  error= "+QRegularExpression::escape(message)+"$"));
+        QTest::ignoreMessage(QtCriticalMsg,QRegularExpression("^INVOICE_IMPORT_END trace=INV-[0-9]+ status=failed error="+QRegularExpression::escape(message)+"$"));
+        CurrentOrdersInvoiceImportService::AttachmentHandler mutate=[](QSqlDatabase& tx,int,int,QString*) {QSqlQuery q(tx);return q.exec("UPDATE work_orders SET order_uid='changed-in-transaction' WHERE number=1");};
+        QVERIFY(!CurrentOrdersInvoiceImportService::importRows(input,mutate,nullptr,&error));QCOMPARE(error,message);QCOMPARE(count("work_order_parts"),0);
+        QSqlQuery owner(db);QVERIFY(owner.exec("SELECT order_uid FROM work_orders WHERE number=1"));QVERIFY(owner.next());QCOMPARE(owner.value(0).toString(),QString("stage1-order"));owner.finish();
+        QVERIFY2(CurrentOrdersInvoiceImportService::importRows(input,CurrentOrdersInvoiceImportService::AttachmentHandler{},nullptr,&error),qPrintable(error));QCOMPARE(count("work_order_parts"),1);
+    }
+    void invoiceReviewCsvPdfOwnerSelection() {
+        addOrder();QString error;sql("UPDATE work_orders SET order_number=918 WHERE number=1");
+        sql("INSERT INTO work_orders(number,order_number,order_year,order_uid,opened_at,status,plate,car) VALUES(915,918,2025,'invoice-form-owner','2025-01-01','in_progress','TEST 915','Synthetic car')");
+        InvoiceImport::ImportedPartDraft draft;draft.orderNumberText="918";draft.name="Synthetic part";draft.oemNumber="FORM-1";draft.qtyText="2";draft.priceText="10.25";
+        InvoiceImport::ExcelReadResult data;data.documentDate="2026-10-02";data.documentNumber="FORM-CSV";data.canonicalPdfAttachmentPath=pdfFile("form-csv.pdf");
+        const QString csv=file("form.csv","Name,Qty,Price\nSynthetic part,2,10.25\n");
+        auto form=CurrentOrdersSupport::createInvoiceReview(csv,data,{draft},nullptr);
+        bool choiceSeen=false;
+        auto choose=[&] {
+            QTimer::singleShot(0,form.get(),[&] {
+                auto* dialog=qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
+                if(!dialog)return;
+                const auto labels=dialog->comboBoxItems();
+                for(const auto& label:labels)if(label.contains("invoice-form-owner")){choiceSeen=true;dialog->setTextValue(label);dialog->accept();return;}
+                dialog->reject();
+            });
+        };
+        choose();QVERIFY2(form->commit(&error),qPrintable(error));QVERIFY(choiceSeen);QCOMPARE(count("work_order_parts"),1);
+        choose();QVERIFY2(form->commit(&error),qPrintable(error));QCOMPARE(count("work_order_parts"),1);
+        QSqlQuery part(db);QVERIFY(part.exec("SELECT order_uid,purchase_amount FROM work_order_parts"));QVERIFY(part.next());QCOMPARE(part.value(0).toString(),QString("invoice-form-owner"));QCOMPARE(qRound64(part.value(1).toDouble()*100),qint64(2050));part.finish();
+        data.documentNumber="FORM-PDF";data.canonicalPdfAttachmentPath.clear();
+        form=CurrentOrdersSupport::createInvoiceReview(pdfFile("form-direct.pdf"),data,{draft},nullptr);
+        choose();QVERIFY2(form->commit(&error),qPrintable(error));QCOMPARE(count("work_order_parts"),2);
+        QTimer::singleShot(0,form.get(),[]{if(auto* dialog=qobject_cast<QInputDialog*>(QApplication::activeModalWidget()))dialog->reject();});
+        QVERIFY(!form->commit(&error));QCOMPARE(count("work_order_parts"),2);
+        QTimer::singleShot(0,form.get(),[&]{
+            auto* dialog=qobject_cast<QInputDialog*>(QApplication::activeModalWidget());if(!dialog)return;
+            for(const auto& label:dialog->comboBoxItems())if(label.contains("invoice-form-owner")){
+                dialog->setTextValue(label);sql("UPDATE work_orders SET order_uid='changed-form-owner' WHERE number=915");dialog->accept();return;
+            }
+            dialog->reject();
+        });
+        QVERIFY(!form->commit(&error));QVERIFY(error.contains(QString::fromUtf8("змінився")));QCOMPARE(count("work_order_parts"),2);
+        sql("UPDATE work_orders SET order_uid='invoice-form-owner' WHERE number=915");
+        choose();QVERIFY2(form->commit(&error),qPrintable(error));QCOMPARE(count("work_order_parts"),2);
     }
     void invoiceImportIsAtomicAndIdempotent() {
         addOrder();

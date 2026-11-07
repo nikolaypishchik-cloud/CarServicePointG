@@ -7,7 +7,7 @@
 #include "core/repository/PartRepository.h"
 #include "core/util/FormatUtils.h"
 #include "core/util/OilServiceClassifier.h"
-#include "core/services/OrderWorkspaceService.h"
+#include "core/services/orders/InvoiceImportOwnerSupport.h"
 #include "core/services/orders/OrderFinancialService.h"
 #include "core/services/orders/OrderStatusService.h"
 #include "core/services/orders/OrderAttachmentService.h"
@@ -89,100 +89,18 @@ static void logInvoiceRowStage(const QString& traceId, const QString& stage, con
                          .arg(safeLogValue(row.priceText));
 }
 
-static bool ensureOrderExists(QSqlDatabase database, int orderNumber)
+static bool bindOwners(QList<CurrentOrdersImportServiceRow>& rows, QString* error)
 {
-    QSqlQuery q(database);
-    q.prepare(QStringLiteral("SELECT 1 FROM work_orders WHERE number=? LIMIT 1"));
-    q.addBindValue(orderNumber);
-    return q.exec() && q.next();
-}
-
-static int importDateYear(const QString& value)
-{
-    const QString text = value.trimmed();
-    if (text.isEmpty()) return 0;
-
-    const QDate iso = DateFormats::parseDate(text.left(10));
-    if (iso.isValid()) return iso.year();
-
-    static const QRegularExpression dottedDate(
-        QStringLiteral(R"((\b\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4}\b))"));
-    const auto match = dottedDate.match(text);
-    if (!match.hasMatch()) return 0;
-
-    bool ok = false;
-    int year = match.captured(3).toInt(&ok);
-    if (!ok) return 0;
-    if (year < 100) year += 2000;
-    return (year >= 2000 && year <= 2100) ? year : 0;
-}
-
-static int preferredOrderYear(const CurrentOrdersImportServiceRow& row)
-{
-    int year = importDateYear(row.orderedAt);
-    if (year > 0) return year;
-    year = importDateYear(row.deliveryDate);
-    if (year > 0) return year;
-    return QDate::currentDate().year();
-}
-
-static int resolveInternalOrderNumberForInvoiceImport(QSqlDatabase database,
-                                                      int displayedOrderNumber,
-                                                      int orderYear,
-                                                      QString* errorText)
-{
-    if (displayedOrderNumber <= 0) return 0;
-    if (!database.isValid() || (!database.isOpen() && !database.open())) {
-        if (errorText) *errorText = database.lastError().text();
-        return 0;
+    for (auto& row : rows) {
+        const auto hits=InvoiceImportOwnerSupport::candidates(Database::db(),row.orderNumberText.toInt(),error);
+        if (error && !error->isEmpty()) return false;
+        row.orderUid=InvoiceImportOwnerSupport::select(hits,row.orderUid,error);
+        if (row.orderUid.isEmpty()) return false;
+        for (const auto& hit:hits) if (hit.orderUid==row.orderUid
+                && !InvoiceImportOwnerSupport::validateStoredOwner(Database::db(),hit,error)) return false;
     }
-
-    QSqlQuery q(database);
-    q.prepare(QStringLiteral(
-        "SELECT number, COALESCE(order_number, number), COALESCE(order_year, 0), COALESCE(status, '') "
-        "FROM work_orders "
-        "WHERE COALESCE(order_number, number)=? OR number=? "
-        "ORDER BY "
-        "CASE "
-        "  WHEN COALESCE(order_number, number)=? AND (?=0 OR COALESCE(order_year,0)=?) THEN 0 "
-        "  WHEN COALESCE(order_number, number)=? THEN 1 "
-        "  WHEN number=? AND (?=0 OR COALESCE(order_year,0)=?) THEN 2 "
-        "  ELSE 3 "
-        "END, "
-        "CASE WHEN LOWER(COALESCE(status,'')) IN ('closed','done','finished','закрито','закритий','закрит') THEN 1 ELSE 0 END, "
-        "number DESC LIMIT 1"));
-    q.addBindValue(displayedOrderNumber);
-    q.addBindValue(displayedOrderNumber);
-    q.addBindValue(displayedOrderNumber);
-    q.addBindValue(orderYear);
-    q.addBindValue(orderYear);
-    q.addBindValue(displayedOrderNumber);
-    q.addBindValue(displayedOrderNumber);
-    q.addBindValue(orderYear);
-    q.addBindValue(orderYear);
-    if (!q.exec()) {
-        if (errorText) *errorText = q.lastError().text();
-        return 0;
-    }
-    if (q.next()) {
-        const int internalNumber = q.value(0).toInt();
-        const int visibleNumber = q.value(1).toInt();
-        const int resolvedYear = q.value(2).toInt();
-        if (RuntimeLoggingControl::deepDebugEnabled()) qInfo().noquote() << QStringLiteral("INVOICE_IMPORT_ORDER_RESOLVED input=%1 internal=%2 visible=%3 preferredYear=%4 resolvedYear=%5")
-                                 .arg(displayedOrderNumber)
-                                 .arg(internalNumber)
-                                 .arg(visibleNumber)
-                                 .arg(orderYear)
-                                 .arg(resolvedYear);
-        return internalNumber > 0 ? internalNumber : displayedOrderNumber;
-    }
-
-    if (RuntimeLoggingControl::deepDebugEnabled()) qInfo().noquote() << QStringLiteral("INVOICE_IMPORT_ORDER_RESOLVED input=%1 internal=%1 visible=%1 preferredYear=%2 mode=no_active_match_keep_input")
-                             .arg(displayedOrderNumber)
-                             .arg(orderYear);
-    return displayedOrderNumber;
+    return true;
 }
-
 
 QString attachmentBaseDir(int orderNumber, const QString& bucket)
 {
@@ -259,23 +177,34 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailed(const QList
     return importRowsDetailedImpl(rows, attachmentHandler, result, errorText, {});
 }
 
+QList<OrderSearchHit> CurrentOrdersInvoiceImportService::findOrderCandidates(int visibleNumber, QString* errorText)
+{
+    return InvoiceImportOwnerSupport::candidates(Database::db(),visibleNumber,errorText);
+}
+
 MutationResult CurrentOrdersInvoiceImportService::importRowsDetailedImpl(const QList<CurrentOrdersImportServiceRow>& rows,
                                                    const AttachmentHandler& attachmentHandler,
                                                    CurrentOrdersInvoiceImportResult* result,
                                                    QString* errorText,
                                                    const QString& receiptKey,
-                                                   const QHash<int, QString>& preparedPaths)
+                                                   const QByteArray& sourceDigest)
 {
+    if (errorText) errorText->clear();
     if (result) result->affectedOrderNumbers.clear();
     const QString traceId = invoiceTraceId();
     if (RuntimeLoggingControl::deepDebugEnabled()) qInfo().noquote() << QStringLiteral("INVOICE_IMPORT_BEGIN trace=%1 rows=%2").arg(traceId).arg(rows.size());
     if (rows.isEmpty()) { MutationResult r; r.sourceModule = QStringLiteral("CurrentOrdersInvoiceImportService"); r.entityType = QStringLiteral("work_order_parts_invoice_batch"); r.entityId = QStringLiteral("0"); r.operation = QStringLiteral("import_invoice_rows"); r.description = QString::fromUtf8("Імпорт рядків накладної в наряди"); r.changedTables = {QStringLiteral("work_order_parts"), QStringLiteral("work_orders")}; r.errorText = QString::fromUtf8("Немає рядків для імпорту."); return r; }
 
     QSqlDatabase db = Database::db();
+    auto boundRows=rows;
+    QString ownerError;
+    if (!bindOwners(boundRows,&ownerError)) {
+        MutationResult failed; failed.errorText=ownerError; return failed;
+    }
     QSet<int> uniqueOrders;
     QHash<int, int> resolvedOrderBySourceRow;
     for (int sourceRowIndex = 0; sourceRowIndex < rows.size(); ++sourceRowIndex) {
-        const CurrentOrdersImportServiceRow& row = rows.at(sourceRowIndex);
+        const CurrentOrdersImportServiceRow& row = boundRows.at(sourceRowIndex);
         logInvoiceRowStage(traceId, QStringLiteral("RAW_ROW"), toUnifiedRow(row, sourceRowIndex));
         bool ok = false;
         const int displayedOrderNumber = row.orderNumberText.toInt(&ok);
@@ -284,23 +213,21 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailedImpl(const Q
         }
 
         QString resolveError;
-        const int orderNumber = resolveInternalOrderNumberForInvoiceImport(db, displayedOrderNumber, preferredOrderYear(row), &resolveError);
+        int orderNumber=0;
+        QSqlQuery active(db);
+        active.prepare(QStringLiteral("SELECT number FROM work_orders WHERE order_uid=?"));
+        active.addBindValue(row.orderUid);
+        if (!active.exec()) resolveError=active.lastError().text();
+        else if (active.next()) orderNumber=active.value(0).toInt();
+        else if (Database::ensureOrderAvailableInActiveByUid(row.orderUid,&resolveError))
+            orderNumber=Database::resolveOrderInternalNumberByUid(row.orderUid);
+        if (orderNumber>0 && !InvoiceImportOwnerSupport::validateActive(db,orderNumber,displayedOrderNumber,row.orderUid,&resolveError)) orderNumber=0;
         if (orderNumber <= 0) {
             MutationResult r; r.sourceModule = QStringLiteral("CurrentOrdersInvoiceImportService"); r.entityType = QStringLiteral("work_order_parts_invoice_batch"); r.entityId = row.orderNumberText; r.operation = QStringLiteral("import_invoice_rows"); r.description = QString::fromUtf8("Імпорт рядків накладної в наряди"); r.changedTables = {QStringLiteral("work_order_parts"), QStringLiteral("work_orders")}; r.errorText = resolveError.trimmed().isEmpty() ? QString::fromUtf8("Не вдалося визначити внутрішній № наряду для %1.").arg(row.orderNumberText) : resolveError; return r;
         }
 
         resolvedOrderBySourceRow.insert(sourceRowIndex, orderNumber);
         uniqueOrders.insert(orderNumber);
-    }
-
-    for (int orderNumber : uniqueOrders) {
-        QString routingError;
-        if (!OrderWorkspaceService::ensureEditableOrder(orderNumber, &routingError)) {
-            MutationResult r; r.sourceModule = QStringLiteral("CurrentOrdersInvoiceImportService"); r.entityType = QStringLiteral("work_order_parts_invoice_batch"); r.entityId = QString::number(orderNumber); r.operation = QStringLiteral("import_invoice_rows"); r.description = QString::fromUtf8("Імпорт рядків накладної в наряди"); r.changedTables = {QStringLiteral("work_order_parts"), QStringLiteral("work_orders")}; r.errorText = routingError.trimmed().isEmpty() ? QString::fromUtf8("Наряд №%1 недоступний для імпорту.").arg(orderNumber) : routingError; return r;
-        }
-        if (!ensureOrderExists(db, orderNumber)) {
-            MutationResult r; r.sourceModule = QStringLiteral("CurrentOrdersInvoiceImportService"); r.entityType = QStringLiteral("work_order_parts_invoice_batch"); r.entityId = QString::number(orderNumber); r.operation = QStringLiteral("import_invoice_rows"); r.description = QString::fromUtf8("Імпорт рядків накладної в наряди"); r.changedTables = {QStringLiteral("work_order_parts"), QStringLiteral("work_orders")}; r.errorText = QString::fromUtf8("Наряд №%1 не знайдено.").arg(orderNumber); return r;
-        }
     }
 
     QList<int> affected = uniqueOrders.values();
@@ -317,39 +244,29 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailedImpl(const Q
     request.commitErrorFallback = QString::fromUtf8("Не вдалося завершити імпорт.");
 
     const auto execResult = WorkPartsMutationService::execute(request, [&](QSqlDatabase& txDb, QString* txError) {
+        QList<QString> owners;
+        for (int i=0;i<boundRows.size();++i) {
+            const auto& row=boundRows.at(i);
+            if (!InvoiceImportOwnerSupport::validateActive(txDb,resolvedOrderBySourceRow.value(i),
+                    row.orderNumberText.toInt(),row.orderUid,txError)) return false;
+            owners.append(row.orderUid);
+        }
         QJsonArray insertedIds;
         if (!receiptKey.isEmpty()) {
             QSqlQuery receipt(txDb);
             receipt.prepare(QStringLiteral("SELECT value FROM settings WHERE key=?"));
             receipt.addBindValue(receiptKey);
             if (!receipt.exec()) { if (txError) *txError = receipt.lastError().text(); return false; }
-            if (receipt.next()) {
-                const QJsonDocument saved = QJsonDocument::fromJson(receipt.value(0).toString().toUtf8());
-                if (!saved.isArray() || saved.array().isEmpty()) {
-                    if (txError) *txError = QString::fromUtf8("Не вдалося перевірити попередній імпорт. Повторне додавання заблоковано.");
-                    return false;
-                }
-                for (const auto& id : saved.array()) {
-                    QSqlQuery part(txDb);
-                    part.prepare(QStringLiteral("SELECT a.file_path,p.order_number FROM work_order_parts p JOIN work_order_part_attachments a ON a.part_id=p.id WHERE p.id=?"));
-                    part.addBindValue(id.toInt());
-                    if (!part.exec() || !part.next() || !QFileInfo::exists(part.value(0).toString())
-                        || QDir::cleanPath(part.value(0).toString()).compare(
-                            QDir::cleanPath(preparedPaths.value(part.value(1).toInt())), Qt::CaseInsensitive) != 0) {
-                        if (txError) *txError = QString::fromUtf8("Попередній імпорт уже збережено, але його дані або вкладення змінено. Потрібна перевірка перед повторним імпортом.");
-                        return false;
-                    }
-                }
-                return true;
-            }
+            if (receipt.next()) return InvoiceImportOwnerSupport::verifyReceipt(txDb,
+                receipt.value(0).toString().toUtf8(),owners,sourceDigest,txError);
         }
         for (int sourceRowIndex = 0; sourceRowIndex < rows.size(); ++sourceRowIndex) {
-            const CurrentOrdersImportServiceRow& row = rows.at(sourceRowIndex);
+            const CurrentOrdersImportServiceRow& row = boundRows.at(sourceRowIndex);
             CurrentOrdersInvoiceUnifiedRow unifiedRow = toUnifiedRow(row, sourceRowIndex);
             logInvoiceRowStage(traceId, QStringLiteral("PARSED_ROW"), unifiedRow);
             bool orderOk = false;
             const int displayedOrderNumber = row.orderNumberText.toInt(&orderOk);
-            const int orderNumber = orderOk ? resolvedOrderBySourceRow.value(sourceRowIndex, displayedOrderNumber) : 0;
+            const int orderNumber = orderOk ? resolvedOrderBySourceRow.value(sourceRowIndex) : 0;
             bool qtyOk = false;
             bool priceOk = false;
             const double qty = qMax(0.0, row.qtyText.trimmed().isEmpty() ? 1.0 : PartImportTextSupport::parseLooseNumber(row.qtyText, &qtyOk));
@@ -412,6 +329,7 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailedImpl(const Q
                 .arg(payload.markupPercent, 0, 'f', 2)
                 .arg(payload.markupSource)
                 .arg(payload.manualMarkupOverride ? 1 : 0);
+            if (!InvoiceImportOwnerSupport::validateActive(txDb,orderNumber,row.orderNumberText.toInt(),row.orderUid,txError)) return false;
             if (attachmentHandler && insertedPartId > 0) {
                 if (!attachmentHandler(txDb, orderNumber, insertedPartId, txError)) {
                     return false;
@@ -419,6 +337,11 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailedImpl(const Q
             }
         }
 
+        for (int i=0;i<boundRows.size();++i) {
+            const auto& row=boundRows.at(i);
+            if (!InvoiceImportOwnerSupport::validateActive(txDb,resolvedOrderBySourceRow.value(i),
+                    row.orderNumberText.toInt(),row.orderUid,txError)) return false;
+        }
         for (int orderNumber : affected) {
             QString localError;
             if (!OrderFinancialService::refreshOrderFinancialSums(txDb, orderNumber, &localError)) {
@@ -476,6 +399,13 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailed(const QList
     if (RuntimeLoggingControl::deepDebugEnabled()) qInfo().noquote() << QStringLiteral("INVOICE_IMPORT_ATTACHMENT_SPEC store=%1 invoice=%2 invoiceDate=%3 source=%4")
                              .arg(attachmentSpec.storeName, attachmentSpec.invoiceNumber, attachmentSpec.invoiceDate, attachmentSpec.sourceFilePath);
     if (!attachmentSpec.hasAttachment()) return importRowsDetailedImpl(rows, {}, result, errorText, {});
+    auto boundRows=rows;
+    QString ownerError;
+    if (!bindOwners(boundRows,&ownerError)) {
+        MutationResult failed; failed.errorText=ownerError;
+        if (errorText) *errorText=ownerError;
+        return failed;
+    }
     QFile source(attachmentSpec.sourceFilePath);
     QTemporaryFile frozenSource(QDir::temp().filePath(QStringLiteral("cs_invoice_XXXXXX.")
         + QFileInfo(attachmentSpec.sourceFilePath).suffix()));
@@ -516,6 +446,7 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailed(const QList
             return failed;
         }
     }
+    const QByteArray sourceDigest=hash.result();
     QJsonArray identityRows;
     for (const auto& row : rows) {
         QJsonArray values;
@@ -530,28 +461,15 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailed(const QList
     hash.addData(QJsonDocument(meta).toJson(QJsonDocument::Compact));
     const QString receiptKey = QStringLiteral("invoice_import.v1.") + QString::fromLatin1(hash.result().toHex());
     QHash<int, QString> storedPaths;
-    for (const auto& row : rows) {
-        QString prepareError;
-        bool validNumber = false;
-        const int displayedNumber = row.orderNumberText.toInt(&validNumber);
-        const int orderNumber = validNumber
-            ? resolveInternalOrderNumberForInvoiceImport(Database::db(), displayedNumber, preferredOrderYear(row), &prepareError) : 0;
-        if (orderNumber > 0 && !storedPaths.contains(orderNumber)) {
-            const QString path = StorageDirectoriesGuard::copyFileToManagedStorageAs(StorageDirectoriesGuard::StorageKind::Invoice,
-                orderNumber, QStringLiteral("parts"), importedInvoiceTargetFileName(attachmentSpec), frozenSource.fileName(), &prepareError);
-            if (!path.isEmpty()) storedPaths.insert(orderNumber, path);
-        }
-        if (orderNumber <= 0 || !storedPaths.contains(orderNumber)) {
-            MutationResult failed; failed.errorText = prepareError.isEmpty()
-                ? QString::fromUtf8("Не вдалося підготувати вкладення для наряду. Рядки не додано.") : prepareError;
-            if (errorText) *errorText = failed.errorText;
-            for (const auto& path : storedPaths) OrderAttachmentService::removeUnreferencedManagedFile(Database::db(), path);
-            return failed;
-        }
-    }
     int evidenceRow = 0;
     const AttachmentHandler handler = [&](QSqlDatabase& txDb, int orderNumber, int partId, QString* txError) {
-        const QString path = storedPaths.value(orderNumber);
+        if (!storedPaths.contains(orderNumber)) {
+            const QString copied=StorageDirectoriesGuard::copyFileToManagedStorageAs(StorageDirectoriesGuard::StorageKind::Invoice,
+                orderNumber,QStringLiteral("parts"),importedInvoiceTargetFileName(attachmentSpec),frozenSource.fileName(),txError);
+            if (copied.isEmpty()) return false;
+            storedPaths.insert(orderNumber,copied);
+        }
+        const QString path=storedPaths.value(orderNumber);
         if (path.isEmpty() || !QFileInfo::exists(path)) {
             if (txError) *txError = QString::fromUtf8("Підготовлене вкладення недоступне. Збереження скасовано.");
             return false;
@@ -562,7 +480,7 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailed(const QList
         return OrderAttachmentService::setPartAttachment(txDb, partId, path, attachmentSpec.displayName,
             attachmentSpec.invoiceNumber, attachmentSpec.invoiceDate, txError, true, quantity*price);
     };
-    auto mutationResult = importRowsDetailedImpl(rows, handler, result, errorText, receiptKey, storedPaths);
+    auto mutationResult = importRowsDetailedImpl(boundRows, handler, result, errorText, receiptKey, sourceDigest);
     if (!mutationResult.ok) {
         if (errorText) *errorText = mutationResult.errorText;
         for (const auto& path : storedPaths) OrderAttachmentService::removeUnreferencedManagedFile(Database::db(), path);

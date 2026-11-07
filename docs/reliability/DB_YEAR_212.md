@@ -39,3 +39,5 @@
 5. Виконувати в ізольованому профілі. Забезпечити журнал етапів, ідемпотентний повтор і відновлення після кожної аварійної межі. Атомарність однієї SQLite-транзакції не доводить атомарність кількох файлів.
 6. Перед переключенням звірити всі записи й зв'язки, суми до копійки, залишки, файли та захищені налаштування. Відкрити відновлений профіль застосунком. Неперенесених записів бути не повинно.
 7. Приймальні сценарії: однакові номери різних років/джерел; дубль UID; повтор одного джерела; суперечливі батьківські ключі; сирітські залежності; відсутні/пошкоджені дати; аварія на кожному етапі; повтор після явного розв'язання неоднозначності.
+
+DBY-T189 (DBY-04/06/07): invoice import selects by visible number and stable UID without using invoice year or creating missing orders. Active/archive owner and v1 receipt guards have portable Qt evidence; public service/review/archive native slots await Windows. See DBY_T189_INVOICE_OWNER.md; these workstreams remain IN_PROGRESS.

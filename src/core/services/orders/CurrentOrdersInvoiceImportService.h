@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/services/MutationResult.h"
+#include "core/services/OrderSearchRepository.h"
 
 #include <QList>
 #include <QHash>
@@ -19,6 +20,7 @@ struct CurrentOrdersImportServiceRow {
     QString brandName;
     QString qtyText;
     QString priceText;
+    QString orderUid; // Explicit owner selected in the review form; never inferred from invoice date.
 };
 
 struct CurrentOrdersInvoiceUnifiedRow {
@@ -56,6 +58,8 @@ struct CurrentOrdersInvoiceAttachmentSpec {
 
 class CurrentOrdersInvoiceImportService {
 public:
+    static QList<OrderSearchHit> findOrderCandidates(int visibleNumber, QString* errorText = nullptr);
+
     using AttachmentHandler = std::function<bool(QSqlDatabase&, int, int, QString*)>;
 
     static MutationResult importRowsDetailed(const QList<CurrentOrdersImportServiceRow>& rows,
@@ -83,5 +87,5 @@ private:
                                                 CurrentOrdersInvoiceImportResult* result,
                                                 QString* errorText,
                                                 const QString& receiptKey,
-                                                const QHash<int, QString>& preparedPaths = {});
+                                                const QByteArray& sourceDigest = {});
 };

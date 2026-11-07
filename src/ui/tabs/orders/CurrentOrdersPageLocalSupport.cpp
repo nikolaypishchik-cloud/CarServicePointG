@@ -9,6 +9,7 @@
 #include "ui/common/dialogs/InvoiceColumnMappingEditor.h"
 #include "ui/common/dialogs/InvoiceDialogSupport.h"
 #include <QScrollArea>
+#include <QInputDialog>
 
 #include <optional>
 
@@ -762,12 +763,39 @@ public:
     }
 private:
     QString m_sourceFilePath,m_canonicalPdfAttachmentPath,m_canonicalPdfAttachmentError,m_invoiceNumber,m_invoiceDate;
-    bool importRows(const QList<CurrentOrdersImportDraftRow>& rows, QString* errorText) const
+    bool importRows(const QList<CurrentOrdersImportDraftRow>& rows, QString* errorText)
     {
-        const auto validation = CurrentOrdersCoordinator::buildInvoiceImportRows(rows);
+        auto validation = CurrentOrdersCoordinator::buildInvoiceImportRows(rows);
         if (!validation.success) {
             if (errorText) *errorText = validation.errorText;
             return false;
+        }
+
+        QHash<int,QString> selectedOwners;
+        for (auto& row:validation.serviceRows) {
+            const int visible=row.orderNumberText.toInt();
+            if (!selectedOwners.contains(visible)) {
+                QString lookupError;
+                const auto hits=CurrentOrdersInvoiceImportService::findOrderCandidates(visible,&lookupError);
+                if (!lookupError.isEmpty() || hits.isEmpty()) {
+                    if (errorText) *errorText=lookupError.isEmpty()?tr("Наряд №%1 не знайдено. Імпорт не створює нарядів.").arg(visible):lookupError;
+                    return false;
+                }
+                int chosen=0;
+                if (hits.size()>1) {
+                    QStringList labels;
+                    for (const auto& hit:hits) labels.append(tr("%1 · %2 · %3 · UID %4")
+                        .arg(hit.plate,hit.car,hit.openedAt,hit.orderUid));
+                    bool accepted=false;
+                    const QString label=QInputDialog::getItem(this,tr("Власник накладної — наряд №%1").arg(visible),
+                        tr("Оберіть автомобіль і дату відкриття наряду:"),labels,0,false,&accepted);
+                    if (!accepted) { if (errorText) *errorText=tr("Вибір наряду скасовано. Імпорт не виконано."); return false; }
+                    chosen=labels.indexOf(label);
+                    if (chosen<0) return false;
+                }
+                selectedOwners.insert(visible,hits.at(chosen).orderUid);
+            }
+            row.orderUid=selectedOwners.value(visible);
         }
 
         CurrentOrdersPage* const page = qobject_cast<CurrentOrdersPage*>(parentWidget());
