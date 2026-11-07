@@ -1,3 +1,5 @@
+#include "ui/tabs/history/HistoryPage.h"
+#include <QLineEdit>
 #include "ui/common/dialogs/HistoricalVersionsDialog.h"
 #include "core/services/WorkshopSpareStockService.h"
 #include "core/services/LegacyMutationLogSupport.h"
@@ -163,6 +165,7 @@ private slots:
     void orderListAndPrintData();
     void invoiceLinkOpensAttachedFile();
     void partsPdfLayout();
+    void annualOrderUiPdfVisibleIdentity();
     void newOrderFromSpareStock();
     void explicitDiscountPersistenceAndArchive();
     void annualAllocationProcessCrash_data();
@@ -6163,6 +6166,89 @@ void ReportsOrdersTests::invoiceLinkOpensAttachedFile()
     QVERIFY(openedUrl.isEmpty());
     QTRY_COMPARE_WITH_TIMEOUT(openedUrl.toLocalFile(), path, 30000);
     QCOMPARE(ReportsDateUtils::effectiveDate("bad-date", "15.09.26"), QDate(2026, 9, 15));
+}
+
+void ReportsOrdersTests::annualOrderUiPdfVisibleIdentity()
+{
+    QTemporaryDir root; QVERIFY(root.isValid());
+    const auto oldRoot=qEnvironmentVariable("CS_TEST_DATA_ROOT"), oldName=QCoreApplication::applicationName();
+    const bool oldTest=QStandardPaths::isTestModeEnabled();
+    const auto oldActor=ActivityAuditService::currentActor();
+    const auto restore=qScopeGuard([&]{Database::close();setIsolatedTestRoot(oldRoot);
+        QCoreApplication::setApplicationName(oldName);QStandardPaths::setTestModeEnabled(oldTest);ActivityAuditService::setCurrentActor(oldActor);});
+    QVERIFY(setIsolatedTestRoot(root.path()));QStandardPaths::setTestModeEnabled(true);
+    QCoreApplication::setApplicationName(isolatedSafetyName("Safety-Year-Pdf-",root.path()));
+    QString error;QVERIFY2(Database::prepareRuntime(&error),qPrintable(error));QVERIFY2(Database::openPrepared(&error),qPrintable(error));
+    const QString artifactRoot=qEnvironmentVariable("CS_ORDER_YEAR_PDF_OUTPUT").trimmed();
+    const QString output=artifactRoot.isEmpty()?QDir(QCoreApplication::applicationDirPath()).filePath("annual-order-pdf-evidence"):QFileInfo(artifactRoot).absoluteFilePath();
+    QVERIFY(QDir().mkpath(output));
+    {
+        auto db=Database::db();QVERIFY(Database::ensureSchema());QVERIFY(rebuildRouterViews(db));
+        Database::setSetting("settings.booking.sync.enabled",false);Database::setSetting("settings.cloudsync.enabled",false);
+        Database::setSetting("settings.int.directories.pdf_dir",output);
+        QVERIFY2(StaffAccountService::ensureSchema(db,&error),qPrintable(error));QVERIFY2(AccessControlService::ensureSchema(db,&error),qPrintable(error));
+        QSqlQuery q(db);
+        const QStringList sql={
+            "INSERT INTO staff_accounts(id,display_name,role,active) VALUES('year-owner','Synthetic Owner','owner',1)",
+            "INSERT INTO masters(id,name,role) VALUES('year-master','Synthetic Master','master')",
+            "INSERT INTO work_orders(number,order_number,order_uid,order_year,opened_at,closed_at,status,plate,plate_norm,car,client,master_id) VALUES(900101,7,'year-2025',2025,'2025-02-03T12:00:00','2025-02-04T12:00:00','closed','AA1111AA','AA1111AA','Synthetic A','Synthetic','year-master'),(900202,7,'year-2026',2026,'2026-02-03T12:00:00','2026-02-04T12:00:00','closed','AA2222AA','AA2222AA','Synthetic B','Synthetic','year-master')",
+            "INSERT INTO work_order_parts(order_number,order_uid,ordered_at,name,qty,price,amount,purchase_price,purchase_amount) VALUES(900101,'year-2025','2025-02-03','PART-ONLY-2025',1,123.45,123.45,100,100),(900202,'year-2026','2026-02-03','PART-ONLY-2026',1,234.56,234.56,200,200)"};
+        for(const auto& statement:sql)QVERIFY2(q.exec(statement),qPrintable(q.lastError().text()));
+    }
+    ActivityAuditService::setCurrentActor({"year-owner","Synthetic Owner","owner","test"});
+    QString extractor=qEnvironmentVariable("CS_TEST_PDFTOTEXT");
+    if(extractor.isEmpty())extractor=QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../resources/windows/ocr-layer/poppler/bin/pdftotext.exe");
+    QVERIFY2(QFileInfo::exists(extractor),"Set CS_TEST_PDFTOTEXT to a real pdftotext executable");
+    QStringList failures;
+    for(int year:{2025,2026}) {
+        OrderDialog dialog(nullptr,year==2025?900101:900202);dialog.show();QCoreApplication::processEvents();
+        QCOMPARE(dialog.recoveryOrderUid(),QString("year-%1").arg(year));
+        QVERIFY(dialog.grab().save(QDir(output).filePath(QString("form-%1.png").arg(year))));
+        for(bool parts:{false,true}) {
+            // Shared with the preview button, including its filename and actual renderer;
+            // suppress only the external PDF viewer, never the rendering or file checks.
+            const auto preview=dialog.renderPdfPreview(parts);
+            QVERIFY2(preview.ok,qPrintable(preview.error));QVERIFY(!preview.opened);
+            const QString expected=QString("7_03.02.%1%2.pdf").arg(year).arg(parts?"_parts_report":"");
+            if(QFileInfo(preview.outFile).fileName()!=expected)failures<<"filename: "+preview.outFile;
+            QProcess text;text.start(extractor,{"-layout","-enc","UTF-8",preview.outFile,"-"});
+            QVERIFY(text.waitForFinished());QCOMPARE(text.exitCode(),0);
+            const auto content=QString::fromUtf8(text.readAllStandardOutput());
+            QFile evidence(QDir(output).filePath(QString("text-%1-%2.txt").arg(year).arg(parts)));
+            QVERIFY(evidence.open(QIODevice::WriteOnly));evidence.write(content.toUtf8());evidence.close();
+            if(!QRegularExpression(QString::fromUtf8("№\\s*наряду\\s+7\\b")).match(content).hasMatch())failures<<QString("PDF number %1/%2").arg(year).arg(parts);
+            QVERIFY(content.contains(QString("PART-ONLY-%1").arg(year)));
+            QVERIFY(!content.contains(QString("PART-ONLY-%1").arg(year==2025?2026:2025)));
+        }
+    }
+    QVERIFY2(Database::archiveSingleActiveOrderToArchive(900101,&error),qPrintable(error));
+    Database::close();QVERIFY2(Database::prepareRuntime(&error),qPrintable(error));QVERIFY2(Database::openPrepared(&error),qPrintable(error));
+    {
+        HistoryPage page;page.resize(1400,900);page.show();
+        auto* table=page.findChild<QTableView*>();QVERIFY(table);
+        const auto searches=page.findChildren<QLineEdit*>(QString(),Qt::FindDirectChildrenOnly);QVERIFY(!searches.isEmpty());
+        auto* search=searches.first();search->setFocus();QTest::keyClicks(search,"7");QTest::keyClick(search,Qt::Key_Return);
+        const auto rowFor=[&](const QString& uid){auto* m=table->model();if(!m)return -1;
+            int col=-1;for(int c=0;c<m->columnCount();++c)if(m->headerData(c,Qt::Horizontal).toString()=="__order_uid")col=c;
+            if(col<0)return -1;for(int r=0;r<m->rowCount();++r)if(m->index(r,col).data().toString()==uid)return r;return -1;};
+        QTRY_VERIFY_WITH_TIMEOUT(rowFor("year-2025")>=0&&rowFor("year-2026")>=0,15000);
+        QVERIFY(page.grab().save(QDir(output).filePath("archive-search.png")));
+        for(const QString& uid:QStringList{"year-2025","year-2026"}) {
+            search->clear();QTest::keyClicks(search,"7");QTest::keyClick(search,Qt::Key_Return);
+            QTRY_VERIFY_WITH_TIMEOUT(rowFor(uid)>=0,15000);
+            const int row=rowFor(uid);QVERIFY(row>=0);QCOMPARE(table->model()->index(row,0).data().toString(),QString("7"));
+            bool opened=false,matched=false;QTimer closer;
+            connect(&closer,&QTimer::timeout,&page,[&]{for(auto* widget:QApplication::topLevelWidgets())if(auto* dialog=qobject_cast<OrderDialog*>(widget)) {
+                opened=true;matched=dialog->recoveryOrderUid()==uid;dialog->done(QDialog::Rejected);}});
+            closer.start(50);
+            // Bound a routing/error modal as well; a failure must not hang the native gate.
+            QTimer watchdog;watchdog.setSingleShot(true);connect(&watchdog,&QTimer::timeout,&page,[]{if(auto* modal=qobject_cast<QDialog*>(QApplication::activeModalWidget()))modal->done(QDialog::Rejected);});watchdog.start(10000);
+            const auto index=table->model()->index(row,0);
+            QVERIFY(QMetaObject::invokeMethod(table,"doubleClicked",Qt::DirectConnection,Q_ARG(QModelIndex,index)));
+            closer.stop();watchdog.stop();QVERIFY(opened);QVERIFY(matched);
+        }
+    }
+    QVERIFY2(failures.isEmpty(),qPrintable(failures.join('\n')));
 }
 
 void ReportsOrdersTests::partsPdfLayout()

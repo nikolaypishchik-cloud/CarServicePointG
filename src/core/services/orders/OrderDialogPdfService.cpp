@@ -32,7 +32,7 @@ static QString orderPdfPreviewPath(int orderNumber, QString* errorText, bool par
 }
 }
 
-OrderDialogPdfService::PreviewResult OrderDialogPdfService::exportPreviewAndOpen(int orderNumber, QWidget* owner, const ExportCallback& exportCallback, bool partsReport, const QDate& createdOn)
+OrderDialogPdfService::PreviewResult OrderDialogPdfService::exportPreviewAndOpen(int orderNumber, QWidget* owner, const ExportCallback& exportCallback, bool partsReport, const QDate& createdOn, bool openAfterExport)
 {
     PreviewResult result;
     QString pathError;
@@ -77,7 +77,7 @@ OrderDialogPdfService::PreviewResult OrderDialogPdfService::exportPreviewAndOpen
     }
 
     result.ok = true;
-    result.opened = openPreviewFile(result.outFile, owner);
+    result.opened = openAfterExport && openPreviewFile(result.outFile, owner);
     return result;
 }
 

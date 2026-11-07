@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDialog>
+#include "core/services/orders/OrderDialogPdfService.h"
 #include "core/backup/BackupContracts.h"
 #include <QString>
 #include <QDate>
@@ -37,6 +38,7 @@ public:
     void setReadOnly(bool on);
     void openWorkPartsTab();
     void exportPdfPreviewAndOpen(bool partsReport = false);
+    OrderDialogPdfService::PreviewResult renderPdfPreview(bool partsReport = false);
     bool exportPartsReportToFile(const QString& outFile, QString* errorText = nullptr);
     bool exportCustomerReportToFile(const QString& outFile, const QString& recommendations, QString* errorText = nullptr);
     void prefillFromExistingOrder(int sourceOrderNumber);

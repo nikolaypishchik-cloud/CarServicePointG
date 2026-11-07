@@ -109,24 +109,13 @@ void OrderDialog::exportPdfPreviewAndOpen(bool partsReport)
             return;
         }
     }
-    const int previewOrderNumber = m_orderNumber > 0 ? m_orderNumber : (m_num ? m_num->value() : 0);
     const bool hadOverrideCursor = QApplication::overrideCursor() != nullptr;
     if (!hadOverrideCursor) {
         QApplication::setOverrideCursor(Qt::BusyCursor);
     }
 
-    const auto preview = OrderDialogPdfService::exportPreviewAndOpen(
-        previewOrderNumber,
-        this,
-        [this, previewOrderNumber, partsReport](const QString& outFile, QString* errorText) {
-            QElapsedTimer timer;
-            timer.start();
-            if (RuntimeLoggingControl::deepDebugEnabled()) qInfo() << "Order PDF export started:" << outFile << "order" << previewOrderNumber;
-            const bool ok = exportPdfToFile(outFile, errorText, partsReport);
-            const qint64 bytes = QFileInfo(outFile).exists() ? QFileInfo(outFile).size() : -1;
-            if (RuntimeLoggingControl::deepDebugEnabled()) qInfo() << "Order PDF export finished:" << outFile << "order" << previewOrderNumber << "bytes" << bytes << "elapsed_ms" << timer.elapsed();
-            return ok;
-        }, partsReport, currentOpenedAt().date());
+    auto preview = renderPdfPreview(partsReport);
+    if (preview.ok) preview.opened = OrderDialogPdfService::openPreviewFile(preview.outFile, this);
 
     if (!hadOverrideCursor && QApplication::overrideCursor() != nullptr) {
         QApplication::restoreOverrideCursor();
@@ -142,6 +131,28 @@ void OrderDialog::exportPdfPreviewAndOpen(bool partsReport)
                              QString::fromUtf8("PDF збережено"),
                              QString::fromUtf8("PDF наряду збережено, але не вдалося відкрити автоматично:\n%1").arg(QDir::toNativeSeparators(preview.outFile)));
     }
+}
+OrderDialogPdfService::PreviewResult OrderDialog::renderPdfPreview(bool partsReport)
+{
+    if (!AccessControlService::canAccessOrder(m_orderNumber)) {
+        OrderDialogPdfService::PreviewResult denied;
+        denied.error = tr("Недостатньо прав для друку наряду.");
+        return denied;
+    }
+    const int previewOrderNumber = m_orderNumber > 0 ? m_orderNumber : (m_num ? m_num->value() : 0);
+    return OrderDialogPdfService::exportPreviewAndOpen(
+        previewOrderNumber,
+        this,
+        [this, previewOrderNumber, partsReport](const QString& outFile, QString* errorText) {
+            QElapsedTimer timer;
+            timer.start();
+            if (RuntimeLoggingControl::deepDebugEnabled()) qInfo() << "Order PDF export started:" << outFile << "order" << previewOrderNumber;
+            const bool ok = exportPdfToFile(outFile, errorText, partsReport);
+            const qint64 bytes = QFileInfo(outFile).exists() ? QFileInfo(outFile).size() : -1;
+            if (RuntimeLoggingControl::deepDebugEnabled()) qInfo() << "Order PDF export finished:" << outFile << "order" << previewOrderNumber << "bytes" << bytes << "elapsed_ms" << timer.elapsed();
+            return ok;
+        }, partsReport, currentOpenedAt().date(), false);
+
 }
 bool OrderDialog::exportPartsReportToFile(const QString& outFile, QString* errorText)
 {
