@@ -4,6 +4,6 @@ Continue docs/reliability/DB_YEAR_212.md with PLAN.md, STATUS.md and MATRIX.csv.
 
 This is a public, sanitized source snapshot for the DB task. It is not a complete build distribution. Resources, binary and document fixtures, private data, captures, build directories and desktop distribution are excluded. Restore reviewed build resources separately for a clean full build. Windows-specific DPAPI, EFS, ACL, process recovery and installer acceptance require a suitable Windows host. Use isolated test profiles. Do not migrate the working profile before acceptance of an independently reconciled copy.
 
-The latest owner-conflict test build linked locally. Run migrationServiceRoundTrip:populated-conflicting-parent first; the result is still pending. Preserve at least 20% weekly Codex usage and stop at 23% remaining; check the 10080-minute account window before substantive work. If usage cannot be verified, stop. Keep historical private evidence on its Windows host.
+The latest owner-conflict test build linked locally. Run migrationServiceRoundTrip:populated-conflicting-parent first; the result is still pending. Preserve at least 20% weekly Codex usage and stop at 21% remaining; check the 10080-minute account window before substantive work. If usage cannot be verified, stop. Keep historical private evidence on its Windows host.
 
 The public matrix contains scenario identifiers, names and historical status. Local evidence and fixture details are retained privately.
