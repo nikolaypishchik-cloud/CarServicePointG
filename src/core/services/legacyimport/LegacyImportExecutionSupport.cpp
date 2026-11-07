@@ -319,9 +319,16 @@ bool LegacyImportExecutionSupport::runExecute(const QString& sourcePath,
             LegacyImportSourceResolver::cleanup(&bundle);
             return false;
         }
-        MigrationRunJournal::finishFailure(runContext, stage, message);
+        // Restoring the snapshot also restores the pre-attachment journal.
+        // Reattach the verified backup so a failed reconciliation retains provenance.
+        QString failureMessage=message, evidenceError;
+        if(snapshot.created && !MigrationRunJournal::attachSnapshot(runContext,snapshot,&evidenceError))
+            failureMessage+=QStringLiteral(" | snapshot provenance not recorded: %1").arg(evidenceError);
+        evidenceError.clear();
+        if(!MigrationRunJournal::finishFailure(runContext,stage,failureMessage,&evidenceError))
+            failureMessage+=QStringLiteral(" | failure journal not recorded: %1").arg(evidenceError);
         LegacyImportSourceResolver::cleanup(&bundle);
-        if (errorText) *errorText = message;
+        if (errorText) *errorText = failureMessage;
         return false;
     };
 

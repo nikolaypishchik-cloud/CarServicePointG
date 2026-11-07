@@ -39,11 +39,47 @@ int main(int argc,char** argv) {
  check(q.next() && q.value(0)=="old-order" && q.value(1)=="old-part" && q.value(2)=="old-service" && q.value(3).toInt()==3850 && q.value(4).toInt()==1250 && q.value(5)=="0001FF");q.finish();
  sql("SELECT cents,hex(note) FROM archive_rollover.historical_adjustments WHERE order_uid='old-order'");check(q.next() && q.value(0).toInt()==7250 && q.value(1)=="0002FF");q.finish();
  sql("SELECT hex(historic_note) FROM archive_rollover.work_order_parts WHERE part_uid='old-part'");check(q.next() && q.value(0)=="AB00CD");q.finish();
+ // Same parent and same physical child key/fields are NOT evidence of a UID alias.
+ sql("INSERT INTO main.work_orders VALUES(3,'earlier-history',4,2022)");
+ const auto ambiguousOriginal=bytes(dir.filePath("old.db"));
+ sql("UPDATE archive_rollover.work_order_parts SET part_uid='current-part' WHERE id=60");
+ for(int retry=0;retry<2;++retry) {
+  check(!MigrationArchiveWorkspace::merge(dir.filePath("old.db"),dir.filePath("workspace.db"),&error));
+  check(error.contains("Historical child ambiguity"));
+ }
+ sql("SELECT part_uid,amount FROM archive_rollover.work_order_parts WHERE id=60");check(q.next() && q.value(0)=="current-part" && q.value(1).toInt()==3850);q.finish();
+ check(bytes(dir.filePath("old.db"))==ambiguousOriginal);
+ sql("SELECT COUNT(*) FROM archive_rollover.work_orders WHERE number=3");check(q.next() && q.value(0).toInt()==0);q.finish();
+ sql("SELECT COUNT(*) FROM archive_rollover.workspace_order_state WHERE order_number=3");check(q.next() && q.value(0).toInt()==0);q.finish();
+ sql("DELETE FROM main.work_orders WHERE number=3");
+ sql("UPDATE archive_rollover.work_order_parts SET part_uid='old-part' WHERE id=60");error.clear();
+ // A known stable UID with conflicting payment evidence also needs a decision.
+ sql("ALTER TABLE main.work_order_parts ADD COLUMN paid INTEGER DEFAULT 0");
+ sql("ALTER TABLE archive_rollover.work_order_parts ADD COLUMN paid INTEGER DEFAULT 0");
+ sql("UPDATE archive_rollover.work_order_parts SET paid=1 WHERE id=60");
+ check(!MigrationArchiveWorkspace::merge(dir.filePath("old.db"),dir.filePath("workspace.db"),&error));check(error.contains("paid value differs"));
+ sql("SELECT paid,amount FROM archive_rollover.work_order_parts WHERE id=60");check(q.next() && q.value(0).toInt()==1 && q.value(1).toInt()==3850);q.finish();
+ sql("UPDATE archive_rollover.work_order_parts SET paid=0 WHERE id=60");error.clear();
+ // Different physical service keys with the SAME stable UID are valid.
+ sql("UPDATE archive_rollover.work_order_services SET id=150 WHERE id=50");
+ sql("UPDATE archive_rollover.work_order_parts SET service_id=150 WHERE id=60");
+ sql("UPDATE archive_rollover.service_masters SET service_id=150 WHERE service_id=50");
+ check(MigrationArchiveWorkspace::merge(dir.filePath("old.db"),dir.filePath("workspace.db"),&error));
+ sql("UPDATE archive_rollover.work_order_services SET service_uid='unrelated-service' WHERE id=150");
+ check(!MigrationArchiveWorkspace::merge(dir.filePath("old.db"),dir.filePath("workspace.db"),&error));check(error.contains("Historical child ambiguity"));
+ sql("UPDATE archive_rollover.work_order_services SET service_uid='old-service' WHERE id=150");
+ sql("INSERT INTO archive_rollover.work_order_services VALUES(151,40,'old-order','second-current-service',0)");
+ sql("UPDATE archive_rollover.work_order_parts SET service_id=151 WHERE id=60");
+ check(!MigrationArchiveWorkspace::merge(dir.filePath("old.db"),dir.filePath("workspace.db"),&error));check(error.contains("stable service UID"));
+ sql("UPDATE archive_rollover.work_order_parts SET service_id=50 WHERE id=60");
+ sql("DELETE FROM archive_rollover.work_order_services WHERE id=151");
+ sql("UPDATE archive_rollover.work_order_services SET id=50 WHERE id=150");
+ sql("UPDATE archive_rollover.service_masters SET service_id=50 WHERE service_id=150");error.clear();
  sql("UPDATE archive_rollover.historical_adjustments SET cents=9999");
  check(!MigrationArchiveWorkspace::merge(dir.filePath("old.db"),dir.filePath("workspace.db"),&error));check(error.contains("supplemental history"));
  sql("SELECT cents FROM archive_rollover.historical_adjustments");check(q.next() && q.value(0).toInt()==9999);q.finish();
  sql("UPDATE archive_rollover.historical_adjustments SET cents=7250");error.clear();
- sql("INSERT INTO main.work_order_parts VALUES(61,999,'missing-order','orphan',NULL,100,NULL)");
+ sql("INSERT INTO main.work_order_parts VALUES(61,999,'missing-order','orphan',NULL,100,NULL,0)");
  check(!MigrationArchiveWorkspace::merge(dir.filePath("old.db"),dir.filePath("workspace.db"),&error));check(error.contains("Orphan"));
  sql("DELETE FROM main.work_order_parts WHERE id=61");error.clear();
  sql("ALTER TABLE main.work_order_parts ADD COLUMN not_in_workspace TEXT");

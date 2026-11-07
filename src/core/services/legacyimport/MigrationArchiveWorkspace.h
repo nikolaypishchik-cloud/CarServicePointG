@@ -108,6 +108,61 @@ inline bool reconcile(QSqlDatabase db,QString* error)
 // source is main so the existing exact graph copier/verifier can be reused.
 // Current workspace copies are authoritative; never overwrite their newer edits.
 namespace MigrationArchiveWorkspace {
+// A current parent is not proof that all historical children are represented.
+// Only stable child UIDs establish identity; neither physical keys nor values do.
+inline bool verifyWorkingChildren(QSqlDatabase db,int number,const QString& owner,QString* error)
+{
+    auto fail=[&](const QString& table,const QString& uid,const QString& reason){
+        if(error)*error=QString("Historical child ambiguity: owner=%1 table=%2 uid=%3: %4; explicit decision required before publication").arg(owner,table,uid,reason);
+        return false;
+    };
+    for(const auto& table:QStringList{"work_order_services","work_order_parts"}) {
+        const QString uidColumn=table=="work_order_parts" ? "part_uid" : "service_uid";
+        QSet<QString> sourceColumns,targetColumns;QSqlQuery q(db);
+        for(const auto& schema:QStringList{"main","archive_rollover"}) {
+            if(!q.exec("PRAGMA "+schema+".table_info("+MigrationArchiveCoverage::ident(table)+")"))return fail(table,{},q.lastError().text());
+            while(q.next())(schema=="main" ? sourceColumns : targetColumns).insert(q.value(1).toString());
+            if(q.lastError().isValid())return fail(table,{},q.lastError().text());q.finish();
+        }
+        q.prepare("SELECT COUNT(*) FROM main."+table+" WHERE order_number=?");q.addBindValue(number);
+        if(!q.exec() || !q.next())return fail(table,{},q.lastError().text());const auto count=q.value(0).toLongLong();q.finish();
+        if(count==0)continue;
+        if(!sourceColumns.contains(uidColumn) || !targetColumns.contains(uidColumn))return fail(table,{},"Stable child UID column is missing");
+        QSqlQuery children(db);children.prepare("SELECT "+uidColumn+",order_uid FROM main."+table+" WHERE order_number=?");children.addBindValue(number);
+        if(!children.exec())return fail(table,{},children.lastError().text());
+        while(children.next()) {
+            const auto uid=children.value(0).toString();
+            if(uid.trimmed().isEmpty() || children.value(1).toString()!=owner)return fail(table,uid,"Unresolved source owner or UID");
+            q.prepare("SELECT COUNT(*) FROM main."+table+" WHERE "+uidColumn+"=?");q.addBindValue(uid);
+            if(!q.exec() || !q.next() || q.value(0).toLongLong()!=1)return fail(table,uid,"Source child UID is not unique");q.finish();
+            q.prepare("SELECT order_uid,order_number FROM archive_rollover."+table+" WHERE "+uidColumn+"=?");q.addBindValue(uid);
+            if(!q.exec())return fail(table,uid,q.lastError().text());
+            if(!q.next())return fail(table,uid,"Historical child UID is absent from current workspace");
+            if(q.value(0).toString()!=owner || q.value(1).toInt()!=number)return fail(table,uid,"Current child belongs to another owner");
+            if(q.next() || q.lastError().isValid())return fail(table,uid,"Current child UID is not unique");q.finish();
+            if(sourceColumns.contains("paid")) {
+                if(!targetColumns.contains("paid"))return fail(table,uid,"Historical payment field is unrepresented");
+                q.prepare("SELECT 1 FROM main."+table+" s JOIN archive_rollover."+table+" t ON t."+uidColumn+"=s."+uidColumn+" WHERE s."+uidColumn+"=? AND (typeof(s.paid)<>typeof(t.paid) OR NOT(s.paid IS t.paid COLLATE BINARY))");q.addBindValue(uid);
+                if(!q.exec())return fail(table,uid,q.lastError().text());
+                if(q.next())return fail(table,uid,"Historical paid value differs");
+                if(q.lastError().isValid())return fail(table,uid,q.lastError().text());q.finish();
+            }
+            const QString relation=table=="work_order_parts" ? "service_id" : "parent_id";
+            if(!sourceColumns.contains(relation))continue;
+            if(!targetColumns.contains(relation))return fail(table,uid,"Historical service link is unrepresented");
+            q.prepare("SELECT COALESCE(s."+relation+",0),ss.service_uid,COALESCE(t."+relation+",0),ts.service_uid,ss.order_uid,ts.order_uid FROM main."+table+" s JOIN archive_rollover."+table+" t ON t."+uidColumn+"=s."+uidColumn+" LEFT JOIN main.work_order_services ss ON ss.id=s."+relation+" LEFT JOIN archive_rollover.work_order_services ts ON ts.id=t."+relation+" WHERE s."+uidColumn+"=?");q.addBindValue(uid);
+            if(!q.exec() || !q.next())return fail(table,uid,q.lastError().text());
+            const auto sourceKey=q.value(0).toLongLong(),targetKey=q.value(2).toLongLong();
+            const bool bothEmpty=sourceKey==0 && targetKey==0;
+            const bool sameService=sourceKey>0 && targetKey>0 && !q.value(1).toString().isEmpty()
+                && q.value(1)==q.value(3) && q.value(4).toString()==owner && q.value(5).toString()==owner;
+            if(!bothEmpty && !sameService)return fail(table,uid,"Conflicting service owner or stable service UID");
+            if(q.next() || q.lastError().isValid())return fail(table,uid,"Ambiguous service reference");q.finish();
+        }
+        if(children.lastError().isValid())return fail(table,{},children.lastError().text());
+    }
+    return true;
+}
 inline bool merge(const QString& archive, const QString& workspace, QString* error, QSet<QString>* materialized = nullptr)
 {
     auto fail=[&](const QString& detail){if(error)*error="Previous archive reconciliation: "+detail;return false;};
@@ -143,6 +198,7 @@ inline bool merge(const QString& archive, const QString& workspace, QString* err
             return fail("Historical identity conflicts with workspace; explicit reconciliation required");
         if(exists && q.next())return fail("Ambiguous historical UID");
         if(q.lastError().isValid())return fail(q.lastError().text());q.finish();
+        if(exists && !verifyWorkingChildren(db,order.key,order.uid,error))return false;
         if(exists && materialized && materialized->contains(order.uid)
             && !OrderArchiveShardSqlSupport::verifyCopiedOrderGraph(db,order.key,error))return false;
         if(!exists) {

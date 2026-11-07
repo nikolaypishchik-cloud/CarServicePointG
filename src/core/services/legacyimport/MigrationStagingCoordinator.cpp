@@ -110,7 +110,10 @@ bool prepareWorkspace(const QString& path, const QString& source, const QString&
     QSet<QString> materialized;
     for(const auto& previous:sortedPaths) {
         if(previous.isEmpty() || !QFileInfo::exists(previous))return NativeSnapshotMetadata::fail(error,"Previous archive route is missing");
-        if(!MigrationArchiveWorkspace::merge(previous,path,error,&materialized))return false;
+        if(!MigrationArchiveWorkspace::merge(previous,path,error,&materialized)) {
+            if(error)*error=QString("Historical source %1: %2").arg(previousSources.key(previous,previous),*error);
+            return false;
+        }
     }
     if(!materialized.isEmpty())copied=true; // Do not clear restored archive-only graphs in an otherwise fresh profile.
     const QString sourceSchema = QStringLiteral("legacy_rewrite");

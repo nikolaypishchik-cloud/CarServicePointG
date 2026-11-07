@@ -3,6 +3,10 @@
 #include "core/services/legacyimport/LegacyImportTypes.h"
 #include "core/services/LegacyMigrationService.h"
 #include "runtime/AppRuntime.h"
+#include "core/services/legacyimport/LegacyImportSafetySupport.h"
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QCoreApplication>
 #include <QTemporaryDir>
 #include <QDir>
@@ -31,5 +35,19 @@ int main(int argc,char** argv) {
   check(log.open(QIODevice::ReadOnly));check(log.readAll()==logBefore);log.close();
  }
  check(LegacyImportJournalSupport::ensureCanImportFingerprint("different-synthetic-source",&error));
+ // Snapshot restoration rewinds the journal to before attachSnapshot.
+ // Reattach it before recording failure, preserving the decision's source backup.
+ audit.sourceFingerprint="different-synthetic-source";LegacyImportRunContext failed;
+ check(LegacyImportJournalSupport::beginRun(bundle,audit,&failed,&error));
+ check(history.open(QIODevice::ReadOnly));const auto beforeAttach=history.readAll();history.close();
+ LegacyImportSafetySnapshot snapshot{root.filePath("synthetic-snapshot"),true};check(QDir().mkpath(snapshot.snapshotDirPath));
+ check(LegacyImportJournalSupport::attachSnapshot(failed,snapshot,&error));
+ check(history.open(QIODevice::WriteOnly|QIODevice::Truncate));check(history.write(beforeAttach)==beforeAttach.size());history.close();
+ check(LegacyImportJournalSupport::attachSnapshot(failed,snapshot,&error));
+ check(LegacyImportJournalSupport::finishFailure(failed,"import_archive","Synthetic historical child decision required",&error));
+ check(history.open(QIODevice::ReadOnly));const auto entries=QJsonDocument::fromJson(history.readAll()).array();history.close();
+ check(!entries.isEmpty());const auto entry=entries.last().toObject();
+ check(entry.value("run_id").toString()==failed.runId && entry.value("status")=="failed" && entry.value("snapshot_dir").toString()==snapshot.snapshotDirPath);
+ check(LegacyImportJournalSupport::ensureCanImportFingerprint(audit.sourceFingerprint,&error));
  qInfo()<<"PASS: production journal refuses successful fingerprint repeats; history and log unchanged";
 }
