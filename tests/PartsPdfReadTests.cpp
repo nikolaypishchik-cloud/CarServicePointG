@@ -5,11 +5,11 @@
 #include <QDebug>
 int main(int argc,char** argv){QCoreApplication app(argc,argv);QTemporaryDir dir;auto db=QSqlDatabase::addDatabase("QSQLITE","carservice_main");db.setDatabaseName(dir.filePath("synthetic.db"));if(!db.open())return 1;QString error;auto check=[&](bool ok){if(!ok)qFatal("Parts PDF: %s",qPrintable(error));};check(FinancialPdfReadFixture::run(db,&error));QSqlQuery q(db);auto sql=[&](const QString& text){if(!q.exec(text)){error=q.lastError().text();check(false);}};
  for(const auto& text:QStringList{
- "ALTER TABLE router_work_orders ADD COLUMN status TEXT", "ALTER TABLE router_work_orders ADD COLUMN order_uid TEXT","ALTER TABLE router_work_orders ADD COLUMN opened_at TEXT","ALTER TABLE router_work_orders ADD COLUMN closed_at TEXT",
+ "ALTER TABLE router_work_orders ADD COLUMN plate TEXT","ALTER TABLE router_work_orders ADD COLUMN car TEXT","ALTER TABLE router_work_orders ADD COLUMN vin TEXT","ALTER TABLE router_work_orders ADD COLUMN status TEXT", "ALTER TABLE router_work_orders ADD COLUMN order_uid TEXT","ALTER TABLE router_work_orders ADD COLUMN opened_at TEXT","ALTER TABLE router_work_orders ADD COLUMN closed_at TEXT",
  "UPDATE router_work_orders SET status='closed',order_uid='u',opened_at='2026-01-01',closed_at='2026-01-02'",
  "CREATE TABLE router_work_order_parts(id INTEGER,order_number INTEGER,order_uid TEXT,ordered_at TEXT,name TEXT,store TEXT,part_number TEXT,qty REAL,amount REAL,purchase_amount REAL,purchase_price REAL,markup_percent REAL,manual_markup_override INTEGER,pricing_calc_version INTEGER)",
- "CREATE TABLE work_order_parts(id INTEGER,order_number INTEGER,order_uid TEXT)","CREATE TABLE work_order_part_attachments(part_id INTEGER,invoice_number TEXT)",
- "CREATE TABLE workshop_spare_movements(part_id INTEGER)","CREATE TABLE workshop_inventory_purchases(id INTEGER,material_key TEXT,material_name TEXT,unit TEXT,stock_kind TEXT,purchased_on TEXT,client_price REAL,unit_cost REAL)"})sql(text);
+ "CREATE TABLE work_order_parts(id INTEGER,order_number INTEGER,order_uid TEXT)","CREATE TABLE work_order_part_attachments(part_id INTEGER,invoice_number TEXT,file_path TEXT,invoice_date TEXT)",
+ "CREATE TABLE workshop_spare_movements(part_id INTEGER,order_number INTEGER,operation TEXT)","CREATE TABLE workshop_inventory_purchases(id INTEGER,material_key TEXT,material_name TEXT,unit TEXT,stock_kind TEXT,purchased_on TEXT,client_price REAL,unit_cost REAL)"})sql(text);
  auto read=[&]{return ReportsPdfSupport::collectPartsPdfGroups("2026-01-01","2026-01-31",&error);};check(read().isEmpty() && error.isEmpty());
  sql("INSERT INTO router_work_order_parts VALUES(21,11,'u','2026-01-01','Synthetic part','Shop','',1,45.25,30.10,30.10,0,0,3)");
  auto rows=read();check(error.isEmpty() && rows.size()==1);auto row=rows.first().first();check(qRound64(row.purchase*100)==3010 && qRound64(row.clientPrice*100)==4525 && qRound64(row.added*100)==1515);

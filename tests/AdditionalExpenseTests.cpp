@@ -1,3 +1,4 @@
+#include "PartsPdfIdentityFixture.h"
 #include "FinancialPdfReadFixture.h"
 #include "StatisticsReadFixture.h"
 #include "core/services/statistics/StatisticsReadService.h"
@@ -198,6 +199,16 @@ private slots:
         QVERIFY(q.exec("UPDATE staff_accounts SET role='owner',active=0 WHERE id='pdf-owner'"));ActivityAuditService::setCurrentActor({"pdf-owner","Synthetic owner","owner","test"});QVERIFY(!render());
         QVERIFY(q.exec("UPDATE staff_accounts SET active=1 WHERE id='pdf-owner'"));QVERIFY2(render(),qPrintable(result.errorText));
         QVERIFY(ReportsPdfRenderer::renderPayrollPdf(QDate(2027,1,1),QDate(2027,1,31),&result));QCOMPARE(result.recordCount,0);
+    }
+    void partsPdfIdentityOwnersAttachmentsAndStock() {
+        QString error;QVERIFY2(PartsPdfIdentityFixture::run(db,&error),qPrintable(error));
+        configureFinancialReportDirectory();ReportsPdfRenderer::ExportResult result;
+        const auto render=[&]{return ReportsPdfRenderer::renderPartsPdf(QDate(2026,1,1),QDate(2026,1,31),&result);};
+        QVERIFY2(render(),qPrintable(result.errorText));QCOMPARE(result.recordCount,1);
+        const auto path=result.path;const auto good=PayrollReadFixture::bytes(path);QVERIFY(good.startsWith("%PDF"));
+        QSqlQuery q(db);QVERIFY(q.exec("UPDATE router_work_order_parts SET order_uid='unknown'"));
+        QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());QCOMPARE(result.recordCount,0);QCOMPARE(PayrollReadFixture::bytes(path),good);
+        QVERIFY(q.exec("UPDATE router_work_order_parts SET order_uid='order-old'"));QVERIFY2(render(),qPrintable(result.errorText));QCOMPARE(result.recordCount,1);
     }
     void financialPdfReadFailuresAndRecovery() {
         QString error;QVERIFY2(FinancialPdfReadFixture::run(db,&error),qPrintable(error));

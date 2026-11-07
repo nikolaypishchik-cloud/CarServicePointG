@@ -556,3 +556,5 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `docs/reliability/DBY_T185_STATISTICS_READ_ERRORS.md` | active | Documents error propagation and repeat reads in the existing statistics and expenses reports. |
 | `docs/reliability/DBY_T187_PARTS_PAYROLL_PDF.md` | active | Documents checked parts and payroll PDF reads and identifies the older expense helper outside the payroll renderer. |
 | `tests/HistoricalRecordStoreTests.cpp` | test-only | Synthetic sources verify archive provenance, fields, rollback and repeated import. |
+| `docs/reliability/DBY_T188_PARTS_PDF_IDENTITY.md` | active | Synthetic evidence for parts PDF owner and child identity; records supported older schemas and date precedence without a runtime exception. |
+| `tests/PartsPdfIdentityFixture.h` | test-only | Synthetic owner/child collisions and unchanged date precedence; no runtime compatibility allowance. |

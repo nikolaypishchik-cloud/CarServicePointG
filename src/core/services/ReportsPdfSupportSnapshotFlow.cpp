@@ -7,6 +7,7 @@
 #include "core/services/orders/PartPricingEngine.h"
 #include "core/services/WorkshopInventoryService.h"
 #include "core/services/PeriodReportGraph.h"
+#include "core/services/PartsReportQuery.h"
 #include "core/services/PeriodReportRows.h"
 #include "core/services/AccessControlService.h"
 #include "core/services/ReportsDataLoaderLocalSupport.h"
@@ -200,45 +201,42 @@ QMap<QString, QList<PartPdfRow>> collectPartsPdfGroups(const QString& df, const 
     QSet<QString> stockMaterials;
     for (const auto& material : WorkshopInventoryService::loadMaterials(db,error,false)) stockMaterials.insert(material.key);
     if(!error->isEmpty())return {};
-    QSet<int> issuedSpares;
-    QSqlQuery spareQuery(db);
-    if(!spareQuery.exec(QStringLiteral("SELECT part_id FROM workshop_spare_movements WHERE part_id IS NOT NULL"))){*error=spareQuery.lastError().text();return {};}
-    while(spareQuery.next())issuedSpares.insert(spareQuery.value(0).toInt());
-    if(spareQuery.lastError().isValid()){*error=spareQuery.lastError().text();return {};}
     ReportMarkupSnapshot markupSnapshot;markupSnapshot.policy=PartMarkupPolicyService::loadPolicySnapshot(db,error);
     if(!error->isEmpty())return {};
     QSqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT COALESCE(p.store,''), p.ordered_at, substr(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at),1,10), COALESCE(wo.order_number,wo.number,p.order_number), COALESCE(p.name,''), COALESCE(p.part_number,''), COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END), COALESCE(p.amount,0), COALESCE(p.qty,1), COALESCE(p.purchase_price,0), COALESCE(p.markup_percent,0), COALESCE(p.manual_markup_override,0), COALESCE(a.invoice_number,''), p.id, COALESCE(p.pricing_calc_version,1) FROM router_work_order_parts p JOIN router_work_orders wo ON ((NULLIF(TRIM(p.order_uid),'') IS NOT NULL AND wo.order_uid=p.order_uid) OR (NULLIF(TRIM(p.order_uid),'') IS NULL AND wo.number=p.order_number)) LEFT JOIN work_order_parts wp ON wp.id = p.id AND COALESCE(wp.order_number,'') = COALESCE(p.order_number,'') AND COALESCE(wp.order_uid,'') = COALESCE(p.order_uid,'') LEFT JOIN work_order_part_attachments a ON a.part_id = wp.id ORDER BY COALESCE(NULLIF(TRIM(p.store),''), '(без магазину)') ASC, p.order_number ASC, p.id ASC"));
-    if(!q.exec()){*error=q.lastError().text();return {};}
+    if(!PartsReportQuery::execute(db,&q,error,true))return {};
     while(q.next()) {
         const QDate eff = ReportsDateUtils::effectiveDate(q.value(1).toString(), q.value(2).toString());
+        if(q.value(3).toInt()<=0 && (!eff.isValid() || (eff>=from && eff<=to))) {
+            *error=QStringLiteral("Cannot resolve a unique order for PDF part %1").arg(q.value(0).toInt());return {};
+        }
         if (!eff.isValid() || eff < from || eff > to) continue;
         PartPdfRow r;
-        const QString rawStore = q.value(0).toString().trimmed();
-        const QString rawInvoiceNumber = q.value(12).toString().trimmed();
+        const QString rawStore = q.value(5).toString().trimmed();
+        const QString rawInvoiceNumber = q.value(17).toString().trimmed();
         const QString resolvedStore = resolveStoreForReports(rawStore.isEmpty() ? QString::fromUtf8("(без магазину)") : rawStore, rawInvoiceNumber);
         const QString policyStore = rawStore;
         r.store = resolvedStore;
         r.date = eff.toString(QStringLiteral("dd.MM.yy"));
-        r.orderNumber = q.value(3).toString();
-        r.name = canonicalizeOilGradesForReport(q.value(4).toString());
+        r.orderNumber = q.value(4).toString();
+        r.name = canonicalizeOilGradesForReport(q.value(6).toString());
         const bool isMotorOil = isMotorOilNameImpl(r.name);
         r.oilGrade = isMotorOil ? detectOilGradeForReport(r.name) : QString();
         if (PartMarkupPolicyService::isInventoryStore(rawStore)
-            && !issuedSpares.contains(q.value(13).toInt())
+            && !q.value(22).toBool()
             && stockMaterials.contains(WorkshopInventoryService::normalizedMaterialKey(r.name)))
             r.store = QString::fromUtf8("Склад СТО");
-        r.oem = q.value(5).toString();
-        const double qty = q.value(8).toDouble();
+        r.oem = q.value(7).toString();
+        const double qty = q.value(12).toDouble();
         const PartFinancials financials = resolvePartFinancialsForReports(markupSnapshot,
                                                                           r.name,
                                                                           policyStore,
                                                                           qty,
-                                                                          q.value(7).toDouble(),
-                                                                          q.value(6).toDouble(),
-                                                                          q.value(9).toDouble(),
-                                                                          q.value(10).toDouble(),
-                                                                          q.value(11).toInt() != 0, q.value(14).toInt());
+                                                                          q.value(13).toDouble(),
+                                                                          q.value(11).toDouble(),
+                                                                          q.value(14).toDouble(),
+                                                                          q.value(15).toDouble(),
+                                                                          q.value(16).toInt() != 0, q.value(20).toInt());
         r.purchase = financials.purchaseAmount;
         r.purchaseUnitPrice = financials.purchasePrice > 0.0
             ? financials.purchasePrice
