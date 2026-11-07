@@ -6,5 +6,6 @@
 class MigrationPromoteCoordinator {
 public:
     static bool reopenProjectedRuntime(const LegacyImportRunContext& runContext,
+                                       const QString& snapshotDirPath,
                                        QString* errorText = nullptr);
 };

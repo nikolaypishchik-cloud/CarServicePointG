@@ -2,6 +2,7 @@
 #include "core/services/legacyimport/LegacyImportExecutionSupport.h"
 #include "core/diagnostics/RuntimeLoggingControl.h"
 #include "core/backup/DataProtectionCoordinator.h"
+#include "core/services/storage/MigrationRestoreJournal.h"
 
 #include "runtime/AppRuntime.h"
 #include "core/services/legacyimport/LegacyImportAuditSupport.h"
@@ -228,6 +229,7 @@ bool LegacyImportExecutionSupport::runExecute(const QString& sourcePath,
     if (!operation.isActive()) return false;
     ProfileConnectionHandoff handoff;
     bool restoreFailed = false;
+    QString publicationSnapshot;
     const auto execute = [&]() -> bool {
 
     emitProgress(progress, QStringLiteral("execute_prepare"), QString::fromUtf8("Імпорт старої БД"), QString::fromUtf8("Підготовка до імпорту..."), 0, 8, 0, 0, 0, 0, 0, 0, true, false);
@@ -348,6 +350,11 @@ bool LegacyImportExecutionSupport::runExecute(const QString& sourcePath,
         return failAndRestore(QStringLiteral("snapshot_journal"), journalError, snapshot);
     }
 
+    if (!MigrationRestoreJournal::beginForSnapshot(snapshot.snapshotDirPath,&journalError)) {
+        return failAndRestore(QStringLiteral("publication_intent"),journalError,snapshot);
+    }
+
+    publicationSnapshot=snapshot.snapshotDirPath;
     QString importError;
     emitProgress(progress, QStringLiteral("execute_import"), QString::fromUtf8("Імпорт старої БД"), QString::fromUtf8("Перенесення нарядів, робіт і запчастин у сховище..."), 5, 8, 52, auditTotalEntities, 0, 0, 0, 0, true, false,
                  QString::fromUtf8("Виявлено у legacy БД"), auditOrders, auditServices, auditParts, auditReport.warningMessages.size() + policyWarnings.size());
@@ -359,7 +366,7 @@ bool LegacyImportExecutionSupport::runExecute(const QString& sourcePath,
     QString reopenError;
     emitProgress(progress, QStringLiteral("execute_reopen"), QString::fromUtf8("Імпорт старої БД"), QString::fromUtf8("Підготовка застосунку після імпорту..."), 6, 8, 68, auditTotalEntities, 0, 0, 0, 0, true, false,
                  QString::fromUtf8("Виявлено у legacy БД"), auditOrders, auditServices, auditParts, auditReport.warningMessages.size() + policyWarnings.size());
-    if (!MigrationPromoteCoordinator::reopenProjectedRuntime(runContext, &reopenError)) {
+    if (!MigrationPromoteCoordinator::reopenProjectedRuntime(runContext, snapshot.snapshotDirPath, &reopenError)) {
         return failAndRestore(QStringLiteral("post_import_startup"),
                               QStringLiteral("Не вдалося повністю підготувати застосунок після імпорту legacy БД: %1").arg(reopenError),
                               snapshot);
@@ -622,6 +629,17 @@ bool LegacyImportExecutionSupport::runExecute(const QString& sourcePath,
     if (!handoff.reopenMain(&reopenError)) {
         if (errorText) *errorText += QStringLiteral(" | Main workspace reopen failed: ") + reopenError;
         return false;
+    }
+    // Commit only after verification, success journal and owner reconnection.
+    // If interrupted earlier, normal startup restores the entire old generation.
+    if(ok) {
+        QString pending;
+        if(!MigrationRestoreJournal::pending(&pending,errorText))return false;
+        if(pending.isEmpty() || pending!=publicationSnapshot) {
+            if(errorText)*errorText=QStringLiteral("Publication rollback intent changed before commit");
+            return false;
+        }
+        if(!MigrationRestoreJournal::finish(errorText))return false;
     }
     return ok;
 }

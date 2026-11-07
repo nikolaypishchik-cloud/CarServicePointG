@@ -5,6 +5,7 @@
 
 class MigrationRestoreJournal {
 public:
+    static bool beginForSnapshot(const QString& snapshotDirPath, QString* errorText);
     static bool begin(const QString& snapshotDirPath, const QString& manifestHash, QString* errorText);
     // Empty path means no interrupted restore. Invalid intent is an error.
     static bool pending(QString* snapshotDirPath, QString* errorText);

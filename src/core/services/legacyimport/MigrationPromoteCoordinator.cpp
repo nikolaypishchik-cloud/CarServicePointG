@@ -5,10 +5,11 @@
 #include "infrastructure/db/sqlite/Db.h"
 
 bool MigrationPromoteCoordinator::reopenProjectedRuntime(const LegacyImportRunContext& runContext,
+                                       const QString& snapshotDirPath,
                                                          QString* errorText)
 {
     if (!MigrationRunJournal::stageStarted(runContext, QStringLiteral("promote_prepare"), QStringLiteral("Prepare runtime projections before promote"), errorText)) return false;
-    if (!RuntimeRecoveryCoordinator::prepareMaterializedRuntime(errorText)
+    if (!RuntimeRecoveryCoordinator::preparePublicationRuntime(snapshotDirPath,errorText)
             || !Database::openPrepared(errorText)
             || !Database::runStartupMigrationCheck(errorText)
             || !Database::runStartupSchemaCheck(errorText)

@@ -186,6 +186,12 @@ bool MigrationRestoreJournal::begin(const QString& snapshotDirPath, const QStrin
     return true;
 }
 
+bool MigrationRestoreJournal::beginForSnapshot(const QString& snapshotDirPath, QString* errorText)
+{
+    QString hash;
+    return checkedManifestHash(snapshotDirPath,&hash,errorText) && begin(snapshotDirPath,hash,errorText);
+}
+
 bool MigrationRestoreJournal::finish(QString* errorText)
 {
     const auto path = restoreIntentPath();
@@ -215,6 +221,20 @@ bool RuntimeRecoveryCoordinator::prepareMaterializedRuntime(QString* errorText)
         return false;
     }
     return true;
+}
+
+bool RuntimeRecoveryCoordinator::preparePublicationRuntime(const QString& snapshotDirPath,QString* errorText)
+{
+    // Only the live migration owning this exact verified rollback intent may open
+    // its uncommitted generation. Normal startup always restores the snapshot.
+    QString pending;
+    if(!MigrationRestoreJournal::pending(&pending,errorText))return false;
+    if(pending.isEmpty() || snapshotDirPath.isEmpty()
+        || QFileInfo(pending).canonicalFilePath()!=QFileInfo(snapshotDirPath).canonicalFilePath()) {
+        if(errorText)*errorText=QStringLiteral("Publication does not own the pending rollback snapshot");
+        return false;
+    }
+    return EncryptedStorage::prepareRuntimeDatabases(errorText);
 }
 
 bool RuntimeRecoveryCoordinator::prepareValidatedRuntime(QString* errorText)

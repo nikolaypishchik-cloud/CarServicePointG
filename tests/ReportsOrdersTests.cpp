@@ -237,6 +237,8 @@ private slots:
     void deferredEditorKeepsProfile();
     void migrationIsolatedSchema();
     void migrationOperationExclusion();
+    void migrationPublicationCrashRecovery_data();
+    void migrationPublicationCrashRecovery();
     void migrationServiceRoundTrip_data();
     void migrationServiceRoundTrip();
     void migrationJournalRejectsCorruption();
@@ -1198,6 +1200,63 @@ void ReportsOrdersTests::migrationOperationExclusion()
     QVERIFY(!QFileInfo::exists(AppRuntime::activeDbFilePath()));
 }
 
+void ReportsOrdersTests::migrationPublicationCrashRecovery_data()
+{
+    QTest::addColumn<QString>("boundary");
+    for(const auto& stage:QStringList{"execute_import","execute_reopen","execute_done"})
+        QTest::newRow(qPrintable(stage))<<stage;
+}
+
+void ReportsOrdersTests::migrationPublicationCrashRecovery()
+{
+    QFETCH(QString,boundary);
+    QTemporaryDir parent;QVERIFY(parent.isValid());
+    const auto markerPath=parent.filePath("crash.json");
+    auto environment=QProcessEnvironment::systemEnvironment();
+    environment.insert("CS_TEST_MIGRATION_PARENT",parent.path());
+    environment.insert("CS_TEST_MIGRATION_CRASH_MARKER",markerPath);
+    environment.insert("CS_TEST_MIGRATION_CRASH_STAGE",boundary);
+    QProcess child;child.setProcessEnvironment(environment);
+    child.start(QCoreApplication::applicationFilePath(),{"migrationServiceRoundTrip:populated-retained-stores"});
+    QVERIFY(child.waitForStarted());QVERIFY(child.waitForFinished(120000));
+    QVERIFY2(child.exitCode()==87,qPrintable(QString::fromUtf8(child.readAllStandardOutput()+child.readAllStandardError())));
+    QFile marker(markerPath);QVERIFY(marker.open(QIODevice::ReadOnly));
+    QJsonParseError parse;const auto evidence=QJsonDocument::fromJson(marker.readAll(),&parse).object();
+    QCOMPARE(parse.error,QJsonParseError::NoError);
+    const auto root=evidence.value("root").toString();QVERIFY(QFileInfo(root).canonicalFilePath().startsWith(parent.path()+"/"));
+    const auto oldRoot=qEnvironmentVariable("CS_TEST_DATA_ROOT");const auto oldName=QCoreApplication::applicationName();
+    const auto oldOrg=QCoreApplication::organizationName(),oldDomain=QCoreApplication::organizationDomain();
+    const bool oldTest=QStandardPaths::isTestModeEnabled();
+    const auto cleanup=qScopeGuard([&]{Database::close();QSettings().clear();QSettings().sync();
+        setIsolatedTestRoot(oldRoot);QCoreApplication::setApplicationName(oldName);QCoreApplication::setOrganizationName(oldOrg);
+        QCoreApplication::setOrganizationDomain(oldDomain);QStandardPaths::setTestModeEnabled(oldTest);});
+    QVERIFY(setIsolatedTestRoot(root));QStandardPaths::setTestModeEnabled(true);
+    QCoreApplication::setApplicationName(evidence.value("name").toString());
+    QCoreApplication::setOrganizationName(evidence.value("organization").toString());
+    QCoreApplication::setOrganizationDomain(evidence.value("domain").toString());
+    QString error,pending;QVERIFY2(MigrationRestoreJournal::pending(&pending,&error),qPrintable(error));
+    QCOMPARE(pending,evidence.value("snapshot").toString());
+    QVERIFY2(RuntimeRecoveryCoordinator::recoverPendingSnapshotRestore(&error),qPrintable(error));
+    QVERIFY2(MigrationRestoreJournal::pending(&pending,&error),qPrintable(error));QVERIFY(pending.isEmpty());
+    const QMap<QString,QString> stores={{"archive",AppRuntime::sealedArchiveDbFilePath()},
+        {"legacy",AppRuntime::sealedLegacyDbFilePath()},{"registry",AppRuntime::sealedRegistryDbFilePath()}};
+    for(auto it=stores.cbegin();it!=stores.cend();++it) {
+        QFile file(it.value());QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(QString::fromLatin1(QCryptographicHash::hash(file.readAll(),QCryptographicHash::Sha256).toHex()),
+            evidence.value("hashes").toObject().value(it.key()).toString());
+    }
+    QVERIFY2(Database::prepareRuntime(&error),qPrintable(error));QVERIFY2(Database::openPrepared(&error),qPrintable(error));
+    {QSqlQuery q(Database::db());QVERIFY(q.exec("SELECT order_uid FROM work_orders"));QVERIFY(q.next());
+     QCOMPARE(q.value(0).toString(),QString("existing-target-order"));QVERIFY(!q.next());}
+    LegacyMigrationResult result;bool ok=false;QEventLoop loop;
+    std::thread retry([&]{ok=LegacyMigrationService::executeLegacyImport(evidence.value("source").toString(),&result,&error);
+        Database::close();QMetaObject::invokeMethod(&loop,&QEventLoop::quit,Qt::QueuedConnection);});
+    loop.exec();retry.join();QVERIFY2(ok,qPrintable(error));
+    QCOMPARE(result.importedOrderCount,1);QCOMPARE(result.importedServiceCount,1);QCOMPARE(result.importedPartCount,1);
+    QVERIFY2(MigrationRestoreJournal::pending(&pending,&error),qPrintable(error));QVERIFY(pending.isEmpty());
+    QSqlQuery q(Database::db());QVERIFY(q.exec("SELECT COUNT(*) FROM work_orders"));QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),2);
+}
+
 void ReportsOrdersTests::migrationServiceRoundTrip_data()
 {
     QTest::addColumn<QString>("targetState");
@@ -1213,7 +1272,8 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     const bool childOnlyCollision=targetState=="populated-child-only-collision";
     const bool childCollision=targetState=="populated-child-key-collision" || targetState=="populated-repeat-open" || childOnlyCollision || retainedStores;
     const bool keyedSource=targetState=="populated-key-collision" || childCollision;
-    QTemporaryDir root; QVERIFY(root.isValid());
+    const auto childParent=qEnvironmentVariable("CS_TEST_MIGRATION_PARENT");
+    QTemporaryDir root(QDir(childParent.isEmpty()?QDir::tempPath():childParent).filePath("service-XXXXXX")); QVERIFY(root.isValid());
     const auto oldRoot=qEnvironmentVariable("CS_TEST_DATA_ROOT");
     const auto oldName=QCoreApplication::applicationName();
     const auto oldOrg=QCoreApplication::organizationName();
@@ -1310,6 +1370,21 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
         ok=LegacyMigrationService::executeLegacyImport(sourcePath,&result,&error,
             [&](const LegacyImportProgressState& progress){
                 stages<<progress.stageKey;
+                if(targetState=="populated-retained-stores" && !qEnvironmentVariable("CS_TEST_MIGRATION_CRASH_MARKER").isEmpty()
+                    && progress.stageKey==qEnvironmentVariable("CS_TEST_MIGRATION_CRASH_STAGE")) {
+                    QString pending,detail;
+                    if(!MigrationRestoreJournal::pending(&pending,&detail) || pending.isEmpty())std::_Exit(91);
+                    QJsonObject hashes;
+                    for(auto it=priorSealed.cbegin();it!=priorSealed.cend();++it)
+                        hashes.insert(it.key(),QString::fromLatin1(QCryptographicHash::hash(it.value(),QCryptographicHash::Sha256).toHex()));
+                    const QJsonObject evidence{{"root",root.path()},{"name",QCoreApplication::applicationName()},
+                        {"organization",QCoreApplication::organizationName()},{"domain",QCoreApplication::organizationDomain()},
+                        {"snapshot",pending},{"source",sourcePath},{"hashes",hashes}};
+                    QSaveFile marker(qEnvironmentVariable("CS_TEST_MIGRATION_CRASH_MARKER"));
+                    const auto bytes=QJsonDocument(evidence).toJson();
+                    if(!marker.open(QIODevice::WriteOnly) || marker.write(bytes)!=bytes.size() || !marker.commit())std::_Exit(92);
+                    std::_Exit(87); // Kill the real service without stack unwinding or rollback.
+                }
                 if(targetState=="populated-retained-rollback" && progress.stageKey=="execute_reopen")
                     QFile::rename(sourcePath,sourcePath+".held");
                 if (targetState=="restore-after-failure" && progress.stageKey=="execute_import")
