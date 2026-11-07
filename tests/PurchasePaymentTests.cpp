@@ -1304,7 +1304,11 @@ private slots:
         QVERIFY(containsGap(today.addDays(-28),today.addDays(-22)));
         QVERIFY(!containsGap(today.addDays(-19),today.addDays(-6)));
         QVERIFY(containsGap(today.addDays(-4),today));
-        for(const auto& p:ReportsDataLoader::LocalSupport::loadMastersForPeriodForReports(db,today.addDays(-19).toString(Qt::ISODate),today.addDays(-6).toString(Qt::ISODate)))QVERIFY(p.id!=gapId);
+        QString readError;
+        const auto roster=ReportsDataLoader::LocalSupport::loadMastersForPeriodForReports(db,
+            today.addDays(-19).toString(Qt::ISODate),today.addDays(-6).toString(Qt::ISODate),&readError);
+        QVERIFY2(readError.isEmpty(),qPrintable(readError));
+        for(const auto& person:roster)QVERIFY(person.id!=gapId);
         QVERIFY(PersonnelEmploymentHistory::setActive(gapId,false,today.toString(Qt::ISODate),&error));
         QCOMPARE(PersonnelEmploymentHistory::load(gapId)["periods"].toArray().size(),2);
         if(!output.isEmpty())QVERIFY(reopened.grab().save(QDir(output).filePath("personnel-roster.png")));
@@ -8138,16 +8142,23 @@ private slots:
                         result.filePath=storedInvoice; result.data.documentDate="2026-10-03";
                         InvoiceImport::ImportedPartDraft draft; draft.name="Brake disc"; draft.oemNumber="OEM-123";draft.qtyText="2";draft.priceText="250";
                         result.data.parsedPartDrafts.append(draft);
-                        job->finished(result);QTest::qWait(2700);
+                        // This fixture supplies a parsed invoice. Let the missing-file
+                        // request finish first so its queued error cannot race the fixture.
+                        QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(),5000);
+                        job->finished(result);
+                        QTRY_COMPARE_WITH_TIMEOUT(dialog->findChild<QLineEdit*>("sparePartName")->text(),draft.name,5000);
                         importAvailable=importAvailable
                             && dialog->findChild<QLineEdit*>("sparePartName")->text()==draft.name
                             && dialog->findChild<QLineEdit*>("sparePartArticle")->text()==draft.oemNumber
                             && dialog->findChild<QDateEdit*>("spareOrderedDate")->date()==QDate(2026,10,3);
                         draft.name="Oil filter"; draft.oemNumber="OEM-456";draft.orderedAt="02.10.26";
                         result.data.parsedPartDrafts.append(draft);
-                        job->cancel(); progress->start(request);
-                        job->finished(result);QTest::qWait(2700);
+                        progress->start(request);
+                        QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(),5000);
+                        job->finished(result);
                         auto* rows=dialog->findChild<QTableWidget*>("spareAdditionalParts");
+                        QVERIFY(rows);
+                        QTRY_COMPARE_WITH_TIMEOUT(rows->rowCount(),1,5000);
                         importAvailable=importAvailable
                             && dialog->findChild<QLineEdit*>("sparePartName")->text()=="Brake disc"
                             && rows && rows->rowCount()==1 && rows->item(0,0)->text()==draft.name

@@ -4,6 +4,7 @@ Run --pilot first. This is a partial UI matrix, never a full end-to-end certific
 import argparse, ctypes, hashlib, json, os, shutil, subprocess, time
 from datetime import datetime, timezone
 from pathlib import Path
+from run_qt_test import diagnostic_error
 
 ROOT=Path(__file__).resolve().parents[1]
 BASE=ROOT/'build-single-instance-audit/reliability-20261028'
@@ -50,14 +51,22 @@ def memory(pid):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--pilot',action='store_true')
     parser.add_argument('--minutes',type=int,choices=range(120,181),default=120)
-    args=parser.parse_args();BASE.mkdir(parents=True,exist_ok=True)
-    lock=BASE/'runner.lock'
+    parser.add_argument('--audit-dir',type=Path,default=BASE)
+    args=parser.parse_args()
+    base=args.audit_dir.resolve()
+    if not base.is_relative_to((ROOT/'build-single-instance-audit').resolve()):
+        parser.error('--audit-dir must be inside build-single-instance-audit')
+    out=base/('pilot' if args.pilot else 'soak')
+    if out.exists():
+        parser.error('Choose a fresh audit directory to preserve previous measurements')
+    base.mkdir(parents=True,exist_ok=True)
+    lock=base/'runner.lock'
     fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY);os.write(fd,str(os.getpid()).encode());os.close(fd)
     state={'phase':'preparing','prepared_at':stamp(),'target_active_minutes':args.minutes,
            'pilot':args.pilot,'complete_acceptance':False,'active_seconds':0,'cases':0,'failures':0,'cycles':0}
-    out=BASE/('pilot' if args.pilot else 'soak');out.mkdir(exist_ok=True)
     try:
-        runtime=BASE/'runtime';runtime.mkdir(exist_ok=True)
+        out.mkdir()
+        runtime=base/'runtime';runtime.mkdir(exist_ok=True)
         manifest=json.loads((ROOT/'dist/runtime-manifest.json').read_text(encoding='utf-8'))
         for rel,info in manifest['files'].items():
             source=ROOT/'dist'/rel;target=runtime/rel
@@ -101,13 +110,16 @@ def main():
                 record=dict(index=ordinal,cycle=cycle+1,case=case,module=module,scope=scope,at=stamp(),
                     seconds=elapsed,exit=code,timeout=timeout,isolated=isolated,peak_private_bytes=peak)
                 with (out/'operations.jsonl').open('a',encoding='utf-8') as stream:stream.write(json.dumps(record)+'\n')
-                state['cases']+=1;state['failures']+=int(code!=0)
+                valid=code==0 and 'Totals:' in text and not diagnostic_error(text)
+                state['cases']+=1;state['failures']+=int(not valid)
                 if not timeout and isolated and 0 <= code <= 255:state['active_seconds']+=elapsed
                 state.update(last_case=case,last_exit=code,updated_at=stamp(),peak_last_private_bytes=peak)
                 write(out/'status.json',state);print(json.dumps(record),flush=True)
                 if not isolated:raise RuntimeError('Isolation preflight failed; no further tests allowed')
                 if timeout or code<0 or code>255:
                     raise RuntimeError('Test hang/crash; preserve evidence and repair before sustained run')
+                if not valid:
+                    raise RuntimeError(f'{case} failed or produced incomplete diagnostics; see {log}')
                 if state['active_seconds']>=args.minutes*60:break
             state['cycles']=cycle+1
             if state['active_seconds']>=args.minutes*60:break

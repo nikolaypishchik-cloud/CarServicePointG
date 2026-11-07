@@ -552,4 +552,5 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `docs/reliability/DBY_T176_LEGACY_COVERAGE.md` | active | Evidence for reconciliation of a distinct historical archive and explicit rejection of conflicting data. |
 | `docs/reliability/DBY_T180_HISTORICAL_CHILDREN.md` | active | Records refusal tests for ambiguous historical child references during migration. |
 | `docs/reliability/DBY_T181_HISTORICAL_VERSIONS.md` | active | Records migration and read-only history checks for separate source versions. |
+| `docs/reliability/DBY_T184_PERIOD_PDF.md` | active | Records source compatibility and failure tests for UID-scoped period PDF reads. |
 | `tests/HistoricalRecordStoreTests.cpp` | test-only | Synthetic sources verify archive provenance, fields, rollback and repeated import. |
