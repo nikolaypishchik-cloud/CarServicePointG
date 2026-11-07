@@ -2,6 +2,7 @@
 // Compiled as a separate P2 implementation module; include-order dependencies are isolated in the module prelude.
 
 #include "infrastructure/security/EncryptedStorageModulePrelude.h"
+#include "infrastructure/security/MigrationRetainedStores.h"
 
 namespace EncryptedStorage {
 
@@ -128,6 +129,13 @@ bool publishPreparedWorkspace(const QString& sourcePlainPath, const QString& arc
     QByteArray key;
     if (!loadOrCreateMasterKey(&key, errorText)) return false;
     Q_UNUSED(key);
+
+    // Preserve a verified immutable receipt before replacing any prior sealed slot.
+    // Active archive routing still needs independent reconciliation; custody is not acceptance.
+    if (!MigrationRetainedStores::retain(QDir(AppRuntime::securityDir()).filePath("migration_retained_stores"),
+            {{"archive",AppRuntime::sealedArchiveDbFilePath()},
+             {"legacy",AppRuntime::sealedLegacyDbFilePath()},
+             {"registry",AppRuntime::sealedRegistryDbFilePath()}},nullptr,errorText)) return false;
 
     // Publish the validated workspace and preserve the audited source in the archive.
     safeRemoveEncryptedStorageFile(AppRuntime::sealedActiveDbFilePath(), AppRuntime::securityDir());

@@ -591,7 +591,7 @@ bool LegacyImportVerifySupport::runVerifyAgainstCurrentWorkspace(const LegacyImp
         const auto audited=verificationFiles->filePath("audited.db");
         if (!copyAuditedDatabase(bundle.primaryDbPath,audited,identity,errorText)) return false;
         verifyPath=audited;
-        if (keys.isEmpty()) return true;
+        if (keys.isEmpty() && keys.children.isEmpty()) return true;
         const auto projected=verificationFiles->filePath("verification.db");
         if (!MigrationOrderKeys::project(verifyPath,projected,keys,errorText)) return false;
         verifyPath=projected;

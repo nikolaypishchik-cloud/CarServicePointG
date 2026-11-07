@@ -25,6 +25,7 @@
 #include "infrastructure/db/sqlite/OrderArchiveShardSqlSupport.h"
 #include "infrastructure/db/sqlite/DbThreadConnectionSupport.h"
 #include "infrastructure/security/EncryptedStorageLocalSupport.h"
+#include "infrastructure/security/EncryptedStorage.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include "core/services/legacyimport/LegacyImportJournalSupport.h"
@@ -1199,14 +1200,17 @@ void ReportsOrdersTests::migrationOperationExclusion()
 void ReportsOrdersTests::migrationServiceRoundTrip_data()
 {
     QTest::addColumn<QString>("targetState");
-    for(const auto& state:QStringList{"fresh", "initialized-closed", "initialized-live", "active-transaction", "restore-after-failure", "populated", "populated-key-collision", "populated-child-key-collision", "populated-repeat-open", "populated-conflicting-parent"})
+    for(const auto& state:QStringList{"fresh", "initialized-closed", "initialized-live", "active-transaction", "restore-after-failure", "populated", "populated-key-collision", "populated-child-key-collision", "populated-child-only-collision", "populated-retained-stores", "populated-retained-rollback", "populated-repeat-open", "populated-conflicting-parent"})
         QTest::newRow(qPrintable(state))<<state;
 }
 
 void ReportsOrdersTests::migrationServiceRoundTrip()
 {
     QFETCH(QString,targetState);
-    const bool childCollision=targetState=="populated-child-key-collision" || targetState=="populated-repeat-open";
+    const bool retainedStores=targetState=="populated-retained-stores" || targetState=="populated-retained-rollback";
+    QMap<QString,QByteArray> priorSealed;
+    const bool childOnlyCollision=targetState=="populated-child-only-collision";
+    const bool childCollision=targetState=="populated-child-key-collision" || targetState=="populated-repeat-open" || childOnlyCollision || retainedStores;
     const bool keyedSource=targetState=="populated-key-collision" || childCollision;
     QTemporaryDir root; QVERIFY(root.isValid());
     const auto oldRoot=qEnvironmentVariable("CS_TEST_DATA_ROOT");
@@ -1254,7 +1258,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     QFile source(sourcePath); QVERIFY(source.open(QIODevice::ReadOnly));
     const auto original=source.readAll();source.close();
     const bool populated = targetState.startsWith("populated");
-    const int existingKey = targetState=="populated" ? 17 : 7;
+    const int existingKey = (targetState=="populated" || childOnlyCollision) ? 17 : 7;
     QString setupError;
     if(targetState!="fresh") {
         QVERIFY2(Database::prepareRuntime(&setupError),qPrintable(setupError));
@@ -1273,12 +1277,31 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             QVERIFY2(setup.exec(QString("INSERT INTO work_order_parts(id,part_uid,order_number,order_uid,name,qty,price,amount) "
                 "VALUES(1001,'existing-target-part',%1,'existing-target-order','Target part',2,19.25,38.50)").arg(existingKey)),qPrintable(setup.lastError().text()));
             if(childCollision) {
-                QVERIFY(setup.exec("INSERT INTO work_order_services(id,service_uid,order_uid,order_number,title,qty,price,amount) VALUES(20,'target-service','existing-target-order',7,'Target work',1,12.50,12.50)"));
+                QVERIFY(setup.exec(QString("INSERT INTO work_order_services(id,service_uid,order_uid,order_number,title,qty,price,amount) VALUES(20,'target-service','existing-target-order',%1,'Target work',1,12.50,12.50)").arg(existingKey)));
                 QVERIFY(setup.exec("UPDATE work_order_parts SET id=21,service_id=20 WHERE id=1001"));
             }
             QVERIFY(setup.exec("INSERT INTO settings(key,value) VALUES('migration.target.sentinel','existing setting')"));
         }
         if(targetState=="initialized-closed") Database::close();
+    }
+    if(retainedStores) {
+        Database::close();
+        const QMap<QString,QPair<QString,QString>> slots={
+            {"archive",{AppRuntime::archiveDbFilePath(),AppRuntime::sealedArchiveDbFilePath()}},
+            {"legacy",{AppRuntime::legacyDbFilePath(),AppRuntime::sealedLegacyDbFilePath()}},
+            {"registry",{AppRuntime::registryDbFilePath(),AppRuntime::sealedRegistryDbFilePath()}}};
+        for(auto it=slots.cbegin();it!=slots.cend();++it) {
+            const auto path=it.value().first;
+            if(!QFileInfo::exists(path))QVERIFY(QFile::copy(AppRuntime::activeDbFilePath(),path));
+            const auto connection="retention-fixture-"+it.key();
+            {auto store=QSqlDatabase::addDatabase("QSQLITE",connection);store.setDatabaseName(path);QVERIFY(store.open());
+             QSqlQuery marker(store);QVERIFY(marker.exec("CREATE TABLE retention_sentinel(uid TEXT,cents INTEGER)"));
+             marker.prepare("INSERT INTO retention_sentinel VALUES(?,?)");marker.addBindValue(it.key()+"-old-uid");marker.addBindValue(7250);
+             QVERIFY(marker.exec());store.close();}
+            QSqlDatabase::removeDatabase(connection);
+            QString sealError;QVERIFY2(EncryptedStorage::encryptPlainFileToSealed(path,it.value().second,&sealError),qPrintable(sealError));
+            QFile sealed(it.value().second);QVERIFY(sealed.open(QIODevice::ReadOnly));priorSealed.insert(it.key(),sealed.readAll());
+        }
     }
     QEventLoop ownerLoop;
     LegacyMigrationResult result; QString error; QStringList stages; bool ok=false;
@@ -1286,6 +1309,8 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
         ok=LegacyMigrationService::executeLegacyImport(sourcePath,&result,&error,
             [&](const LegacyImportProgressState& progress){
                 stages<<progress.stageKey;
+                if(targetState=="populated-retained-rollback" && progress.stageKey=="execute_reopen")
+                    QFile::rename(sourcePath,sourcePath+".held");
                 if (targetState=="restore-after-failure" && progress.stageKey=="execute_import")
                     QFile::rename(sourcePath,sourcePath+".held");
             });
@@ -1294,8 +1319,15 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     });
     ownerLoop.exec();
     worker.join();
-    if (targetState=="restore-after-failure") QVERIFY(QFile::rename(sourcePath+".held",sourcePath));
+    if (targetState=="restore-after-failure" || targetState=="populated-retained-rollback") QVERIFY(QFile::rename(sourcePath+".held",sourcePath));
     QVERIFY(source.open(QIODevice::ReadOnly)); QCOMPARE(source.readAll(),original); source.close();
+    if(targetState=="populated-retained-rollback") {
+        QVERIFY(!ok);QVERIFY(!error.isEmpty());QVERIFY(stages.contains("execute_reopen"));
+        const QMap<QString,QString> paths={{"archive",AppRuntime::sealedArchiveDbFilePath()},
+            {"legacy",AppRuntime::sealedLegacyDbFilePath()},{"registry",AppRuntime::sealedRegistryDbFilePath()}};
+        for(auto it=paths.cbegin();it!=paths.cend();++it){QFile file(it.value());QVERIFY(file.open(QIODevice::ReadOnly));QCOMPARE(file.readAll(),priorSealed.value(it.key()));}
+        return;
+    }
     if (targetState=="populated-conflicting-parent") {
         QVERIFY(!ok); QVERIFY2(error.contains("Conflicting source parent references"),qPrintable(error));
         QVERIFY(!stages.contains("execute_reopen"));
@@ -1370,7 +1402,8 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     }
     if (keyedSource) {
         QVERIFY(q.exec("SELECT number,order_year,order_number FROM work_orders WHERE order_uid='migration-service-order'"));
-        QVERIFY(q.next()); const auto mapped=q.value(0).toInt(); QVERIFY(mapped!=7);
+        QVERIFY(q.next()); const auto mapped=q.value(0).toInt();
+        if(childOnlyCollision) QCOMPARE(mapped,7); else QVERIFY(mapped!=7);
         QCOMPARE(q.value(1).toInt(),2024); QCOMPARE(q.value(2).toInt(),3);
         QVERIFY(q.exec("SELECT p.order_number,s.order_number,s.order_uid,s.service_uid FROM work_order_parts p JOIN work_order_services s ON s.id=p.service_id "
                        "WHERE p.part_uid='source-part-uid' AND p.order_uid='migration-service-order'"));
@@ -1395,7 +1428,31 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     QVERIFY2(q.exec(populated ? "SELECT order_uid,order_year,order_number FROM work_orders WHERE order_uid='migration-service-order'" : "SELECT order_uid,order_year,order_number FROM work_orders"),qPrintable(q.lastError().text()));
     QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("migration-service-order"));
     QCOMPARE(q.value(1).toInt(),2024); QCOMPARE(q.value(2).toInt(),3); QVERIFY(!q.next());
-    if(targetState=="populated-repeat-open") {
+    if(retainedStores) {
+        const QDir receipts(QDir(AppRuntime::securityDir()).filePath("migration_retained_stores"));
+        bool matched=false;
+        for(const auto& dir:receipts.entryList(QDir::Dirs|QDir::NoDotAndDotDot)) {
+            if(dir.startsWith('.'))continue;
+            bool same=true;
+            for(auto it=priorSealed.cbegin();it!=priorSealed.cend();++it) {
+                QFile file(receipts.filePath(dir+"/"+it.key()+".enc"));
+                if(!file.open(QIODevice::ReadOnly) || file.readAll()!=it.value()){same=false;break;}
+            }
+            if(!same)continue;
+            matched=true;QTemporaryDir exported;QVERIFY(exported.isValid());
+            for(auto it=priorSealed.cbegin();it!=priorSealed.cend();++it) {
+                const auto plain=exported.filePath(it.key()+".db");
+                QVERIFY2(EncryptedStorage::exportPlaintextDatabase(receipts.filePath(dir+"/"+it.key()+".enc"),plain,&error),qPrintable(error));
+                const auto connection="retention-readback-"+it.key();
+                {auto retained=QSqlDatabase::addDatabase("QSQLITE",connection);retained.setDatabaseName(plain);QVERIFY(retained.open());
+                 QSqlQuery marker(retained);QVERIFY(marker.exec("SELECT uid,cents FROM retention_sentinel"));QVERIFY(marker.next());
+                 QCOMPARE(marker.value(0).toString(),it.key()+"-old-uid");QCOMPARE(marker.value(1).toInt(),7250);QVERIFY(!marker.next());retained.close();}
+                QSqlDatabase::removeDatabase(connection);
+            }
+        }
+        QVERIFY2(matched,"Prior sealed stores have no verified retained generation");
+    }
+    if(targetState=="populated-repeat-open" || retainedStores) {
         q.finish();db.close();
         QVERIFY2(Database::prepareRuntime(&error),qPrintable(error));
         QVERIFY2(Database::openPrepared(&error),qPrintable(error));
