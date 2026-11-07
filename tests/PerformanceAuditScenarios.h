@@ -1,5 +1,8 @@
 #pragma once
 #include "PerformanceAuditSupport.h"
+#include <QCryptographicHash>
+#include <QDataStream>
+#include <QSaveFile>
 #include "core/services/HistoryQueryService.h"
 #include "core/services/OrderStoragePolicyService.h"
 #include "core/services/OrderSearchIndex.h"
@@ -20,6 +23,35 @@
 #include <QLoggingCategory>
 
 namespace PerformanceAudit {
+// Compare the registry before and after performance work without exporting the
+// customer's invoice contents. Keep display order and order-to-vehicle links.
+inline bool saveInvoiceFingerprint(QSqlDatabase db,const QString& path) {
+    QString error;
+    const auto invoices=InvoiceRegistryService::load(db,&error);
+    if (!error.isEmpty()) return false;
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const auto& invoice:invoices) {
+        QByteArray bytes;
+        QDataStream stream(&bytes,QIODevice::WriteOnly);
+        stream.setVersion(QDataStream::Qt_6_0);
+        stream << invoice.key << invoice.number << invoice.supplier << invoice.date << invoice.dueDate << invoice.paidAt
+               << invoice.remoteIdentity << invoice.orders << invoice.vehicles << invoice.totalCents << invoice.paidCents
+               << invoice.amountMismatch << invoice.apportioned << qint64(invoice.parts.size());
+        for (const auto& part:invoice.parts)
+            stream << part.source << part.id << part.orderUid << part.orderNumber << part.date << part.name << part.supplier
+                   << part.oem << part.invoice << part.car << part.note << part.unit << part.quantity << part.dueDate
+                   << part.totalCents << part.paidCents;
+        stream << qint64(invoice.distribution.size());
+        for (const auto& slice:invoice.distribution)
+            stream << slice.purchaseId << slice.partId << slice.orderNumber << slice.quantity << slice.total;
+        if (stream.status()!=QDataStream::Ok) return false;
+        hash.addData(bytes);
+    }
+    const auto result=QJsonDocument(QJsonObject{{"invoices",invoices.size()},
+            {"sha256",QString::fromLatin1(hash.result().toHex())}}).toJson();
+    QSaveFile file(path);
+    return file.open(QIODevice::WriteOnly) && file.write(result)==result.size() && file.commit();
+}
 inline int runAudit(QSqlDatabase db, const QString& output) {
     const auto label=qEnvironmentVariable("CS_PERF_DATASET");
     Recorder rec(output+"/samples-"+label+".jsonl",label);
@@ -65,6 +97,9 @@ inline int runAudit(QSqlDatabase db, const QString& output) {
     rec.run("reports.outsource","service",[&]{auto r=ReportsDataLoader::buildOutsourceSnapshot(dbPath,df,dt);return snap(r.rows.size(),r.stats);},reset);
     rec.run("statistics.snapshot","service",[&]{auto r=StatisticsSnapshotService::collectFromPath(dbPath,from,to);return checked(r.closedOrders+r.openOrders);},reset);
     rec.run("invoices.registry","service",[&]{QString e;auto r=InvoiceRegistryService::load(db,&e);return checked(r.size(),e);},reset);
+    const auto selectedScenarios=qEnvironmentVariable("CS_PERF_SCENARIOS");
+    if ((selectedScenarios.isEmpty() || selectedScenarios.split(',').contains("invoices.registry"))
+            && !saveInvoiceFingerprint(db,output+"/invoice-fingerprint-"+label+".json")) return 1;
     rec.run("debts.list","service",[&]{QString e;auto r=PurchasePaymentService::debts(db,&e);return checked(r.size(),e);},reset);
     rec.run("catalog.all","service",[&]{QString e;auto r=CatalogQueryService::loadAllRows(&e);return checked(r.size(),e);},reset);
     rec.run("inventory.snapshot","service",[&]{auto r=WorkshopInventoryService::buildSnapshot(db,from,to);return checked(r.purchases.size(),r.errorText);},reset);
@@ -101,7 +136,17 @@ inline int runAudit(QSqlDatabase db, const QString& output) {
     rec.run("ui.history.open-close","ui",[&]{return openPage([]{return new HistoryPage;},RuntimeJob::Family::History,true);},reset);
     rec.run("ui.parts.open-close","ui",[&]{return openPage([]{auto* p=new PartsPage;p->refresh();return p;},RuntimeJob::Family::Parts,true);},reset);
     rec.run("ui.invoices.open-close","ui",[&]{bool complete=false;InvoicesPage p;p.metricsChanged=[&](int,int,int,qint64){complete=true;};p.resize(1300,760);p.show();p.setPeriod(from,to);p.refresh();bool ok=waitUntil([&]{return complete&&tableReady(&p);});int rows=p.findChild<QTableView*>()->model()->rowCount();p.close();return Result{ok,rows,ok?QString():"UI readiness timeout"};},reset);
-    rec.run("ui.debts.open-close","ui",[&]{PurchaseDebtsPage p;p.resize(1300,760);p.show();p.refresh();bool ok=waitUntil([&]{return !p.property("debtDataLoading").toBool();});return checked(p.findChild<QTableWidget*>("purchaseDebtsTable")->rowCount(),ok?p.property("debtLoadError").toString():"UI readiness timeout");},reset);
+    rec.run("ui.debts.open-close","ui",[&] {
+        PurchaseDebtsPage page;
+        page.resize(1300,760);
+        page.show();
+        page.refresh();
+        auto* table=page.findChild<QTableView*>("purchaseDebtsTable");
+        if (!table || !table->model()) return Result{false,0,"Debt table or model missing"};
+        const bool ready=waitUntil([&]{return !page.property("debtDataLoading").toBool();});
+        const auto error=ready ? page.property("debtLoadError").toString() : QStringLiteral("UI readiness timeout");
+        return checked(table->model()->rowCount(),error);
+    },reset);
     rec.run("ui.crm.open-close","ui",[&]{CrmPage p;p.resize(1300,760);p.show();p.refresh();bool ok=waitUntil([&]{return tableReady(&p);});QCoreApplication::processEvents();int rows=0;for(auto* t:p.findChildren<QTableWidget*>())rows+=t->rowCount();return Result{ok,rows,ok?QString():"UI readiness timeout"};},reset);
     rec.run("ui.statistics.open-close","ui",[&]{StatsPage p;p.resize(1300,760);p.show();p.refresh();QCoreApplication::processEvents();return checked(p.property("performanceOrders").toList().size());},reset);
 

@@ -1228,7 +1228,7 @@
   "tests/PartMutationServiceTests.cpp": "db35a4f83cedc2a5f9801a3a39b66a6e649a8281b84a86b0728025234d243424",
   "tests/PartOverduePolicyTests.cpp": "da7da56629b836e7ce5612f277b2381b638b1d3c922a2b9c3b46abbdd842318c",
   "tests/PartsQueryServiceTests.cpp": "7a2419585a57aee6b231af7699fe6836f25a4ede26eb5830b97eb96984c3128f",
-  "tests/PerformanceAuditScenarios.h": "64c079a5acf2971c6d3dc1cb8d565c8c527d93c2d364c7f61c070fdc866658cb",
+  "tests/PerformanceAuditScenarios.h": "d2b37db3744d5499d122b65535b20c51aa2bd5b3a7faf0157a1722029f3c5c77",
   "tests/PerformanceAuditSupport.h": "f48e39faaf999daa792a0271c1c5fe3fb06d7ca21e60fa69383ad4688bf1afdf",
   "tests/PerformanceSamples.h": "a3e0f3641883926802ae6a9c01e9f6b1d2621b368f063bc5ce36198ad4e164c6",
   "tests/PlanningOrdersDisplayTests.cpp": "5258dded0e05a2fd5572415936aa28dbb4153f67ee13bd7db2312540e68e13e1",
