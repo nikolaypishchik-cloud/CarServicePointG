@@ -323,19 +323,21 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                     row.purchase = q.value(11).toDouble();
                     row.qty = q.value(12).toDouble();
                     const double storedClientAmount = qMax(0.0, q.value(13).toDouble());
-                    const double purchasePrice = q.value(14).toDouble() > 0.0 ? q.value(14).toDouble() : (row.qty > 0.0 ? row.purchase / row.qty : 0.0);
-                    PartPricingInput pricingInput;
-                    pricingInput.partName = row.partName;
-                    pricingInput.store = rawStore;
-                    pricingInput.qty = row.qty > 0.0 ? row.qty : 1.0;
-                    pricingInput.purchasePrice = purchasePrice;
-                    pricingInput.manualMarkupOverride = q.value(16).toInt() != 0;
-                    pricingInput.manualMarkupPercent = pricingInput.manualMarkupOverride ? qMax(0.0, q.value(15).toDouble()) : 0.0;
-                    pricingInput.sourceType = QStringLiteral("report");
-                    const PartPricingResult pricing = PartPricingEngine::calculate(pricingInput, policySnapshot);
-                    row.client = q.value(20).toInt() >= 3 || storedClientAmount > 0.009 || PartMarkupPolicyService::isInventoryStore(row.store)
-                        ? storedClientAmount : pricing.clientAmount;
-                    row.net = q.value(20).toInt() >= 3 ? FormatUtils::roundMoneyValue(row.client - row.purchase)
+                    const bool recordedPrice = q.value(20).toInt() >= 3;
+                    row.client = storedClientAmount;
+                    if (!recordedPrice && storedClientAmount <= 0.009 && !PartMarkupPolicyService::isInventoryStore(row.store)) {
+                        PartPricingInput pricingInput;
+                        pricingInput.partName = row.partName;
+                        pricingInput.store = rawStore;
+                        pricingInput.qty = row.qty > 0.0 ? row.qty : 1.0;
+                        const double unitPrice = q.value(14).toDouble();
+                        pricingInput.purchasePrice = unitPrice > 0.0 ? unitPrice : (row.qty > 0.0 ? row.purchase / row.qty : 0.0);
+                        pricingInput.manualMarkupOverride = q.value(16).toInt() != 0;
+                        pricingInput.manualMarkupPercent = pricingInput.manualMarkupOverride ? qMax(0.0, q.value(15).toDouble()) : 0.0;
+                        pricingInput.sourceType = QStringLiteral("report");
+                        row.client = PartPricingEngine::calculate(pricingInput, policySnapshot).clientAmount;
+                    }
+                    row.net = recordedPrice ? FormatUtils::roundMoneyValue(row.client - row.purchase)
                         : qMax(0.0, row.client - row.purchase);
                     row.isOil = PartMarkupPolicyService::isInventoryStore(rawStore) && !issuedSpares.contains(row.rowId)
                         && stockUnits.contains(WorkshopInventoryService::normalizedMaterialKey(row.partName));

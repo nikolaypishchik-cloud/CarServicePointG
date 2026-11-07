@@ -94,6 +94,23 @@ inline int runAudit(QSqlDatabase db, const QString& output) {
     rec.run("reports.period","service",[&]{auto r=ReportsDataLoader::buildPeriodSnapshot(dbPath,df,dt);return snap(r.rows.size(),r.stats);},reset);
     rec.run("reports.orders","service",[&]{auto r=ReportsDataLoader::buildOrdersSnapshot(dbPath,df,dt);return snap(r.rows.size(),r.stats);},reset);
     rec.run("reports.parts","service",[&]{auto r=ReportsDataLoader::buildPartsSnapshot(dbPath,df,dt,0,0,{},{});return checked(r.rows.size(),r.error);},reset);
+    if (qEnvironmentVariableIsSet("CS_PERF_PARTS_EVIDENCE")) {
+        const auto report=ReportsDataLoader::buildPartsSnapshot(dbPath,df,dt,0,0,{},{});
+        if (!report.error.isEmpty()) return 1;
+        QByteArray bytes;
+        QDataStream stream(&bytes,QIODevice::WriteOnly);
+        stream.setVersion(QDataStream::Qt_6_0);
+        stream << report.stats << report.tileTitles << report.tileBodies << report.oilHtml;
+        for (const auto& row : report.rows)
+            stream << row.isStoreHeader << row.store << row.date << row.orderNumber << row.internalOrderNumber
+                   << row.orderUid << row.partName << row.invoiceNumber << row.invoicePath << row.invoiceDate
+                   << row.purchase << row.net << row.qty << row.client << row.tooltip;
+        if (stream.status()!=QDataStream::Ok) return 1;
+        QSaveFile file(output+"/parts-fingerprint-"+label+".json");
+        const auto digest=QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex();
+        const auto proof=QJsonDocument(QJsonObject{{"rows",report.rows.size()},{"sha256",QString::fromLatin1(digest)}}).toJson();
+        if (!file.open(QIODevice::WriteOnly) || file.write(proof)!=proof.size() || !file.commit()) return 1;
+    }
     rec.run("reports.payroll","service",[&]{auto r=ReportsDataLoader::buildPayrollSnapshot(dbPath,df,dt);return checked(r.rows.size(),r.error);},reset);
     rec.run("reports.outsource","service",[&]{auto r=ReportsDataLoader::buildOutsourceSnapshot(dbPath,df,dt);return checked(r.rows.size(),r.error);},reset);
     rec.run("statistics.snapshot","service",[&]{auto r=StatisticsSnapshotService::collectFromPath(dbPath,from,to);return checked(r.closedOrders+r.openOrders,r.error);},reset);
