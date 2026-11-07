@@ -135,7 +135,9 @@ private slots:
         const auto missing=dir.filePath("missing-parts.db");QVERIFY(!read(missing).error.isEmpty());QVERIFY(!QFile::exists(missing));
         QVERIFY(!read(dir.path()).error.isEmpty());
         auto empty=read(db.databaseName());QVERIFY2(empty.error.isEmpty(),qPrintable(empty.error));QVERIFY(empty.rows.isEmpty());
-        QSqlQuery q(db);QVERIFY(q.exec("INSERT INTO work_orders(number,order_uid,order_number,order_year,opened_at,status,car) VALUES(11,'parts-report-order',7,2026,'2026-01-01','open','Synthetic')"));
+        QSqlQuery q(db);
+        QVERIFY2(q.exec("INSERT INTO work_orders(number,order_uid,order_number,order_year,opened_at,status,plate,plate_norm,car,client,master_id) "
+                        "VALUES(11,'parts-report-order',7,2026,'2026-01-01','open','','','Synthetic','','m1')"),qPrintable(q.lastError().text()));
         QVERIFY(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,name,store,ordered_at,qty,purchase_price,purchase_amount,price,amount,markup_percent,manual_markup_override) VALUES(21,11,'parts-report-order','parts-report-part','Synthetic part','Shop','2026-01-01',1,30,30,45,45,50,1)"));
         PartsQueryService::invalidateCache();
         auto good=read(db.databaseName());QVERIFY2(good.error.isEmpty(),qPrintable(good.error));QCOMPARE(good.rows.size(),2);
@@ -156,6 +158,9 @@ private slots:
         ReportsPage page;page.show();auto* tabs=page.findChild<QTabWidget*>();auto* stats=page.findChild<QLabel*>("reportsStatsLabel");auto* pdf=page.findChild<QPushButton*>("reportsPdfButton");QVERIFY(tabs && stats && pdf);
         int parts=-1;for(int i=0;i<tabs->count();++i)if(tabs->tabText(i)==QString::fromUtf8("Придбання запчастин"))parts=i;QVERIFY(parts>=0);tabs->setCurrentIndex(parts);
         QTRY_VERIFY_WITH_TIMEOUT(stats->text().contains(QString::fromUtf8("Помилка читання запчастин")),10000);QVERIFY(!pdf->isEnabled());
+        auto* table=tabs->widget(parts)->findChild<QTableView*>();
+        QVERIFY(table && table->model());
+        QCOMPARE(table->model()->rowCount(),0);
         QVERIFY(q.exec("ALTER TABLE parts_broken RENAME TO work_order_part_attachments"));page.refresh();
         QTRY_VERIFY_WITH_TIMEOUT(pdf->isEnabled(),10000);QVERIFY(!stats->text().contains(QString::fromUtf8("Помилка читання запчастин")));
     }

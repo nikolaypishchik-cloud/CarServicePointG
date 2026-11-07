@@ -368,7 +368,8 @@ void applyPartsSnapshot(QTableView* table, ReportsSnapshotTableModel* model, con
         rows.push_back(out);
     }
     model->setSnapshot(partsHeaders(), rows);
-    if (rows.isEmpty()) model->setMessageRow(QString::fromUtf8("За вибраний період немає придбаних запчастин"));
+    if (rows.isEmpty() && snapshot.error.isEmpty())
+        model->setMessageRow(QString::fromUtf8("За вибраний період немає придбаних запчастин"));
 
     table->blockSignals(false);
     table->setUpdatesEnabled(true);
