@@ -549,3 +549,4 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `tests/AdditionalExpenseTests.cpp` | test-only | Uses an aborting trigger on the expense mutation log to prove financial updates roll back when their audit insert fails. |
 | `docs/reliability/DBY_T174_ARCHIVE_ROUTING.md` | active | Describes the production archive hydration and verified scopes. |
 | `tests/MigrationArchiveWorkspaceTests.cpp` | test-only | Uses synthetic stored order graphs and prior database roles to verify archive merge and refusal on identity conflict. |
+| `docs/reliability/DBY_T176_LEGACY_COVERAGE.md` | active | Evidence for reconciliation of a distinct historical archive and explicit rejection of conflicting data. |
