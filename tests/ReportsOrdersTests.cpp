@@ -3981,6 +3981,17 @@ void ReportsOrdersTests::deletedHistoricalOrderKeepsIdentity()
                         "plate,plate_norm,car,client,master_id) VALUES(91,'old-order-to-delete',42,2024,"
                         "'2024-11-01','open','AA1111AA','AA1111AA','Test car','Test client','delete-master')"), qPrintable(q.lastError().text()));
         QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db, {}, QDate(2024,11,2)), 43);
+        QVERIFY(q.exec("CREATE TRIGGER retain_header BEFORE DELETE ON work_orders BEGIN SELECT RAISE(IGNORE); END"));
+        QTest::ignoreMessage(QtCriticalMsg,QRegularExpression("^DB_TRANSACTION_CONTEXT phase= rollback_ok  transactionId= [0-9a-f-]{36}  owner= TransactionRunner  operationId= tx_runner_[0-9]+  connection= carservice_main  threadId= [0-9]+  error= step_failed$"));
+        QTest::ignoreMessage(QtCriticalMsg,QRegularExpression("^DB_TRANSACTION step_failed_rollback connection= carservice_main  transactionId= [0-9a-f-]{36}  rollbackOk= true  error= Confirmed order header was not deleted$"));
+        QVERIFY(!Database::hardDeleteOrder(91, &error));
+        QCOMPARE(error, QStringLiteral("Confirmed order header was not deleted"));
+        QVERIFY(q.exec("SELECT COUNT(*) FROM work_orders WHERE number=91 AND order_uid='old-order-to-delete'"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 1);
+        q.finish();
+        QVERIFY(q.exec("DROP TRIGGER retain_header"));
+        error.clear();
         QVERIFY2(Database::hardDeleteOrder(91, &error), qPrintable(error));
         QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db, {}, QDate(2024,11,2)), 43);
     }

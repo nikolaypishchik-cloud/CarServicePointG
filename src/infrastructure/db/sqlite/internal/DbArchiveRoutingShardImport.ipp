@@ -344,7 +344,7 @@ bool ensureWorkspaceOrderStateSchema(QSqlDatabase database)
 }
 
 static bool purgeOrderGraphRowsInOwnedTransaction(QSqlDatabase txDb, int orderNumber,
-                                                  QString* txError, bool verifyArchive)
+                                                  QString* txError, bool verifyArchive, bool requireDeletedHeader = false)
 {
     if (!TransactionContext::hasActiveTransaction(txDb)) {
         if (txError) *txError = QStringLiteral("Order graph purge requires an owned transaction");
@@ -420,6 +420,8 @@ static bool purgeOrderGraphRowsInOwnedTransaction(QSqlDatabase txDb, int orderNu
     q.prepare("DELETE FROM work_orders WHERE number=?");
     q.addBindValue(orderNumber);
     if (!q.exec()) return fail(q.lastError().text());
+    if (requireDeletedHeader && q.numRowsAffected() != 1)
+        return fail(QStringLiteral("Confirmed order header was not deleted"));
         if (verifyArchive) ArchiveTransferJournal::crashPoint("before_purge_commit");
         return true;
 }
@@ -448,7 +450,8 @@ static bool purgeOrderGraphImpl(QSqlDatabase database, int orderNumber, QString*
     const auto tx = MutationExecutor::execute(database, request, [&](QSqlDatabase& txDb, QString* txError) {
         if (reason == PurgeReason::ConfirmedDeletion
             && !OrderIdentityService::reserveIdentityBeforeDeletion(txDb, orderNumber, txError)) return false;
-        return purgeOrderGraphRowsInOwnedTransaction(txDb, orderNumber, txError, reason == PurgeReason::ArchivedCopy);
+        return purgeOrderGraphRowsInOwnedTransaction(txDb, orderNumber, txError, reason == PurgeReason::ArchivedCopy,
+                                                    reason == PurgeReason::ConfirmedDeletion);
     });
     if (!tx.ok) {
         if (errorText) *errorText = tx.errorText;
