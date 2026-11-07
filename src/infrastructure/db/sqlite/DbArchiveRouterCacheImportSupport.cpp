@@ -129,6 +129,7 @@ bool seedArchiveServices_local(QSqlDatabase database, const QSet<QString>& srcSe
     add(QStringLiteral("note"), firstAvailableExpr(srcServices, {QStringLiteral("note")}, QStringLiteral("''")));
     add(QStringLiteral("paid"), firstAvailableExpr(srcServices, {QStringLiteral("paid")}, QStringLiteral("1")));
     add(QStringLiteral("parent_id"), firstAvailableExpr(srcServices, {QStringLiteral("parent_id")}, QStringLiteral("0")));
+    add(QStringLiteral("service_uid"), QStringLiteral("COALESCE(%1,'')").arg(firstAvailableExpr(srcServices, {QStringLiteral("service_uid")}, QStringLiteral("''"))));
     const QString sql = QStringLiteral("INSERT OR REPLACE INTO router_cache_work_order_services(%1) SELECT %2 FROM legacy_router.work_order_services AS source_service WHERE %3 IN (SELECT number FROM router_cache_work_orders)")
                             .arg(insertCols.join(','), selectExprs.join(','), orderExpr);
     if (q.exec(sql)) return true;
@@ -338,6 +339,17 @@ bool routerCacheContentReady(QSqlDatabase database, QString* errorText)
     return true;
 }
 
+static QString serviceIdentityPredicate(QSqlDatabase db,const QString& schema)
+{
+    QString match=QStringLiteral("a.id=c.id AND a.order_uid=c.order_uid AND a.order_number=c.order_number");
+    if(tableColumnsForDb(db,"router_cache_work_order_services").contains("service_uid")) {
+        match+=tableColumnsForDb(db,"work_order_services",schema).contains("service_uid")
+            ? QStringLiteral(" AND (COALESCE(c.service_uid,'')='' OR a.service_uid=c.service_uid)")
+            : QStringLiteral(" AND COALESCE(c.service_uid,'')=''");
+    }
+    return match;
+}
+
 static bool backfillRouterCacheBody_local(QSqlDatabase database,
                                            QString* errorText)
 {
@@ -353,7 +365,7 @@ static bool backfillRouterCacheBody_local(QSqlDatabase database,
         const QStringList missingSources{
             QStringLiteral("SELECT 1 FROM router_cache_work_orders c WHERE NOT EXISTS(SELECT 1 FROM work_orders a WHERE a.order_uid=c.order_uid AND a.number=c.number AND a.order_year=c.order_year AND a.order_number=c.order_number) LIMIT 1"),
             QStringLiteral("SELECT 1 FROM router_cache_work_order_parts c WHERE NOT EXISTS(SELECT 1 FROM work_order_parts a WHERE a.part_uid=c.part_uid AND a.order_uid=c.order_uid AND a.order_number=c.order_number) LIMIT 1"),
-            QStringLiteral("SELECT 1 FROM router_cache_work_order_services c WHERE NOT EXISTS(SELECT 1 FROM work_order_services a WHERE a.id=c.id AND a.order_uid=c.order_uid AND a.order_number=c.order_number) LIMIT 1"),
+            QStringLiteral("SELECT 1 FROM router_cache_work_order_services c WHERE NOT EXISTS(SELECT 1 FROM work_order_services a WHERE %1) LIMIT 1").arg(serviceIdentityPredicate(database,"main")),
             QStringLiteral("SELECT 1 FROM router_cache_outsource_repairs c WHERE NOT EXISTS(SELECT 1 FROM outsource_repairs a WHERE a.id=c.id AND a.order_uid=c.order_uid AND a.order_number=c.order_number) LIMIT 1"),
             QStringLiteral("SELECT 1 FROM router_cache_service_masters c WHERE NOT EXISTS(SELECT 1 FROM service_masters a WHERE a.service_id=c.service_id AND a.master_id=c.master_id) LIMIT 1")};
         for (const auto& sql : missingSources) {
@@ -437,8 +449,10 @@ bool validateRouterCacheReconstructionSources(QSqlDatabase database, bool archiv
         {"service_masters","a.service_id=c.service_id AND a.master_id=c.master_id"}};
     for(const auto& family:families) {
         QStringList sources;
-        for(const auto& schema:schemas) if(tableExistsInDb(database,family.first,schema))
-            sources<<"EXISTS(SELECT 1 FROM "+sqlQuoteIdent(schema)+"."+sqlQuoteIdent(family.first)+" a WHERE "+family.second+")";
+        for(const auto& schema:schemas) if(tableExistsInDb(database,family.first,schema)) {
+            const auto match=family.first=="work_order_services"?serviceIdentityPredicate(database,schema):family.second;
+            sources<<"EXISTS(SELECT 1 FROM "+sqlQuoteIdent(schema)+"."+sqlQuoteIdent(family.first)+" a WHERE "+match+")";
+        }
         if(sources.isEmpty())sources<<"0";
         if(!rejectRows("SELECT 1 FROM "+sqlQuoteIdent("router_cache_"+family.first)+" c WHERE NOT ("+sources.join(" OR ")+") LIMIT 1","Router cache contains identities absent from authoritative sources"))return false;
     }
@@ -510,11 +524,13 @@ static bool writeActiveWorkspaceRouterCache(QSqlDatabase database,
             return false;
         }
     
+        const QString serviceUid=tableColumnsForDb(database,QStringLiteral("work_order_services")).contains(QStringLiteral("service_uid"))
+            ? QStringLiteral("COALESCE(service_uid,'')") : QStringLiteral("''");
         if (!q.exec(QStringLiteral(
-                "INSERT OR REPLACE INTO router_cache_work_order_services(id, order_uid, order_number, title, qty, price, amount, note, paid, parent_id) "
+                "INSERT OR REPLACE INTO router_cache_work_order_services(id, order_uid, order_number, title, qty, price, amount, note, paid, parent_id, service_uid) "
                 "SELECT id, COALESCE(NULLIF(TRIM(COALESCE(order_uid,'')),''), (SELECT NULLIF(TRIM(COALESCE(o.order_uid,'')), '') FROM router_cache_work_orders o WHERE o.number=work_order_services.order_number), CASE WHEN COALESCE(order_number,0)>0 THEN 'rewrite_' || order_number ELSE '' END), "
-                "COALESCE(order_number,0), COALESCE(title,''), COALESCE(qty,1), COALESCE(price,0), COALESCE(amount,0), COALESCE(note,''), COALESCE(paid,1), COALESCE(parent_id,0) "
-                "FROM work_order_services WHERE COALESCE(order_number,0) IN (SELECT number FROM router_cache_work_orders)"))) {
+                "COALESCE(order_number,0), COALESCE(title,''), COALESCE(qty,1), COALESCE(price,0), COALESCE(amount,0), COALESCE(note,''), COALESCE(paid,1), COALESCE(parent_id,0), %1 "
+                "FROM work_order_services WHERE COALESCE(order_number,0) IN (SELECT number FROM router_cache_work_orders)").arg(serviceUid))) {
             if (errorText) *errorText = QStringLiteral("Active services router-cache seed failed: %1").arg(q.lastError().text());
             return false;
         }

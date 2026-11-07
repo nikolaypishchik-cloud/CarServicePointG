@@ -3234,6 +3234,7 @@ void ReportsOrdersTests::archiveChildrenHaveIdentityAtInsert()
 void ReportsOrdersTests::archivePartUidTransfer_data()
 {
     QTest::addColumn<QString>("phase");
+    QTest::newRow("cached-upgrade-archive-service-uid-metadata") << QString("cached-upgrade-archive-service-uid-metadata");
     for(const auto& phase:QStringList{"physical-cache","workspace-cache","hydrate","hydrate-empty","hydrate-duplicate","hydrate-owner","hydrate-ignore","hydrate-root","hydrate-service-ignore","hydrate-header-ignore","hydrate-outer","hydrate-ignore-outer","hydrate-global-duplicate","hydrate-service-parent","direct-import","direct-empty","direct-parent","direct-late","direct-target-uid","direct-target-year","direct-target-number","direct-metadata","cached-workspace-metadata","cached-physical-metadata","cached-upgrade-metadata","cached-upgrade-unavailable-metadata","cached-upgrade-rollback-metadata","cached-upgrade-archive-metadata","cached-upgrade-mixed-metadata","cached-upgrade-archive-missing-metadata","cached-upgrade-archive-owner-metadata","cached-upgrade-archive-failure-metadata","cached-upgrade-outer-metadata"})QTest::newRow(qPrintable(phase))<<phase;
 }
 
@@ -3251,7 +3252,7 @@ void ReportsOrdersTests::archivePartUidTransfer()
         QVERIFY(q.exec("INSERT INTO work_orders"+header));
         QVERIFY(q.exec("INSERT INTO work_order_parts(id,part_uid,order_number,order_uid,name) VALUES(10,'source-part-a',100,'transfer-order','First archived'),(11,'source-part-b',100,'transfer-order','Second archived')"));
         if(phase.startsWith("direct-") || phase.startsWith("cached-")) {
-            QVERIFY(q.exec("INSERT INTO work_order_services(id,order_uid,order_number,title) VALUES(8,'transfer-order',100,'Archived work')"));
+            QVERIFY(q.exec("INSERT INTO work_order_services(id,service_uid,order_uid,order_number,title) VALUES(8,'source-service-uid','transfer-order',100,'Archived work')"));
             QVERIFY(q.exec("UPDATE work_order_parts SET service_id=8 WHERE order_number=100"));
             if(phase.endsWith("metadata")) {
                 QVERIFY(q.exec(R"SQL(UPDATE work_order_parts SET installed_at='2025-01-04',manual_markup_override=1,markup_source='manual',price_input_mode='client',pricing_updated_at='2025-01-03T12:34:56',pricing_calc_version=7,status='installed',installed=1,installed_by='installer',request_uid='request-'||id,requested_at='2025-01-02T10:00:00',requested_by='Requester',requested_by_uid='requester-uid',ordered_by='Buyer',ordered_by_uid='buyer-uid',order_comment='Preserve comment',node_group='engine',component='filter',metadata_json='{"note":"preserve"}',created_at='2025-01-02T09:00:00',updated_at='2025-01-04T11:00:00',qty=0.5,price=17.25,amount=8.63,purchase_price=13.11,purchase_amount=6.56,markup_percent=31.58 WHERE order_number=100)SQL"));
@@ -3344,7 +3345,7 @@ void ReportsOrdersTests::archivePartUidTransfer()
                             QVERIFY(q.exec("DELETE FROM work_order_services WHERE order_number=100"));
                             QVERIFY(q.exec("DELETE FROM work_orders WHERE number=100"));
                         }
-                        if(phase=="cached-upgrade-archive-missing-metadata" || phase=="cached-upgrade-archive-owner-metadata" || phase=="cached-upgrade-archive-failure-metadata") {
+                        if(phase=="cached-upgrade-archive-missing-metadata" || phase=="cached-upgrade-archive-owner-metadata" || phase=="cached-upgrade-archive-failure-metadata" || phase=="cached-upgrade-archive-service-uid-metadata") {
                             QString expectedFailure;
                             if(phase=="cached-upgrade-archive-failure-metadata") {
                                 QVERIFY(q.exec("CREATE TRIGGER fail_physical_recovery BEFORE INSERT ON router_cache_work_order_parts WHEN NEW.part_uid='source-part-b' BEGIN SELECT RAISE(ABORT,'injected physical rebuild failure'); END"));
@@ -3353,6 +3354,9 @@ void ReportsOrdersTests::archivePartUidTransfer()
                                 QVERIFY(q.exec("ATTACH DATABASE "+sqlQuoteText(archivePath)+" AS fixture_archive"));
                                 if(phase=="cached-upgrade-archive-missing-metadata") {
                                     QVERIFY(q.exec("DELETE FROM fixture_archive.work_order_parts WHERE part_uid='source-part-b'"));
+                                    expectedFailure="Router cache contains identities absent from authoritative sources";
+                                } else if(phase=="cached-upgrade-archive-service-uid-metadata") {
+                                    QVERIFY(q.exec("UPDATE router_cache_work_order_services SET service_uid='different-service-uid' WHERE id=8"));
                                     expectedFailure="Router cache contains identities absent from authoritative sources";
                                 } else {
                                     QVERIFY(q.exec("UPDATE fixture_archive.work_order_parts SET order_uid='foreign-owner' WHERE part_uid='source-part-b'"));
@@ -3392,6 +3396,12 @@ void ReportsOrdersTests::archivePartUidTransfer()
                         QVERIFY2(backfillRouterCacheFromActiveIfNeeded(db,&error),qPrintable(error));
                     }
                     QVERIFY(routerCacheContentReady(db));
+                    if(phase=="cached-upgrade-archive-metadata") {
+                        QVERIFY(q.exec("SELECT service_uid FROM router_work_order_services WHERE order_uid='transfer-order' AND id=8"));
+                        QVERIFY(q.next());QCOMPARE(q.value(0).toString(),QString("source-service-uid"));q.finish();
+                        QVERIFY(q.exec("SELECT part_uid FROM router_work_order_parts WHERE order_uid='transfer-order' AND id=10"));
+                        QVERIFY(q.next());QCOMPARE(q.value(0).toString(),QString("source-part-a"));q.finish();
+                    }
                 }
             } else if(phase=="cached-physical-metadata") {
                 QVERIFY(q.exec("INSERT INTO router_cache_work_orders"+header));

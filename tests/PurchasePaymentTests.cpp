@@ -6471,6 +6471,8 @@ private slots:
             QString error;
             QVERIFY2(Database::prepareRuntime(&error),qPrintable(error));
             QVERIFY2(Database::openPrepared(&error),qPrintable(error));
+            if(!qEnvironmentVariable("CS_PERF_OUTPUT").isEmpty())
+                QVERIFY2(Database::runStartupSchemaCheck(&error),qPrintable(error));
             db=Database::db();
             Database::setSetting("settings.booking.sync.enabled",false);
             Database::setSetting("settings.cloudsync.enabled",false);

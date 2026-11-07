@@ -14,6 +14,7 @@
 #include "core/cache/ReportsSnapshotCache.h"
 #include "core/cache/OrderSnapshotCache.h"
 #include "core/services/ReportsPdfRenderer.h"
+#include "core/services/ReportsPdfSupport.h"
 #include "ui/tabs/crm/CrmPage.h"
 #include <QSqlError>
 #include <QSqlQuery>
@@ -107,6 +108,29 @@ inline int runAudit(QSqlDatabase db, const QString& output) {
     rec.run("order.print-data","service",[&]{auto p=OrderDialogPrintQueryService::loadPartRows(uid);auto s=OrderDialogPrintQueryService::loadServiceRows(uid);return checked(p.size()+s.size());},reset);
     const QDate pdfFrom(2026,10,1),pdfTo(2026,10,31);
     rec.run("pdf.period-october-2026","service",[&]{ReportsPdfRenderer::ExportResult r;const bool ok=ReportsPdfRenderer::renderPeriodPdf(pdfFrom,pdfTo,&r);return Result{ok&&r.success,r.recordCount,ok?QString():r.errorText};},reset);
+    if(qEnvironmentVariableIsSet("CS_PERF_PERIOD_EVIDENCE")) {
+        double parts=0,works=0,markup=0,outsource=0,salary=0,expenses=0;
+        QString readError;
+        const auto lines=ReportsPdfSupport::collectPeriodPdfRows(pdfFrom.toString(Qt::ISODate),pdfTo.toString(Qt::ISODate),
+            parts,works,markup,outsource,salary,expenses,&readError);
+        if(!readError.isEmpty())return 1;
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        for(const auto& line:lines) {
+            QByteArray bytes;
+            QDataStream stream(&bytes,QIODevice::WriteOnly);
+            stream.setVersion(QDataStream::Qt_6_0);
+            stream<<line.date<<line.orderNumber<<line.car<<line.plate<<line.workTitle<<line.partName<<line.qty
+                <<qRound64(100*line.partsPrice)<<qRound64(100*line.added)<<qRound64(100*line.worksPrice)<<qRound64(100*line.total);
+            if(stream.status()!=QDataStream::Ok)return 1;
+            hash.addData(bytes);
+        }
+        const QJsonObject cents{{"parts",qRound64(parts*100)},{"works",qRound64(works*100)},{"markup",qRound64(markup*100)},
+            {"outsource",qRound64(outsource*100)},{"salary",qRound64(salary*100)},{"expenses",qRound64(expenses*100)}};
+        const auto content=QJsonDocument(QJsonObject{{"rows",lines.size()},{"sha256",QString::fromLatin1(hash.result().toHex())},
+            {"totals_cents",cents}}).toJson();
+        QSaveFile file(output+"/period-fingerprint-"+label+".json");
+        if(!file.open(QIODevice::WriteOnly)||file.write(content)!=content.size()||!file.commit())return 1;
+    }
     const auto backupPath=output+"/snapshot-"+label+".db";
     rec.run("backup.workspace-vacuum","service",[&]{QSqlQuery q(db);QString path=backupPath;path.replace("'","''");bool ok=q.exec("VACUUM main INTO '"+path+"'");return Result{ok,1,ok?QString():q.lastError().text()};},[&]{QFile::remove(backupPath);});
 

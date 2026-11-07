@@ -344,7 +344,8 @@ bool ensureRouterCacheSchema(QSqlDatabase database)
             "  amount REAL NOT NULL DEFAULT 0,"
             "  note TEXT NOT NULL DEFAULT '',"
             "  paid INTEGER NOT NULL DEFAULT 1,"
-            "  parent_id INTEGER NOT NULL DEFAULT 0"
+            "  parent_id INTEGER NOT NULL DEFAULT 0,"
+            "  service_uid TEXT NOT NULL DEFAULT ''"
             ");")) return false;
     if (!q.exec(
             "CREATE TABLE IF NOT EXISTS router_cache_service_masters ("
@@ -455,6 +456,7 @@ bool ensureRouterCacheSchema(QSqlDatabase database)
         if (!ensureChildColumn(QStringLiteral("router_cache_work_order_services"), QStringLiteral("note"), QStringLiteral("note TEXT NOT NULL DEFAULT ''"))) return false;
         if (!ensureChildColumn(QStringLiteral("router_cache_work_order_services"), QStringLiteral("paid"), QStringLiteral("paid INTEGER NOT NULL DEFAULT 1"))) return false;
         if (!ensureChildColumn(QStringLiteral("router_cache_work_order_services"), QStringLiteral("parent_id"), QStringLiteral("parent_id INTEGER NOT NULL DEFAULT 0"))) return false;
+        if (!ensureChildColumn(QStringLiteral("router_cache_work_order_services"), QStringLiteral("service_uid"), QStringLiteral("service_uid TEXT NOT NULL DEFAULT ''"))) return false;
         if (!ensureChildColumn(QStringLiteral("router_cache_work_order_parts"), QStringLiteral("order_uid"), QStringLiteral("order_uid TEXT NOT NULL DEFAULT ''"))) return false;
         if (!ensureChildColumn(QStringLiteral("router_cache_work_order_parts"), QStringLiteral("part_uid"), QStringLiteral("part_uid TEXT NOT NULL DEFAULT ''"))) return false;
         if (!ensureChildColumn(QStringLiteral("router_cache_work_order_parts"), QStringLiteral("status"), QStringLiteral("status TEXT NOT NULL DEFAULT ''"))) return false;
@@ -665,13 +667,15 @@ bool rebuildRouterViews(QSqlDatabase database)
         return false;
     }
     q.exec("DROP VIEW IF EXISTS router_work_order_services");
-    if (!q.exec(
+    const QString serviceUid = tableColumnsForDb(database,QStringLiteral("work_order_services")).contains(QStringLiteral("service_uid"))
+        ? QStringLiteral("s.service_uid") : QStringLiteral("''");
+    if (!q.exec(QStringLiteral(
             "CREATE VIEW router_work_order_services AS "
-            "SELECT s.id, s.order_uid, s.order_number, s.title, s.qty, s.price, s.amount, COALESCE(s.note,''), COALESCE(s.paid,1), COALESCE(s.parent_id,0) FROM work_order_services s "
+            "SELECT s.id, s.order_uid, s.order_number, s.title, s.qty, s.price, s.amount, COALESCE(s.note,''), COALESCE(s.paid,1), COALESCE(s.parent_id,0), %1 AS service_uid FROM work_order_services s "
             "UNION ALL "
-            "SELECT c.id, c.order_uid, c.order_number, c.title, c.qty, c.price, c.amount, c.note, c.paid, c.parent_id "
+            "SELECT c.id, c.order_uid, c.order_number, c.title, c.qty, c.price, c.amount, c.note, c.paid, c.parent_id, c.service_uid "
             "FROM router_cache_work_order_services c "
-            "WHERE NOT EXISTS (SELECT 1 FROM work_orders o WHERE o.number=c.order_number)")) {
+            "WHERE NOT EXISTS (SELECT 1 FROM work_orders o WHERE o.number=c.order_number)").arg(serviceUid))) {
         qWarning() << "router_work_order_services create failed:" << q.lastError().text();
         return false;
     }
@@ -689,14 +693,16 @@ bool rebuildRouterViews(QSqlDatabase database)
         return false;
     }
     q.exec("DROP VIEW IF EXISTS router_work_order_parts");
-    if (!q.exec(
+    const QString partUid = tableColumnsForDb(database,QStringLiteral("work_order_parts")).contains(QStringLiteral("part_uid"))
+        ? QStringLiteral("p.part_uid") : QStringLiteral("''");
+    if (!q.exec(QStringLiteral(
             "CREATE VIEW router_work_order_parts AS "
-            "SELECT p.id, p.order_uid, p.order_number, p.ordered_at, p.delivery_date, p.installed_at, p.store, p.part_number, p.name, p.manufacturer, p.note, p.qty, p.price, p.amount, p.service_id, p.ordered_by_admin, p.paid, p.purchase_price, p.purchase_amount, p.markup_percent, p.manual_markup_override, p.markup_source, p.pricing_updated_at, p.pricing_calc_version "
+            "SELECT p.id, p.order_uid, p.order_number, p.ordered_at, p.delivery_date, p.installed_at, p.store, p.part_number, p.name, p.manufacturer, p.note, p.qty, p.price, p.amount, p.service_id, p.ordered_by_admin, p.paid, p.purchase_price, p.purchase_amount, p.markup_percent, p.manual_markup_override, p.markup_source, p.pricing_updated_at, p.pricing_calc_version, %1 AS part_uid "
             "FROM work_order_parts p "
             "UNION ALL "
-            "SELECT c.id, c.order_uid, c.order_number, c.ordered_at, c.delivery_date, c.installed_at, c.store, c.part_number, c.name, c.manufacturer, c.note, c.qty, c.price, c.amount, c.service_id, c.ordered_by_admin, c.paid, c.purchase_price, c.purchase_amount, c.markup_percent, c.manual_markup_override, c.markup_source, c.pricing_updated_at, c.pricing_calc_version "
+            "SELECT c.id, c.order_uid, c.order_number, c.ordered_at, c.delivery_date, c.installed_at, c.store, c.part_number, c.name, c.manufacturer, c.note, c.qty, c.price, c.amount, c.service_id, c.ordered_by_admin, c.paid, c.purchase_price, c.purchase_amount, c.markup_percent, c.manual_markup_override, c.markup_source, c.pricing_updated_at, c.pricing_calc_version, c.part_uid "
             "FROM router_cache_work_order_parts c "
-            "WHERE NOT EXISTS (SELECT 1 FROM work_orders o WHERE o.number=c.order_number)")) {
+            "WHERE NOT EXISTS (SELECT 1 FROM work_orders o WHERE o.number=c.order_number)").arg(partUid))) {
         qWarning() << "router_work_order_parts create failed:" << q.lastError().text();
         return false;
     }
