@@ -1,5 +1,6 @@
 #include "ui/common/dialogs/HistoricalVersionsDialog.h"
 #include "core/services/LegacyMutationLogSupport.h"
+#include "core/services/legacyimport/LegacyImportPolicySupport.h"
 #include "infrastructure/db/sqlite/MigrationOrderKeys.h"
 #include <QtTest/QtTest>
 #include <QDataStream>
@@ -1237,6 +1238,16 @@ void ReportsOrdersTests::migrationOperationExclusion()
     QVERIFY(setIsolatedTestRoot(root.path())); QStandardPaths::setTestModeEnabled(true);
     QVERIFY(AppRuntime::dataDir().startsWith(root.path()));
     using Operation=DataProtectionCoordinator::Operation;
+    {
+        QString detail;
+        const auto runtime = AppRuntime::sessionDir();
+        QVERIFY(!LegacyImportPolicySupport::validateSourceSelection(QDir(runtime).filePath("nested/service_center.db"),&detail));
+        QVERIFY(!LegacyImportPolicySupport::validateSourceSelection(QDir(AppRuntime::securityDir()).filePath("nested/source.db"),&detail));
+        QVERIFY(LegacyImportPolicySupport::validateSourceSelection(runtime+"-backup/service_center.db",&detail));
+#ifdef Q_OS_WIN
+        QVERIFY(!LegacyImportPolicySupport::validateSourceSelection(QDir::toNativeSeparators(runtime.toUpper()+"/source.db"),&detail));
+#endif
+    }
     for(const auto operation:{Operation::AutomaticBackup,Operation::ManualBackup,Operation::Restore,Operation::DbMigration}) {
         QString error;
         DataProtectionCoordinator::Scope held;

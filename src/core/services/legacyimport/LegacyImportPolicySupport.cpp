@@ -1,10 +1,12 @@
 #include "core/services/legacyimport/LegacyImportPolicySupport.h"
 
 #include "runtime/AppRuntime.h"
+#include "core/io/SafeFileOps.h"
 #include "core/services/legacyimport/LegacyImportTypes.h"
 
 #include <QDir>
 #include <QFileInfo>
+#include <algorithm>
 
 namespace {
 
@@ -14,12 +16,10 @@ QString normalizedAbsPath(const QString& path)
     return QDir::cleanPath(QFileInfo(path).absoluteFilePath());
 }
 
-bool isPathInside(const QString& path, const QString& root)
+QString resolvedPath(const QString& path)
 {
-    const QString p = normalizedAbsPath(path);
-    const QString r = normalizedAbsPath(root);
-    if (p.isEmpty() || r.isEmpty()) return false;
-    return p == r || p.startsWith(r + QDir::separator());
+    const auto canonical = QFileInfo(path).canonicalFilePath();
+    return canonical.isEmpty() ? normalizedAbsPath(path) : canonical;
 }
 
 }
@@ -37,7 +37,8 @@ bool LegacyImportPolicySupport::validateSourceSelection(const QString& sourcePat
         AppRuntime::sessionDir()
     };
     for (const QString& root : forbiddenRoots) {
-        if (isPathInside(normalized, root)) {
+        if (SafeFileOps::isInsideRoot(normalized, root)
+                || SafeFileOps::isInsideRoot(resolvedPath(normalized), resolvedPath(root))) {
             if (errorText) {
                 *errorText = QStringLiteral("Заборонено імпортувати БД напряму з внутрішнього runtime/sealed каталогу застосунку. Потрібен зовнішній legacy backup або архів.");
             }
@@ -64,7 +65,10 @@ bool LegacyImportPolicySupport::validateExecutePolicy(const LegacyImportBundle& 
         normalizedAbsPath(AppRuntime::registryDbFilePath()),
         normalizedAbsPath(AppRuntime::pendingLegacyImportFilePath())
     };
-    if (forbiddenExact.contains(primaryDb)) {
+    const auto primaryTarget = resolvedPath(primaryDb);
+    if (std::any_of(forbiddenExact.cbegin(), forbiddenExact.cend(), [&](const QString& path) {
+            return SafeFileOps::isSamePath(primaryTarget, resolvedPath(path));
+        })) {
         if (errorText) {
             *errorText = QStringLiteral("Заборонено запускати execute mode на активній або службовій БД застосунку. Імпорт повинен йти лише через зовнішній legacy backup і staging-пайплайн.");
         }
