@@ -554,4 +554,5 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `docs/reliability/DBY_T181_HISTORICAL_VERSIONS.md` | active | Records migration and read-only history checks for separate source versions. |
 | `docs/reliability/DBY_T184_PERIOD_PDF.md` | active | Records source compatibility and failure tests for UID-scoped period PDF reads. |
 | `docs/reliability/DBY_T185_STATISTICS_READ_ERRORS.md` | active | Documents error propagation and repeat reads in the existing statistics and expenses reports. |
+| `docs/reliability/DBY_T187_PARTS_PAYROLL_PDF.md` | active | Documents checked parts and payroll PDF reads and identifies the older expense helper outside the payroll renderer. |
 | `tests/HistoricalRecordStoreTests.cpp` | test-only | Synthetic sources verify archive provenance, fields, rollback and repeated import. |
