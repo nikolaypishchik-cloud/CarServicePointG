@@ -1300,17 +1300,18 @@ void ReportsOrdersTests::migrationReservesArchivedOrderKeys()
 void ReportsOrdersTests::migrationServiceRoundTrip_data()
 {
     QTest::addColumn<QString>("targetState");
-    for(const auto& state:QStringList{"fresh", "initialized-closed", "initialized-live", "active-transaction", "restore-after-failure", "populated", "populated-key-collision", "populated-child-key-collision", "populated-child-only-collision", "populated-retained-stores", "populated-retained-rollback", "populated-repeat-open", "populated-conflicting-parent"})
+    for(const auto& state:QStringList{"fresh", "initialized-closed", "initialized-live", "active-transaction", "restore-after-failure", "populated", "populated-key-collision", "populated-child-key-collision", "populated-child-only-collision", "populated-archive-routing", "populated-retained-stores", "populated-retained-rollback", "populated-repeat-open", "populated-conflicting-parent"})
         QTest::newRow(qPrintable(state))<<state;
 }
 
 void ReportsOrdersTests::migrationServiceRoundTrip()
 {
     QFETCH(QString,targetState);
+    const bool archiveRouting=targetState=="populated-archive-routing";
     const bool retainedStores=targetState=="populated-retained-stores" || targetState=="populated-retained-rollback";
     QMap<QString,QByteArray> priorSealed;
     const bool childOnlyCollision=targetState=="populated-child-only-collision";
-    const bool childCollision=targetState=="populated-child-key-collision" || targetState=="populated-repeat-open" || childOnlyCollision || retainedStores;
+    const bool childCollision=targetState=="populated-child-key-collision" || targetState=="populated-repeat-open" || childOnlyCollision || retainedStores || archiveRouting;
     const bool keyedSource=targetState=="populated-key-collision" || childCollision;
     const auto childParent=qEnvironmentVariable("CS_TEST_MIGRATION_PARENT");
     QTemporaryDir root(QDir(childParent.isEmpty()?QDir::tempPath():childParent).filePath("service-XXXXXX")); QVERIFY(root.isValid());
@@ -1384,6 +1385,31 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             QVERIFY(setup.exec("INSERT INTO settings(key,value) VALUES('migration.target.sentinel','existing setting')"));
         }
         if(targetState=="initialized-closed") Database::close();
+    }
+    if(archiveRouting) {
+        const auto clearActor=qScopeGuard([]{ActivityAuditService::clearCurrentActor();});
+        {
+        auto active=Database::db();QSqlQuery setup(active);
+        QVERIFY(StaffAccountService::ensureSchema(active,&setupError));
+        QVERIFY(AccessControlService::ensureSchema(active,&setupError));
+        QVERIFY(setup.exec("INSERT INTO staff_accounts(id,display_name,role,active) VALUES('migration-owner','Owner','owner',1)"));
+        ActivityAuditService::setCurrentActor({"migration-owner","Owner","owner","test"});
+        QVERIFY(setup.exec("UPDATE work_orders SET status='closed',closed_at='2023-06-16' WHERE order_uid='existing-target-order'"));
+        {TransactionContext tx(active,"MigrationArchiveBaseline");QVERIFY(tx.begin("test",&setupError));
+         QVERIFY2(Database::finalizeOrderWorkspaceInTransaction(active,existingKey,&setupError),qPrintable(setupError));
+         QVERIFY(tx.commit("test",&setupError));}
+        QVERIFY2(Database::replayPendingOrderRegistryRefresh(&setupError),qPrintable(setupError));
+        QVERIFY2(OrderArchiveShardSqlSupport::archiveSingleActiveOrderToShard(active,existingKey,&setupError),qPrintable(setupError));
+        QVERIFY(setup.exec("SELECT COUNT(*) FROM work_orders"));QVERIFY(setup.next());QCOMPARE(setup.value(0).toInt(),0);setup.finish();
+        QVERIFY(setup.exec("SELECT COUNT(*) FROM work_order_parts"));QVERIFY(setup.next());QCOMPARE(setup.value(0).toInt(),0);setup.finish();
+        }
+        // The order is genuinely archive-only before migration, not a hydrated
+        // active duplicate. Exercise replacement of the primary archive too.
+        const auto previous=archiveShardFilePathForOrder(existingKey);
+        Database::close();
+        QVERIFY(QFile::remove(AppRuntime::archiveDbFilePath()) || !QFileInfo::exists(AppRuntime::archiveDbFilePath()));
+        QVERIFY(QFile::copy(previous,AppRuntime::archiveDbFilePath()));
+        QVERIFY2(EncryptedStorage::encryptPlainFileToSealed(AppRuntime::archiveDbFilePath(),AppRuntime::sealedArchiveDbFilePath(),&setupError),qPrintable(setupError));
     }
     if(retainedStores) {
         Database::close();
@@ -1497,7 +1523,30 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
         QVERIFY2(Database::prepareRuntime(&error),qPrintable(error));
         QVERIFY2(Database::openPrepared(&error),qPrintable(error));
         QVERIFY2(Database::runStartupMigrationCheck(&error),qPrintable(error));
+        if(archiveRouting) {
+            QVERIFY2(Database::runStartupArchiveMaintenance(&error),qPrintable(error));
+            QVERIFY2(Database::runStartupRegistryRefresh(&error),qPrintable(error));
+            for(const auto& uid:QStringList{"existing-target-order","migration-service-order"}) {
+                QVERIFY2(Database::ensureOrderAvailableInActiveByUid(uid,&error),qPrintable(error));
+                QVERIFY(Database::resolveOrderInternalNumberByUid(uid)>0);
+            }
+            QSqlQuery graph(Database::db());
+            QVERIFY(graph.exec("SELECT p.part_uid,s.service_uid,ROUND(p.amount*100),ROUND(s.amount*100) FROM work_order_parts p JOIN work_order_services s ON s.id=p.service_id AND s.order_uid=p.order_uid WHERE p.order_uid='existing-target-order'"));
+            QVERIFY(graph.next());QCOMPARE(graph.value(0).toString(),QString("existing-target-part"));
+            QCOMPARE(graph.value(1).toString(),QString("target-service"));QCOMPARE(graph.value(2).toInt(),3850);QCOMPARE(graph.value(3).toInt(),1250);QVERIFY(!graph.next());graph.finish();
+        }
         Database::close();
+        if(archiveRouting) {
+            // A second ordinary boot, with no migration/recovery invocation.
+            QVERIFY2(Database::prepareRuntime(&error),qPrintable(error));
+            QVERIFY2(Database::openPrepared(&error),qPrintable(error));
+            QVERIFY2(Database::runStartupMigrationCheck(&error),qPrintable(error));
+            QVERIFY2(Database::runStartupArchiveMaintenance(&error),qPrintable(error));
+            QVERIFY2(Database::runStartupRegistryRefresh(&error),qPrintable(error));
+            QVERIFY2(Database::ensureOrderAvailableInActiveByUid("existing-target-order",&error),qPrintable(error));
+            QVERIFY2(Database::ensureOrderAvailableInActiveByUid("migration-service-order",&error),qPrintable(error));
+            Database::close();
+        }
     }
     const QString name="service-roundtrip-result";
     auto db=QSqlDatabase::addDatabase("QSQLITE",name); db.setDatabaseName(AppRuntime::activeDbFilePath());
