@@ -543,3 +543,4 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `SOURCE_SHA256.json` | active | The public source checksum inventory lists migration filenames containing legacy markers. It contains paths and digests only. |
 | `tests/MigrationRepeatJournalTests.cpp` | test-only | Exercises LegacyImportJournal on an isolated duplicate import. |
 | `docs/reliability/DBY_T166_REPEAT.md` | active | Records commands and expected behavior for repeated legacy import. |
+| `tests/MigrationRetainedStoresTests.cpp` | test-only | Exercises preservation of previous encrypted archive, registry and legacy store files in an isolated fixture. |
