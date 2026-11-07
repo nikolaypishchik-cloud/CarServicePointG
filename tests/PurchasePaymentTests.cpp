@@ -8093,6 +8093,14 @@ private slots:
     void paymentHistoryInStatistics() {
         QString error;
         prepareWorkLogFixture();
+        QSqlQuery fixture(db);
+        QVERIFY(fixture.exec("ALTER TABLE work_orders ADD COLUMN order_year INTEGER DEFAULT 2026"));
+        QVERIFY(fixture.exec("UPDATE work_orders SET order_number=72 WHERE number=1"));
+        QVERIFY(fixture.exec("INSERT INTO work_orders(number,order_number,order_year,order_uid,car) VALUES(81,72,2025,'old-order','Older car')"));
+        QVERIFY(fixture.exec("UPDATE work_order_parts SET order_number=81,order_uid='old-order' WHERE id=2"));
+        fixture.prepare("UPDATE work_order_parts SET ordered_at=?");
+        fixture.addBindValue(QDate::currentDate().toString(Qt::ISODate));
+        QVERIFY(fixture.exec());
         QVERIFY2(StaffAccountService::ensureSchema(db,&error),qPrintable(error));
         ActivityAuditService::setCurrentActor({"test-owner", "Test Owner", "owner", "test-session"});
         auto debt=PurchasePaymentService::detail(db,"part",1,"order-a");
@@ -8114,6 +8122,26 @@ private slots:
                 && table->model()->index(0,3).data().toString()==QString::fromUtf8("Оплати")) { activity=table; break; }
         }
         QVERIFY(activity);
+        QCOMPARE(activity->model()->index(0,5).data().toString(),QStringLiteral("72"));
+        QTableView* movement=nullptr;
+        for (auto* table : page.findChildren<QTableView*>())
+            if (table->model() && table->model()->columnCount()==11) movement=table;
+        QVERIFY(movement);
+        QCOMPARE(movement->model()->rowCount(),2);
+        QSet<QString> identities;
+        for (int i=0; i<2; ++i) {
+            QCOMPARE(movement->model()->index(i,0).data().toString(),QStringLiteral("72"));
+            const auto detail=page.property("partRows").toList().at(i).toMap();
+            identities.insert(QString::number(detail.value("orderNumber").toInt())+"/"+detail.value("orderUid").toString());
+        }
+        QCOMPARE(identities,(QSet<QString>{"1/order-a","81/old-order"}));
+        QLineEdit* search=nullptr;
+        for (auto* input : page.findChildren<QLineEdit*>())
+            if (input->placeholderText()==QStringLiteral("Наряд, деталь, дія")) search=input;
+        QVERIFY(search);
+        search->setText("81"); QCOMPARE(movement->model()->rowCount(),0);
+        search->setText("72"); QCOMPARE(movement->model()->rowCount(),2);
+        search->clear();
         QTimer::singleShot(0,[&] {
             auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget()); QVERIFY(dialog);
             const auto close=qScopeGuard([dialog] {dialog->reject();});

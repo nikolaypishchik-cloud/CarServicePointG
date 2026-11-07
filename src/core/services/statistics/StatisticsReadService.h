@@ -11,6 +11,7 @@ struct PartTraceRow
 {
     qint64 id = 0;
     int orderNumber = 0;
+    int visibleOrderNumber = 0;
     QString orderUid;
     QString name;
     QString partNumber;

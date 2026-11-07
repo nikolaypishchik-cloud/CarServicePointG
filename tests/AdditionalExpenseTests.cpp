@@ -311,6 +311,25 @@ private slots:
         QVERIFY2(q.exec("ALTER TABLE broken_invoices RENAME TO work_order_part_attachments"), qPrintable(q.lastError().text()));
         QVERIFY(q.exec("PRAGMA legacy_alter_table=OFF"));
         checkInvoices();
+        QVERIFY(q.exec("CREATE TABLE IF NOT EXISTS order_creation_reservations(request_uid TEXT,order_uid TEXT,internal_number INTEGER,order_year INTEGER,order_number INTEGER,created_at TEXT)"));
+        QVERIFY(q.exec("INSERT INTO order_creation_reservations(request_uid,order_uid,internal_number,order_year,order_number,created_at) "
+                       "VALUES('retired-request','retired-order',81,2025,7,'2025-01-01')"));
+        for (int number : {11,81,97}) {
+            QVERIFY2(ActivityAuditService::recordExternal(db, QStringLiteral("audit-%1").arg(number),
+                 QDateTime(QDate(2026,1,12),QTime(12,0)), {"stats-owner","Synthetic owner","owner","test"},
+                 "parts","review","Synthetic review",number,{}, {}, {}, "{}", &error), qPrintable(error));
+        }
+        auto audit=read();
+        QVERIFY2(audit.error.isEmpty(),qPrintable(audit.error));
+        QCOMPARE(audit.events.size(),3);
+        for (const auto& event : audit.events) {
+            const auto row=event.toMap();
+            QCOMPARE(row.value("visibleOrder").toInt(),row.value("order").toInt()==97 ? 0 : 7);
+        }
+        QVERIFY(q.exec("UPDATE order_creation_reservations SET internal_number=11 WHERE internal_number=81"));
+        audit=read();
+        QVERIFY2(audit.error.isEmpty(),qPrintable(audit.error));
+        for (const auto& event : audit.events) QCOMPARE(event.toMap().value("visibleOrder").toInt(),0);
         // A request captured before revocation must not authorize the later worker.
         QVERIFY(q.exec("UPDATE staff_accounts SET active=0 WHERE id='stats-owner'"));QVERIFY(!read().error.isEmpty());
         QVERIFY(q.exec("UPDATE staff_accounts SET active=1 WHERE id='stats-owner'"));QVERIFY(read().error.isEmpty());

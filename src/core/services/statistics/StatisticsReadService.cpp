@@ -7,6 +7,7 @@
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QSqlRecord>
+#include <QScopeGuard>
 #include <algorithm>
 namespace StatisticsReadService {
 QDate parseBusinessDate(const QString& raw)
@@ -29,6 +30,40 @@ bool databaseObjectExists(QSqlDatabase database, const QString& name)
     });
 }
 
+QHash<int,int> auditVisibleNumbers(QSqlDatabase db, const QList<ActivityAuditEvent>& events, QString* error)
+{
+    QSet<int> referenced;
+    for (const auto& event : events)
+        if (event.orderNumber > 0) referenced.insert(event.orderNumber);
+    if (referenced.isEmpty()) return {};
+
+    QString headers = QStringLiteral("work_orders");
+    if (databaseObjectExists(db, "router_order_locator")) headers = "router_order_locator";
+    else if (databaseObjectExists(db, "router_work_orders")) headers = "router_work_orders";
+    const QString visible = db.record(headers).contains("order_number") ? "COALESCE(NULLIF(order_number,0),number)" : "number";
+    QString source = QStringLiteral("SELECT number,order_uid,%1 AS visible FROM %2 WHERE number IN (SELECT id FROM wanted)").arg(visible,headers);
+    if (databaseObjectExists(db, "order_creation_reservations"))
+        source += " UNION SELECT internal_number,order_uid,order_number FROM order_creation_reservations WHERE internal_number IN (SELECT id FROM wanted)";
+
+    const auto numbers = referenced.values();
+    QHash<int,int> result;
+    for (qsizetype offset = 0; offset < numbers.size(); offset += 400) {
+        const auto batch = numbers.mid(offset,400);
+        const QString values = QStringList(batch.size(), QStringLiteral("(?)")).join(',');
+        QSqlQuery q(db);
+        if (!q.prepare(QStringLiteral("WITH wanted(id) AS (VALUES %1), owners AS (%2) "
+                                      "SELECT number,MIN(visible) FROM owners GROUP BY number HAVING COUNT(*)=1").arg(values, source))) {
+            *error = q.lastError().text();
+            return {};
+        }
+        for (int number : batch) q.addBindValue(number);
+        if (!q.exec()) { *error = q.lastError().text(); return {}; }
+        while (q.next()) result.insert(q.value(0).toInt(), q.value(1).toInt());
+        if (q.lastError().isValid()) { *error = q.lastError().text(); return {}; }
+    }
+    return result;
+}
+
 QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const QDate& to, const QString& search, const std::shared_ptr<std::atomic_bool>& cancel, QString* error)
 {
     QVector<PartTraceRow> rows;
@@ -41,14 +76,14 @@ QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const 
     QSqlQuery query(database);
     QVector<int> localRows;
     const QString sql = QStringLiteral(
-        "WITH headers AS MATERIALIZED (SELECT number,order_uid,car,client,master_name_closed,master_id FROM %2), "
+        "WITH headers AS MATERIALIZED (SELECT number,order_uid,%5 AS visible_number,car,client,master_name_closed,master_id FROM %2), "
         "owner_keys AS (SELECT 'u:'||order_uid AS lookup,number,order_uid FROM headers WHERE COALESCE(order_uid,'')<>'' "
         "UNION ALL SELECT 'n:'||number,number,order_uid FROM headers), "
         "owners AS (SELECT lookup,MIN(number) AS number,MIN(order_uid) AS order_uid FROM owner_keys GROUP BY lookup HAVING COUNT(*)=1) "
         "SELECT p.id, COALESCE(p.order_number,0), COALESCE(p.order_uid,''), COALESCE(p.name,''), COALESCE(p.part_number,''), "
         "COALESCE(p.ordered_at,''), COALESCE(p.delivery_date,''), COALESCE(p.installed_at,''), COALESCE(p.store,''), "
         "COALESCE(o.car,''), COALESCE(o.client,''), "
-        "COALESCE(NULLIF(TRIM(o.master_name_closed),''), NULLIF(TRIM(m.name),''), ''), o.number, o.order_uid, local.id "
+        "COALESCE(NULLIF(TRIM(o.master_name_closed),''), NULLIF(TRIM(m.name),''), ''), o.number, o.order_uid, local.id, o.visible_number "
         "FROM %1 p LEFT JOIN owners owner ON owner.lookup=CASE WHEN COALESCE(p.order_uid,'')<>'' THEN 'u:'||p.order_uid ELSE 'n:'||p.order_number END "
         "LEFT JOIN headers o ON o.number=owner.number AND o.order_uid IS owner.order_uid "
         "LEFT JOIN work_order_parts local ON local.id=p.id AND local.order_number=p.order_number "
@@ -58,7 +93,8 @@ QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const 
         "ORDER BY date(CASE WHEN substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),3,1)='.' AND substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),7,2) END||'-'||substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),4,2)||'-'||substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),1,2) ELSE COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,'')) END) DESC, p.id DESC")
         .arg(partsSource, ordersSource,
              database.record("work_order_parts").contains("part_uid") ? "COALESCE(local.part_uid,'')" : "''",
-             database.record(partsSource).contains("part_uid") ? "COALESCE(p.part_uid,'')" : "''");
+             database.record(partsSource).contains("part_uid") ? "COALESCE(p.part_uid,'')" : "''",
+             database.record(ordersSource).contains("order_number") ? "COALESCE(NULLIF(order_number,0),number)" : "number");
     if (!query.exec(sql)) {*error=query.lastError().text();return {};}
 
     const QDate today = QDate::currentDate();
@@ -88,7 +124,8 @@ QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const 
         }
         row.orderNumber = query.value(12).toInt();
         row.orderUid = query.value(13).toString();
-        const QString probe = QString::number(row.orderNumber) + QLatin1Char(' ') + row.name + QLatin1Char(' ')
+        row.visibleOrderNumber = query.value(15).toInt();
+        const QString probe = QString::number(row.visibleOrderNumber) + QLatin1Char(' ') + row.name + QLatin1Char(' ')
             + row.partNumber + QLatin1Char(' ') + row.car + QLatin1Char(' ') + row.client;
         if (!search.trimmed().isEmpty() && !probe.contains(search, Qt::CaseInsensitive)) continue;
 
@@ -136,12 +173,18 @@ Snapshot run(const Request& r,const std::shared_ptr<std::atomic_bool>& cancel)
     if(!r.allowed){result.error=QString::fromUtf8("Немає дозволу на перегляд статистики.");return result;}
     QString error;
     ScopedSqliteConnection connection(r.path,QStringLiteral("statistics_snapshot"),&error,true);
-    const auto db=connection.db();
+    auto db=connection.db();
     if(!db.isOpen() || db.databaseName()!=r.path) {
         result.error=error.isEmpty()?QString::fromUtf8("Профіль статистики змінився або недоступний."):error;return result;
     }
+    if (!db.transaction()) { result.error=db.lastError().text(); return result; }
+    auto rollback=qScopeGuard([&]{db.rollback();});
     if(!r.performance && !AccessControlService::currentUserHasPermission(db,QStringLiteral("nav.statistics"))) {result.error=QString::fromUtf8("Немає дозволу на перегляд статистики.");return result;}
-    return load(db,r.from,r.to,r.performance,AccessControlService::currentOrderScope(db),AccessControlService::currentMasterId(db),cancel);
+    result=load(db,r.from,r.to,r.performance,AccessControlService::currentOrderScope(db),AccessControlService::currentMasterId(db),cancel);
+    if (!result.error.isEmpty()) return result;
+    if (!db.commit()) { result={}; result.error=db.lastError().text(); return result; }
+    rollback.dismiss();
+    return result;
 }
 Snapshot load(QSqlDatabase db, const QDate& fromDate, const QDate& toDate,
               bool performance, const AccessControlService::OrderScope& scope,
@@ -216,6 +259,7 @@ Snapshot load(QSqlDatabase db, const QDate& fromDate, const QDate& toDate,
         filter.from=fromDate;filter.to=toDate;filter.limit=5000;
         filter.includeSystem=false;filter.includeLegacy=false;
         const auto events=ActivityAuditService::readEvents(db,filter,&result.error);
+        const auto visibleNumbers = auditVisibleNumbers(db, events, &result.error);
     QVariantList serialised;
     serialised.reserve(events.size());
     for (const ActivityAuditEvent& event : events) {
@@ -230,6 +274,8 @@ Snapshot load(QSqlDatabase db, const QDate& fromDate, const QDate& toDate,
         map.insert(QStringLiteral("action"), event.action);
         map.insert(QStringLiteral("title"), event.title);
         map.insert(QStringLiteral("order"), event.orderNumber);
+        const int visibleOrder = visibleNumbers.value(event.orderNumber);
+        if (visibleOrder > 0) map.insert(QStringLiteral("visibleOrder"), visibleOrder);
         map.insert(QStringLiteral("entity_type"), event.entityType);
         map.insert(QStringLiteral("entity_id"), event.entityId);
         map.insert(QStringLiteral("subject"), event.subject);

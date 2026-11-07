@@ -393,8 +393,9 @@ public:
         add(QString::fromUtf8("Працівник:"), event.value(QStringLiteral("actor")).toString());
         add(QString::fromUtf8("Роль:"), roleText(event.value(QStringLiteral("role")).toString()));
         add(QString::fromUtf8("Розділ:"), categoryText(event.value(QStringLiteral("category")).toString()));
-        add(QString::fromUtf8("Наряд:"), event.value(QStringLiteral("order")).toInt() > 0
-            ? QStringLiteral("№%1").arg(event.value(QStringLiteral("order")).toInt()) : QString::fromUtf8("Не прив'язано"));
+        const int visibleOrder = event.value(QStringLiteral("visibleOrder")).toInt();
+        add(QString::fromUtf8("Наряд:"), visibleOrder > 0 ? QStringLiteral("№%1").arg(visibleOrder)
+            : event.value(QStringLiteral("order")).toInt() > 0 ? QStringLiteral("Номер недоступний") : QStringLiteral("Не прив’язано"));
         const QString entity = entityText(event.value(QStringLiteral("entity_type")).toString());
         const QString subject = event.value(QStringLiteral("subject")).toString().trimmed();
         if (!subject.isEmpty() && !event.value(QStringLiteral("legacy")).toBool()) {
@@ -1188,7 +1189,7 @@ void StatsPage::applyFilters()
         if (!category.isEmpty() && map.value(QStringLiteral("category")).toString() != category) continue;
         const QString probe = map.value(QStringLiteral("title")).toString() + QLatin1Char(' ')
             + map.value(QStringLiteral("subject")).toString() + QLatin1Char(' ')
-            + QString::number(map.value(QStringLiteral("order")).toInt());
+            + map.value(QStringLiteral("visibleOrder")).toString();
         if (!search.isEmpty() && !probe.contains(search, Qt::CaseInsensitive)) continue;
         events.append(map);
     }
@@ -1227,7 +1228,7 @@ void StatsPage::populateTables()
         const QDateTime when = map.value(QStringLiteral("at")).toDateTime();
         activity.rows.append({dateTimeText(when), actor, roleText(map.value(QStringLiteral("role")).toString()), categoryText(category),
                               eventTitleText(map),
-                              map.value(QStringLiteral("order")).toInt() > 0 ? QString::number(map.value(QStringLiteral("order")).toInt()) : QString(),
+                              map.value(QStringLiteral("visibleOrder")).toInt() > 0 ? map.value(QStringLiteral("visibleOrder")).toString() : QString(),
                               map.value(QStringLiteral("subject")).toString()});
         if (dashboard.rows.size() < 18) dashboard.rows.append(activity.rows.constLast());
 
@@ -1277,7 +1278,7 @@ void StatsPage::populateTables()
 
     QVector<PartTraceRow> parts;
     for(const auto& row:m_loadedParts) {
-        const QString probe=QString::number(row.orderNumber)+' '+row.name+' '+row.partNumber+' '+row.car+' '+row.client;
+        const QString probe=QString::number(row.visibleOrderNumber)+' '+row.name+' '+row.partNumber+' '+row.car+' '+row.client;
         if(m_search->text().trimmed().isEmpty() || probe.contains(m_search->text().trimmed(),Qt::CaseInsensitive))parts.append(row);
     }
     TabularReadModel partsModel;
@@ -1295,13 +1296,14 @@ void StatsPage::populateTables()
         if (!row.car.isEmpty()) subject.append(row.car);
         if (!row.client.isEmpty()) subject.append(row.client);
         const QString part = row.partNumber.isEmpty() ? row.name : QStringLiteral("%1 | %2").arg(row.name, row.partNumber);
-        partsModel.rows.append({row.orderNumber > 0 ? QString::number(row.orderNumber) : QString(), part, subject.join(QStringLiteral(" | ")),
+        partsModel.rows.append({row.visibleOrderNumber > 0 ? QString::number(row.visibleOrderNumber) : QString(), part, subject.join(QStringLiteral(" | ")),
                                 orderDateTimeText(row.orderedAt), row.store, invoiceText(row), dateText(row.deliveredOn), dateText(row.installedOn),
                                 row.deliveredOn.isValid() && !row.installedOn.isValid() ? QString::number(row.storageDays) : QString(),
                                 row.status, row.responsible});
         QVariantMap detail;
         detail.insert(QStringLiteral("id"), row.id);
         detail.insert(QStringLiteral("orderNumber"), row.orderNumber);
+        detail.insert(QStringLiteral("visibleOrderNumber"), row.visibleOrderNumber);
         detail.insert(QStringLiteral("orderUid"), row.orderUid);
         detail.insert(QStringLiteral("part"), part);
         detail.insert(QStringLiteral("orderedAt"), orderDateTimeText(row.orderedAt));
@@ -1346,7 +1348,7 @@ void StatsPage::showTeamMemberDetails(int sourceRow)
         if (event.value(QStringLiteral("actor_id")).toString() != actorId) continue;
 
         memberEvents.append(event);
-        const int orderNumber = event.value(QStringLiteral("order")).toInt();
+        const int orderNumber = event.value(QStringLiteral("visibleOrder")).toInt();
         activity.rows.append({dateTimeText(event.value(QStringLiteral("at")).toDateTime()),
                               event.value(QStringLiteral("actor")).toString(),
                               roleText(event.value(QStringLiteral("role")).toString()),
@@ -1402,7 +1404,7 @@ void StatsPage::openPartOrder(int sourceRow)
     if (!result.launched) {
         QMessageBox::warning(this, QString::fromUtf8("Не вдалося відкрити наряд"),
                              result.errorText.trimmed().isEmpty()
-                                 ? QString::fromUtf8("Наряд №%1 недоступний.").arg(orderNumber)
+                                 ? QString::fromUtf8("Наряд №%1 недоступний.").arg(part.value(QStringLiteral("visibleOrderNumber")).toInt())
                                  : result.errorText);
         return;
     }
