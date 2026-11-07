@@ -560,6 +560,7 @@ OutsourceSnapshot buildOutsourceSnapshot(const QString& dbPath, const QString& d
         db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
         if (!db.open()) {
             snapshot.stats = { QString::fromUtf8("Помилка відкриття БД для аутсорсу") };
+            snapshot.error = db.lastError().text();
         } else {
             const QDate from = DateFormats::parseDate(df);
             const QDate to = DateFormats::parseDate(dt);
@@ -601,7 +602,8 @@ OutsourceSnapshot buildOutsourceSnapshot(const QString& dbPath, const QString& d
 
             if (!executed || q.lastError().isValid()) {
                 snapshot.rows.clear();
-                snapshot.stats = {QStringLiteral("Помилка читання звіту про аутсорс: ") + q.lastError().text()};
+                snapshot.error = q.lastError().text();
+                snapshot.stats = {QStringLiteral("Помилка читання звіту про аутсорс: ") + snapshot.error};
             } else snapshot.stats = {
                 QString::fromUtf8("Відправлено на ремонт:  %1  од.").arg(count),
                 QString::fromUtf8("На суму:  %1  грн.").arg(money0(repair)),
@@ -719,6 +721,48 @@ PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, c
     return snapshot;
 }
 
+static ExpensesSnapshot readExpensePeriod(QSqlDatabase& db, const QString& df, const QString& dt)
+{
+    ExpensesSnapshot snapshot;
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("SELECT elec_prev, elec_curr, elec_tariff, cleaning, cleaning_note, sw_opendatabot, software_note, heating, heating_note, amortization, amortization_note, rent, rent_note, other_amount, other_note FROM expenses WHERE (CASE WHEN substr(period_from,3,1)='.' THEN '20'||substr(period_from,7,2)||'-'||substr(period_from,4,2)||'-'||substr(period_from,1,2) ELSE period_from END)=? AND (CASE WHEN substr(period_to,3,1)='.' THEN '20'||substr(period_to,7,2)||'-'||substr(period_to,4,2)||'-'||substr(period_to,1,2) ELSE period_to END)=? ORDER BY id DESC LIMIT 1"));
+    q.addBindValue(df);
+    q.addBindValue(dt);
+    const double savedTariff = reportsWorkerSetting(db, QStringLiteral("reports.expenses.electricity_tariff"), 0.0, &snapshot.error).toDouble();
+    if (!snapshot.error.isEmpty()) return snapshot;
+    if (!q.exec()) {
+        snapshot.error = q.lastError().text();
+    } else if (q.next()) {
+        snapshot.foundRow = true;
+        snapshot.elecPrev = q.value(0).toDouble();
+        snapshot.elecCurr = q.value(1).toDouble();
+        const double rowTariff = q.value(2).toDouble();
+        snapshot.elecTariff = rowTariff > 0.0 ? rowTariff : savedTariff;
+        snapshot.cleaning = q.value(3).toDouble();
+        snapshot.cleaningNote = q.value(4).toString();
+        snapshot.software = q.value(5).toDouble();
+        snapshot.softwareNote = q.value(6).toString();
+        snapshot.heating = q.value(7).toDouble();
+        snapshot.heatingNote = q.value(8).toString();
+        snapshot.amortization = q.value(9).toDouble();
+        snapshot.amortizationNote = q.value(10).toString();
+        snapshot.rent = q.value(11).toDouble();
+        snapshot.rentNote = q.value(12).toString();
+        snapshot.other = q.value(13).toDouble();
+        snapshot.otherNote = q.value(14).toString();
+    } else if (q.lastError().isValid()) {
+        snapshot.error = q.lastError().text();
+    } else {
+        snapshot.elecTariff = savedTariff;
+        QSqlQuery prev(db);
+        prev.prepare(QStringLiteral("SELECT COALESCE(elec_curr,0) FROM expenses WHERE date((CASE WHEN substr(trim(period_to),3,1)='.' AND substr(trim(period_to),6,1)='.' THEN CASE WHEN substr(trim(period_to),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_to),7,4) ELSE '20'||substr(trim(period_to),7,2) END||'-'||substr(trim(period_to),4,2)||'-'||substr(trim(period_to),1,2) ELSE period_to END)) < date(?) ORDER BY date((CASE WHEN substr(trim(period_to),3,1)='.' AND substr(trim(period_to),6,1)='.' THEN CASE WHEN substr(trim(period_to),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_to),7,4) ELSE '20'||substr(trim(period_to),7,2) END||'-'||substr(trim(period_to),4,2)||'-'||substr(trim(period_to),1,2) ELSE period_to END)) DESC, id DESC LIMIT 1"));
+        prev.addBindValue(df);
+        if (prev.exec() && prev.next()) snapshot.elecPrev = prev.value(0).toDouble();
+        if (prev.lastError().isValid()) snapshot.error = prev.lastError().text();
+    }
+    return snapshot;
+}
+
 ExpensesSnapshot buildExpensesSnapshot(const QString& dbPath, const QString& df, const QString& dt)
 {
     ExpensesSnapshot snapshot;
@@ -726,41 +770,14 @@ ExpensesSnapshot buildExpensesSnapshot(const QString& dbPath, const QString& df,
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connName);
         db.setDatabaseName(dbPath);
-        if (!db.open()) {
-            return snapshot;
-        }
-
-        QSqlQuery q(db);
-        q.prepare(QStringLiteral("SELECT elec_prev, elec_curr, elec_tariff, elec_kwh, elec_cost, cleaning, cleaning_note, sw_opendatabot, software_note, heating, heating_note, amortization, amortization_note, rent, rent_note, other_amount, other_note FROM expenses WHERE (CASE WHEN substr(period_from,3,1)='.' THEN '20'||substr(period_from,7,2)||'-'||substr(period_from,4,2)||'-'||substr(period_from,1,2) ELSE period_from END)=? AND (CASE WHEN substr(period_to,3,1)='.' THEN '20'||substr(period_to,7,2)||'-'||substr(period_to,4,2)||'-'||substr(period_to,1,2) ELSE period_to END)=? ORDER BY id DESC LIMIT 1"));
-        q.addBindValue(df);
-        q.addBindValue(dt);
-        const double savedTariff = reportsWorkerSetting(db, QStringLiteral("reports.expenses.electricity_tariff"), 0.0).toDouble();
-        if (q.exec() && q.next()) {
-            snapshot.foundRow = true;
-            snapshot.elecPrev = q.value(0).toDouble();
-            snapshot.elecCurr = q.value(1).toDouble();
-            const double rowTariff = q.value(2).toDouble();
-            snapshot.elecTariff = rowTariff > 0.0 ? rowTariff : savedTariff;
-            snapshot.cleaning = q.value(5).toDouble();
-            snapshot.cleaningNote = q.value(6).toString();
-            snapshot.software = q.value(7).toDouble();
-            snapshot.softwareNote = q.value(8).toString();
-            snapshot.heating = q.value(9).toDouble();
-            snapshot.heatingNote = q.value(10).toString();
-            snapshot.amortization = q.value(11).toDouble();
-            snapshot.amortizationNote = q.value(12).toString();
-            snapshot.rent = q.value(13).toDouble();
-            snapshot.rentNote = q.value(14).toString();
-            snapshot.other = q.value(15).toDouble();
-            snapshot.otherNote = q.value(16).toString();
+        db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
+        if (!db.open() || !db.transaction()) {
+            snapshot.error = db.lastError().text();
         } else {
-            snapshot.elecTariff = savedTariff;
-            QSqlQuery prev(db);
-            prev.prepare(QStringLiteral("SELECT COALESCE(elec_curr,0) FROM expenses WHERE date((CASE WHEN substr(trim(period_to),3,1)='.' AND substr(trim(period_to),6,1)='.' THEN CASE WHEN substr(trim(period_to),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_to),7,4) ELSE '20'||substr(trim(period_to),7,2) END||'-'||substr(trim(period_to),4,2)||'-'||substr(trim(period_to),1,2) ELSE period_to END)) < date(?) ORDER BY date((CASE WHEN substr(trim(period_to),3,1)='.' AND substr(trim(period_to),6,1)='.' THEN CASE WHEN substr(trim(period_to),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_to),7,4) ELSE '20'||substr(trim(period_to),7,2) END||'-'||substr(trim(period_to),4,2)||'-'||substr(trim(period_to),1,2) ELSE period_to END)) DESC, id DESC LIMIT 1"));
-            prev.addBindValue(df);
-            if (prev.exec() && prev.next()) snapshot.elecPrev = prev.value(0).toDouble();
+            snapshot = readExpensePeriod(db, df, dt);
+            if (snapshot.error.isEmpty() && !db.commit()) snapshot.error = db.lastError().text();
+            if (!snapshot.error.isEmpty()) db.rollback();
         }
-
         db.close();
     }
     SqliteConnectionUtils::safeCloseAndRemoveDatabase(connName);

@@ -8,6 +8,7 @@
 #include "core/services/orders/PartMarkupPolicyService.h"
 
 #include "core/util/StoreNameNormalizer.h"
+#include <QSqlError>
 namespace ReportsDataLoader::LocalSupport {
 
 QString parsePlateForUi(const QString& value)
@@ -162,7 +163,7 @@ QString canonStoreKey(const QString& s)
     return StoreNameNormalizer::canonKey(s);
 }
 
-QVariant reportsWorkerSetting(QSqlDatabase& db, const QString& key, const QVariant& def)
+QVariant reportsWorkerSetting(QSqlDatabase& db, const QString& key, const QVariant& def, QString* error)
 {
     QSqlQuery q(db);
     q.prepare(QStringLiteral("SELECT value FROM settings WHERE key=?"));
@@ -171,6 +172,7 @@ QVariant reportsWorkerSetting(QSqlDatabase& db, const QString& key, const QVaria
         const QVariant value = q.value(0);
         if (value.isValid() && !value.isNull()) return value;
     }
+    if (error && q.lastError().isValid()) *error = q.lastError().text();
     return def;
 }
 

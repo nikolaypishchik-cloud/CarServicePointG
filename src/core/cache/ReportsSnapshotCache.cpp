@@ -138,6 +138,7 @@ bool tryGetOutsource(const QString& key, OutsourceSnapshot* out)
 
 void storeOutsource(const QString& key, const OutsourceSnapshot& snapshot)
 {
+    if (!snapshot.error.isEmpty()) return;
     QMutexLocker lock(&cacheMutex());
     storeImpl(cacheState().outsource, cacheState().outsourceOrder, key, snapshot);
 }
@@ -150,6 +151,7 @@ bool tryGetExpenses(const QString& key, ExpensesSnapshot* out)
 
 void storeExpenses(const QString& key, const ExpensesSnapshot& snapshot)
 {
+    if (!snapshot.error.isEmpty()) return;
     QMutexLocker lock(&cacheMutex());
     storeImpl(cacheState().expenses, cacheState().expensesOrder, key, snapshot);
 }
@@ -162,6 +164,7 @@ bool tryGetTotalExpenses(const QString& key, TotalExpensesSnapshot* out)
 
 void storeTotalExpenses(const QString& key, const TotalExpensesSnapshot& snapshot)
 {
+    if (!snapshot.error.isEmpty()) return;
     QMutexLocker lock(&cacheMutex());
     storeImpl(cacheState().totalExpenses, cacheState().totalExpensesOrder, key, snapshot);
 }

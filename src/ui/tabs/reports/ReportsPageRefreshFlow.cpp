@@ -6,6 +6,7 @@
 #include "ui/tabs/reports/PurchaseDebtsPage.h"
 #include "ui/tabs/reports/InvoicesPage.h"
 #include <QScrollArea>
+#include <QSignalBlocker>
 #include <QTabBar>
 #include <QTextDocument>
 #include <QTextTable>
@@ -553,7 +554,8 @@ void ReportsPage::refreshOutsource()
         if (generation != m_asyncRefreshGeneration) return;
         if (activeTab() != ReportTab::Outsource) return;
         applyOutsourceSnapshot(snapshot);
-        m_tabKeys[static_cast<int>(ReportTab::Outsource)] = key;
+        if (snapshot.error.isEmpty()) m_tabKeys[static_cast<int>(ReportTab::Outsource)] = key;
+        else m_tabKeys.remove(static_cast<int>(ReportTab::Outsource));
         applyCachedTabUi(ReportTab::Outsource);
     });
 }
@@ -586,7 +588,8 @@ void ReportsPage::refreshExpenses()
         if (generation != m_asyncRefreshGeneration) return;
         if (activeTab() != ReportTab::Expenses) return;
         applyExpensesSnapshot(snapshot);
-        m_tabKeys[static_cast<int>(ReportTab::Expenses)] = key;
+        if (snapshot.error.isEmpty()) m_tabKeys[static_cast<int>(ReportTab::Expenses)] = key;
+        else m_tabKeys.remove(static_cast<int>(ReportTab::Expenses));
         applyCachedTabUi(ReportTab::Expenses);
     });
 }
@@ -595,6 +598,15 @@ void ReportsPage::applyExpensesSnapshot(const ExpensesSnapshot& snapshot)
 {
     m_expensesFound=snapshot.foundRow;
     if (!m_expensesPage) return;
+    m_expensesPage->setEnabled(snapshot.error.isEmpty());
+    if (!snapshot.error.isEmpty()) {
+        for (auto* field : m_expensesPage->findChildren<QLineEdit*>()) {
+            const QSignalBlocker blocker(field);
+            field->clear();
+        }
+        setTabStats(ReportTab::Expenses, {QStringLiteral("Не вдалося прочитати витрати: ") + snapshot.error});
+        return;
+    }
     ReportsExpensesSupport::applySnapshot(snapshot, {
         m_expensesPage, m_elecPrevEdit, m_elecCurrEdit, m_elecTariffEdit, m_elecKwhEdit, m_elecCostEdit,
         m_cleaningEdit, m_cleaningNoteEdit, m_softwareEdit, m_softwareNoteEdit,
@@ -637,7 +649,8 @@ void ReportsPage::refreshTotalExpenses()
         if (generation != m_asyncRefreshGeneration) return;
         if (activeTab() != ReportTab::TotalExpenses) return;
         applyTotalExpensesSnapshot(snapshot);
-        m_tabKeys[static_cast<int>(ReportTab::TotalExpenses)] = key;
+        if (snapshot.error.isEmpty()) m_tabKeys[static_cast<int>(ReportTab::TotalExpenses)] = key;
+        else m_tabKeys.remove(static_cast<int>(ReportTab::TotalExpenses));
         applyCachedTabUi(ReportTab::TotalExpenses);
     });
 }
@@ -679,6 +692,12 @@ void ReportsPage::saveExpenses()
     });
 
     const auto existing = ReportsDataLoader::buildExpensesSnapshot(df, dt);
+    if (!existing.error.isEmpty()) {
+        applyExpensesSnapshot(existing);
+        m_tabKeys.remove(static_cast<int>(ReportTab::Expenses));
+        applyCachedTabUi(ReportTab::Expenses);
+        return;
+    }
     const double persistedTariffSetting = ReportsSettingsService::loadElectricityTariff(0.0);
     const auto nearlyEqual = [](double a, double b) {
         return qAbs(a - b) <= 0.0001;

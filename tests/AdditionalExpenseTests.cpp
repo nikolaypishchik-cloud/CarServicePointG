@@ -122,6 +122,52 @@ private slots:
         QCOMPARE(QSqlDatabase::connectionNames(), before);
     }
 
+    void expenseFormDistinguishesEmptyPeriodFromReadFailure() {
+        const auto before = QSqlDatabase::connectionNames();
+        const auto read = [](const QString& path) {
+            return ReportsDataLoader::buildExpensesSnapshot(path, "2026-02-01", "2026-02-28");
+        };
+        const auto missing = dir.filePath("missing-form.sqlite");
+        QVERIFY(!read(missing).error.isEmpty());
+        QVERIFY(!QFile::exists(missing));
+        QCOMPARE(QSqlDatabase::connectionNames(), before);
+        QSqlQuery q(db);
+        QVERIFY(q.exec("INSERT INTO settings(key,value) VALUES('reports.expenses.electricity_tariff','4.25')"));
+        QVERIFY(q.exec("INSERT INTO expenses(period_from,period_to,elec_curr) VALUES('2026-01-01','2026-01-31',378)"));
+        const auto empty = read(db.databaseName());
+        QVERIFY2(empty.error.isEmpty(), qPrintable(empty.error));
+        QVERIFY(!empty.foundRow);
+        QCOMPARE(empty.elecPrev, 378.0);
+        QCOMPARE(empty.elecTariff, 4.25);
+        QVERIFY(q.exec("INSERT INTO expenses(period_from,period_to,cleaning) VALUES('2026-02-01','2026-02-28',28.75)"));
+        const auto existing = read(db.databaseName());
+        QVERIFY2(existing.error.isEmpty(), qPrintable(existing.error));
+        QVERIFY(existing.foundRow);
+        QCOMPARE(existing.cleaning, 28.75);
+        QVERIFY(q.exec("ALTER TABLE expenses RENAME COLUMN cleaning TO invalid_cleaning"));
+        QVERIFY(!read(db.databaseName()).error.isEmpty());
+        QCOMPARE(QSqlDatabase::connectionNames(), before);
+    }
+
+    void expenseFormRecoversAfterBrokenSchema() {
+        QSqlQuery q(db);
+        QVERIFY(q.exec("ALTER TABLE expenses RENAME COLUMN cleaning TO invalid_cleaning"));
+        ReportsPage page;
+        page.show();
+        auto* tabs = page.findChild<QTabWidget*>();
+        auto* form = page.findChild<QWidget*>("reportsExpensesPage");
+        auto* stats = page.findChild<QLabel*>("reportsStatsLabel");
+        QVERIFY(tabs && form && stats);
+        tabs->setCurrentWidget(form);
+        QTRY_VERIFY_WITH_TIMEOUT(stats->text().contains(QStringLiteral("Не вдалося прочитати витрати")), 10000);
+        QVERIFY(!form->isEnabled());
+        for (auto* field : form->findChildren<QLineEdit*>()) QVERIFY(field->text().isEmpty());
+        QVERIFY(q.exec("ALTER TABLE expenses RENAME COLUMN invalid_cleaning TO cleaning"));
+        page.refresh();
+        QTRY_VERIFY_WITH_TIMEOUT(form->isEnabled(), 10000);
+        QVERIFY(!stats->text().contains(QStringLiteral("Не вдалося прочитати витрати")));
+    }
+
     void validationPermissionsAndRollback() {
         const QDate date(2026,9,17);
         QVERIFY(!AdditionalExpenseService::add(db, date, "", "Parcel", 5));

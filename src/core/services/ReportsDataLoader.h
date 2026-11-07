@@ -82,6 +82,7 @@ struct OutsourceSnapshotRow {
 struct OutsourceSnapshot {
     QList<OutsourceSnapshotRow> rows;
     QStringList stats;
+    QString error;
 };
 
 struct PayrollSnapshotRow {
@@ -100,6 +101,7 @@ struct PayrollSnapshot {
 };
 
 struct ExpensesSnapshot {
+    QString error;
     bool foundRow = false;
     double elecPrev = 0.0;
     double elecCurr = 0.0;
