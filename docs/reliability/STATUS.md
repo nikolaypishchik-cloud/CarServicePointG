@@ -33,3 +33,7 @@ DBY-T170: Windows strict service tests populated-retained-stores, populated-reta
 ## DBY-T171 — publication interruption, cloud
 
 Published custody increment c6b5a47; desktop reports child-only/custody/rollback rows passed, saved in 092d335 including its Qt variable rename. Current increment arms the existing snapshot restore intent before any publication and commits only after successful verification/history/owner reopen. Added three real-service child-process crash boundaries, recovery and repeat for Windows (NOT_RUN in cloud). Production journal process test and static gates PASS; see DBY_T171_PUBLICATION.md. Archive availability/routing and DBY-05 acceptance remain OPEN. Latest reported quota 17%; user replaced the separate 20% reserve with a 5% stop threshold.
+
+## DBY-T172 — archived key reservation checkpoint
+
+Publication interruption increment 9e4ca8f published; desktop metadata 05cbae4 incorporated. Actual planner/projection regression failed before the fix and passed after reserving local registry keys as well as active keys. Static gates PASS; Windows `migrationReservesArchivedOrderKeys` NOT_RUN and service tests RETEST_REQUIRED for this change. See DBY_T172_REGISTRY_KEYS.md. Archive graph availability/routing remains OPEN; no full DBY-05 acceptance. User now reports 5% weekly remaining, reaching the <=5% stop threshold. Stopped new implementation/tests; saved the already checked increment only. No cloud test jobs left running. Resume after a fresh reading above 5%.

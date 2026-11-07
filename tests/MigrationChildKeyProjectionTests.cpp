@@ -58,6 +58,28 @@ int main(int argc,char** argv) {
  MigrationOrderKeys::Map childOnly;
  check(MigrationOrderKeys::plan(db,"source",&childOnly,&error));
  check(childOnly.isEmpty() && !childOnly.children.isEmpty());check(db.rollback());
+ // An unhydrated archive still owns its physical routing key. A duplicate
+ // active/mirror row must reserve one key, not allocate it twice.
+ check(db.transaction());
+ sql("CREATE TABLE main.order_registry(order_number INTEGER PRIMARY KEY,order_uid TEXT)");
+ sql("INSERT INTO main.order_registry VALUES(7,'target-order'),(40,'archived-only')");
+ MigrationOrderKeys::Map registryKeys;
+ check(MigrationOrderKeys::plan(db,"source",&registryKeys,&error));
+ check(registryKeys.size()==1 && registryKeys.value(7)==41);
+ sql("UPDATE main.work_orders SET number=9 WHERE number=7");
+ check(MigrationOrderKeys::plan(db,"source",&registryKeys,&error));
+ check(registryKeys.size()==1 && registryKeys.value(7)==41);
+ check(MigrationOrderKeys::project(dir.filePath("source.db"),dir.filePath("registry-reserved.db"),registryKeys,&error));
+ sql("ATTACH DATABASE '"+dir.filePath("registry-reserved.db")+"' AS projected");
+ sql("SELECT p.order_number,s.order_number,p.order_uid,s.order_uid,p.amount,s.amount FROM projected.work_order_parts p JOIN projected.work_order_services s ON s.id=p.service_id");
+ check(q.next() && q.value(0).toInt()==41 && q.value(1).toInt()==41 && q.value(2)=="source-order" && q.value(3)=="source-order" && q.value(4).toInt()==3850 && q.value(5).toInt()==125);q.finish();
+ sql("SELECT order_uid FROM main.order_registry WHERE order_number=7");
+ check(q.next() && q.value(0)=="target-order");q.finish();
+ sql("INSERT INTO main.order_registry VALUES(2147483647,'last-archive')");
+ check(!MigrationOrderKeys::plan(db,"source",&registryKeys,&error));
+ check(error.contains("No free internal order number"));error.clear();
+ check(db.rollback());
+ sql("DETACH DATABASE projected");
  check(MigrationOrderKeys::project(dir.filePath("source.db"),dir.filePath("child-only.db"),childOnly,&error));
  sql("ATTACH DATABASE '"+dir.filePath("child-only.db")+"' AS child_only");
  sql("SELECT p.id,s.id,p.order_number,s.order_number FROM child_only.work_order_parts p JOIN child_only.work_order_services s ON s.id=p.service_id");

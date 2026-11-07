@@ -25,10 +25,15 @@ inline bool plan(QSqlDatabase workspace,const QString& attached,Map* mapping,QSt
     mapping->children.clear();
     const QString orders=sqlQuoteIdent(attached)+".work_orders";
     QSqlQuery q(workspace);
-    if (!q.exec("SELECT MAX(number) FROM (SELECT number FROM main.work_orders UNION ALL SELECT number FROM "+orders+")") || !q.next())
+    // The local routing mirror owns keys for orders that are no longer hydrated
+    // in work_orders. UNION also deduplicates active orders present in both.
+    QString reserved = "SELECT number FROM main.work_orders";
+    if (!SqliteSchemaInspection::tableAbsent(workspace,"main","order_registry"))
+        reserved += " UNION SELECT order_number AS number FROM main.order_registry";
+    if (!q.exec("SELECT MAX(number) FROM ("+reserved+" UNION ALL SELECT number FROM "+orders+")") || !q.next())
         return fail(error,q.lastError().text());
     qint64 high=q.value(0).toLongLong();
-    if (!q.exec("SELECT s.number FROM "+orders+" s JOIN main.work_orders t ON t.number=s.number ORDER BY s.number"))
+    if (!q.exec("SELECT s.number FROM "+orders+" s JOIN ("+reserved+") t ON t.number=s.number ORDER BY s.number"))
         return fail(error,q.lastError().text());
     while (q.next()) {
         if (high>=std::numeric_limits<int>::max()) return fail(error,"No free internal order number");

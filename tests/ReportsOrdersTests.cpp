@@ -1,3 +1,4 @@
+#include "infrastructure/db/sqlite/MigrationOrderKeys.h"
 #include <QtTest/QtTest>
 #include <QDataStream>
 #include <QSaveFile>
@@ -239,6 +240,7 @@ private slots:
     void migrationOperationExclusion();
     void migrationPublicationCrashRecovery_data();
     void migrationPublicationCrashRecovery();
+    void migrationReservesArchivedOrderKeys();
     void migrationServiceRoundTrip_data();
     void migrationServiceRoundTrip();
     void migrationJournalRejectsCorruption();
@@ -1255,6 +1257,44 @@ void ReportsOrdersTests::migrationPublicationCrashRecovery()
     QCOMPARE(result.importedOrderCount,1);QCOMPARE(result.importedServiceCount,1);QCOMPARE(result.importedPartCount,1);
     QVERIFY2(MigrationRestoreJournal::pending(&pending,&error),qPrintable(error));QVERIFY(pending.isEmpty());
     QSqlQuery q(Database::db());QVERIFY(q.exec("SELECT COUNT(*) FROM work_orders"));QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),2);
+}
+
+void ReportsOrdersTests::migrationReservesArchivedOrderKeys()
+{
+    const QString name=QUuid::createUuid().toString();
+    auto db=QSqlDatabase::addDatabase("QSQLITE",name);
+    const auto close=qScopeGuard([&]{db.close();db={};QSqlDatabase::removeDatabase(name);});
+    db.setDatabaseName(":memory:");
+    QVERIFY(db.open());
+    QSqlQuery q(db);
+    for(const auto& sql:QStringList{
+        "CREATE TABLE work_orders(number INTEGER PRIMARY KEY)",
+        "INSERT INTO work_orders VALUES(7)",
+        "CREATE TABLE order_registry(order_number INTEGER PRIMARY KEY,order_uid TEXT)",
+        "INSERT INTO order_registry VALUES(7,'old-uid'),(40,'archive-only-uid')",
+        "ATTACH DATABASE ':memory:' AS audited_source",
+        "CREATE TABLE audited_source.work_orders(number INTEGER PRIMARY KEY)",
+        "INSERT INTO audited_source.work_orders VALUES(7)"})
+        QVERIFY2(q.exec(sql),qPrintable(q.lastError().text()));
+    QString error;
+    MigrationOrderKeys::Map keys;
+    QVERIFY2(MigrationOrderKeys::plan(db,"audited_source",&keys,&error),qPrintable(error));
+    QCOMPARE(keys.size(),1);
+    QCOMPARE(keys.value(7),qint64(41));
+    QVERIFY(q.exec("DELETE FROM work_orders"));
+    QVERIFY2(MigrationOrderKeys::plan(db,"audited_source",&keys,&error),qPrintable(error));
+    QCOMPARE(keys.size(),1);
+    QCOMPARE(keys.value(7),qint64(41));
+    QVERIFY(q.exec("SELECT order_uid FROM order_registry WHERE order_number=7"));
+    QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("old-uid"));q.finish();
+    QVERIFY(q.exec("INSERT INTO order_registry VALUES(2147483647,'last-uid')"));
+    QVERIFY(!MigrationOrderKeys::plan(db,"audited_source",&keys,&error));
+    QVERIFY(error.contains("No free internal order number"));
+    QVERIFY(q.exec("DROP TABLE order_registry"));
+    QVERIFY(q.exec("CREATE TABLE order_registry(broken INTEGER)"));
+    error.clear();
+    QVERIFY(!MigrationOrderKeys::plan(db,"audited_source",&keys,&error));
+    QVERIFY(!error.isEmpty());
 }
 
 void ReportsOrdersTests::migrationServiceRoundTrip_data()
