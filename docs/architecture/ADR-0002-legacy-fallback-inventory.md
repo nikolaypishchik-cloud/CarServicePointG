@@ -537,3 +537,7 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `docs/reliability/DB_YEAR_212.md` | active | Migration plan references existing legacy import paths; documentation only, no runtime exception. |
 | `docs/reliability/STATUS.md` | active | Persistent evidence and unresolved migration defects; documentation only, no runtime exception. |
 | `docs/reliability/PLAN.md` | active | Persistent reliability milestone references historical schema migration tests; documentation only, no runtime exception. |
+
+| `tests/MigrationChildKeyProjectionTests.cpp` | test-only | Attaches a synthetic SQLite source as legacy_rewrite to exercise the actual canonical import query and child-key mapping. |
+| `docs/reliability/DBY_T163_CLOUD.md` | active | Evidence names LegacyOrderChildMapper exercised by the synthetic child-key test. |
+| `SOURCE_SHA256.json` | active | The public source checksum inventory lists migration filenames containing legacy markers. It contains paths and digests only. |
