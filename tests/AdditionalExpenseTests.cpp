@@ -196,6 +196,29 @@ private slots:
         QVERIFY(q.exec("ALTER TABLE work_order_parts RENAME COLUMN name TO broken_name"));
         auto failed=read();QVERIFY(!failed.error.isEmpty());QVERIFY(failed.parts.isEmpty());QVERIFY(failed.events.isEmpty());
         QVERIFY(q.exec("ALTER TABLE work_order_parts RENAME COLUMN broken_name TO name"));QVERIFY2(read().error.isEmpty(),qPrintable(read().error));
+        QVERIFY(q.exec("DROP VIEW router_work_orders"));
+        QVERIFY(q.exec("CREATE VIEW router_work_orders AS SELECT number,order_uid,car,client,master_name_closed,master_id FROM work_orders "
+                       "UNION ALL SELECT 475,'stats-current','Current car','Current client','','' "
+                       "UNION ALL SELECT 475,'stats-history','Historical car','Historical client','',''"));
+        QVERIFY(q.exec("DROP VIEW router_work_order_parts"));
+        const QString partsView = QStringLiteral("CREATE VIEW router_work_order_parts AS SELECT id,order_number,order_uid,name,part_number,ordered_at,delivery_date,installed_at,store FROM work_order_parts "
+                                                 "UNION ALL SELECT 21,475,'%1','Filter','','2026-01-02','','',''");
+        QVERIFY(q.exec(partsView.arg("stats-current")));
+        auto current = read();
+        QVERIFY2(current.error.isEmpty(), qPrintable(current.error));
+        QCOMPARE(current.parts.size(), 1);
+        QCOMPARE(current.parts.first().client, QStringLiteral("Current client"));
+        QVERIFY(q.exec("DROP VIEW router_work_order_parts"));
+        QVERIFY(q.exec(partsView.arg("")));
+        auto ambiguous = read();
+        QVERIFY(!ambiguous.error.isEmpty());
+        QVERIFY(ambiguous.parts.isEmpty());
+        QVERIFY(q.exec("DROP VIEW router_work_order_parts"));
+        QVERIFY(q.exec(partsView.arg("stats-history")));
+        auto historical = read();
+        QVERIFY2(historical.error.isEmpty(), qPrintable(historical.error));
+        QCOMPARE(historical.parts.size(), 1);
+        QCOMPARE(historical.parts.first().client, QStringLiteral("Historical client"));
         // A request captured before revocation must not authorize the later worker.
         QVERIFY(q.exec("UPDATE staff_accounts SET active=0 WHERE id='stats-owner'"));QVERIFY(!read().error.isEmpty());
         QVERIFY(q.exec("UPDATE staff_accounts SET active=1 WHERE id='stats-owner'"));QVERIFY(read().error.isEmpty());

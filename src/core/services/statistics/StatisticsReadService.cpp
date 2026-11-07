@@ -39,11 +39,16 @@ QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const 
 
     QSqlQuery query(database);
     const QString sql = QStringLiteral(
+        "WITH headers AS MATERIALIZED (SELECT number,order_uid,car,client,master_name_closed,master_id FROM %2), "
+        "owner_keys AS (SELECT 'u:'||order_uid AS lookup,number,order_uid FROM headers WHERE COALESCE(order_uid,'')<>'' "
+        "UNION ALL SELECT 'n:'||number,number,order_uid FROM headers), "
+        "owners AS (SELECT lookup,MIN(number) AS number,MIN(order_uid) AS order_uid FROM owner_keys GROUP BY lookup HAVING COUNT(*)=1) "
         "SELECT p.id, COALESCE(p.order_number,0), COALESCE(p.order_uid,''), COALESCE(p.name,''), COALESCE(p.part_number,''), "
         "COALESCE(p.ordered_at,''), COALESCE(p.delivery_date,''), COALESCE(p.installed_at,''), COALESCE(p.store,''), "
         "COALESCE(o.car,''), COALESCE(o.client,''), "
-        "COALESCE(NULLIF(TRIM(o.master_name_closed),''), NULLIF(TRIM(m.name),''), '') "
-        "FROM %1 p LEFT JOIN %2 o ON o.number=p.order_number "
+        "COALESCE(NULLIF(TRIM(o.master_name_closed),''), NULLIF(TRIM(m.name),''), ''), o.number, o.order_uid "
+        "FROM %1 p LEFT JOIN owners owner ON owner.lookup=CASE WHEN COALESCE(p.order_uid,'')<>'' THEN 'u:'||p.order_uid ELSE 'n:'||p.order_number END "
+        "LEFT JOIN headers o ON o.number=owner.number AND o.order_uid IS owner.order_uid "
         "LEFT JOIN masters m ON m.id=o.master_id "
         "WHERE TRIM(COALESCE(p.name,''))<>'' "
         "ORDER BY date(CASE WHEN substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),3,1)='.' AND substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),7,2) END||'-'||substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),4,2)||'-'||substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),1,2) ELSE COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,'')) END) DESC, p.id DESC")
@@ -70,6 +75,13 @@ QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const 
         const QDate latestDate = row.installedOn.isValid() ? row.installedOn
             : (row.deliveredOn.isValid() ? row.deliveredOn : row.orderedOn);
         if (latestDate.isValid() && (latestDate < from || latestDate > to)) continue;
+        if (query.value(12).isNull()) {
+            *error = QStringLiteral("Не вдалося однозначно визначити наряд для запчастини %1 (№%2).")
+                         .arg(row.id).arg(row.orderNumber);
+            return {};
+        }
+        row.orderNumber = query.value(12).toInt();
+        row.orderUid = query.value(13).toString();
         const QString probe = QString::number(row.orderNumber) + QLatin1Char(' ') + row.name + QLatin1Char(' ')
             + row.partNumber + QLatin1Char(' ') + row.car + QLatin1Char(' ') + row.client;
         if (!search.trimmed().isEmpty() && !probe.contains(search, Qt::CaseInsensitive)) continue;
