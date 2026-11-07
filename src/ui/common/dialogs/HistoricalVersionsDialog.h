@@ -37,7 +37,7 @@ inline QDialog* create(QWidget* parent,const QString& owner,QString* error)
     auto offset=std::make_shared<int>(0);
     auto load=[=]() {
         grid->clear();grid->setRowCount(0);grid->setColumnCount(0);next->setEnabled(false);previous->setEnabled(*offset>0);
-        const auto table=tables->currentData().toString();const bool hasUid=QStringList{"work_orders","work_order_services","work_order_parts"}.contains(table);uid->setEnabled(hasUid);
+        const auto table=tables->currentData().toString();const bool hasUid=!HistoricalVersionsService::uidColumn(table,owner).isEmpty();uid->setEnabled(hasUid);
         if(table.isEmpty()){status->setText(QString::fromUtf8("У цій версії немає доступних записів"));return;}
         HistoricalVersionsService::Page page;QString detail;
         if(!HistoricalVersionsService::read(owner,source->currentData().toString(),table,*offset,100,&page,&detail,hasUid?uid->text().trimmed():QString())){status->setText(detail);return;}

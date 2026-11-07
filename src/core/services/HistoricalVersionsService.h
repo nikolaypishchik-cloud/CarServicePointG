@@ -31,6 +31,14 @@ inline bool allowedVersion(const QString& owner,const QString& id,QString* error
     return fail(error,QString::fromUtf8("Версія не належить вибраному джерелу або наряду"));
 }
 inline bool catalogue(const QString& table){return table=="parts_catalog" || table=="parts_catalog_sources" || table=="parts_catalog_vehicle_map";}
+inline QString uidColumn(const QString& table,const QString& owner)
+{
+    if(table=="order_registry" && owner.isEmpty())return "order_uid";
+    if(table=="work_orders")return "order_uid";
+    if(table=="work_order_services")return "service_uid";
+    if(table=="work_order_parts")return "part_uid";
+    return {};
+}
 inline bool tables(const QString& owner,const QString& id,QStringList* output,QString* error)
 {
     output->clear();if(!allowedVersion(owner,id,error))return false;auto db=Database::db();QSqlQuery q(db);QStringList names;
@@ -45,11 +53,11 @@ inline bool tables(const QString& owner,const QString& id,QStringList* output,QS
         if(!q.exec())return fail(error,q.lastError().text());
         const bool inspectAdditional=AccessControlService::currentUserHasPermission(db,"security.manage");
         const QStringList orderTables={"work_orders","work_order_services","work_order_parts","service_masters","work_order_part_attachments","work_order_service_attachments","outsource_jobs","outsource_repairs"};
-        const bool sourceJournal = inspectAdditional && !AccessControlService::currentOrderScope(db).restricted;
+        const bool sourceAdmin = inspectAdditional && !AccessControlService::currentOrderScope(db).restricted;
         while(q.next()) {
             const auto name=q.value(0).toString();
             const bool visible=owner.isEmpty()
-                ? catalogue(name) || (sourceJournal && name==mutationJournalTableName())
+                ? catalogue(name) || (sourceAdmin && (name==mutationJournalTableName() || name=="order_registry"))
                 : orderTables.contains(name) || inspectAdditional;
             if(visible)names<<name;
         }
@@ -60,12 +68,15 @@ inline bool read(const QString& owner,const QString& id,const QString& table,int
 {
     *output={};if(offset<0 || limit<1 || limit>100)return fail(error,QString::fromUtf8("Некоректна сторінка історії"));
     QStringList names;if(!tables(owner,id,&names,error))return false;if(!names.contains(table))return fail(error,QString::fromUtf8("Таблиця недоступна у вибраній версії"));
-    const QString uidColumn=table=="work_orders" ? "order_uid" : table=="work_order_services" ? "service_uid" : table=="work_order_parts" ? "part_uid" : QString();
-    if(!recordUid.isEmpty() && uidColumn.isEmpty())return fail(error,QString::fromUtf8("У цій таблиці немає стабільного UID запису"));
+    const QString filterColumn=uidColumn(table,owner);
+    if(!recordUid.isEmpty() && filterColumn.isEmpty())return fail(error,QString::fromUtf8("У цій таблиці немає стабільного UID запису"));
     Page page;
     if(id!="current") {
         QList<HistoricalRecordStore::Record> rows;
-        if(!HistoricalRecordStore::read(Database::db(),id,table,owner,recordUid,offset,limit,&rows,error))return false;
+        // Registry projections carry the recorded order UID in the owner field.
+        const bool byRegistryOwner=table=="order_registry" && owner.isEmpty() && !recordUid.isEmpty();
+        if(!HistoricalRecordStore::read(Database::db(),id,table,byRegistryOwner?recordUid:owner,
+                byRegistryOwner?QString():recordUid,offset,limit,&rows,error))return false;
         for(const auto& row:rows) {if(page.columns.isEmpty())page.columns=row.columns;if(page.columns!=row.columns)return fail(error,QString::fromUtf8("Схема історичних записів не узгоджена"));page.rows<<row.values;page.storageTypes<<row.storageTypes;}
     } else {
         QSqlQuery q(Database::db());const auto quoted=HistoricalRecordStore::ident(table);
@@ -73,7 +84,7 @@ inline bool read(const QString& owner,const QString& id,const QString& table,int
         const auto info=q.record();QStringList fields,types;
         for(int i=0;i<info.count();++i){const auto name=info.fieldName(i);page.columns<<name;fields<<HistoricalRecordStore::ident(name);types<<"typeof("+HistoricalRecordStore::ident(name)+")";}q.finish();
         if(fields.isEmpty())return fail(error,QString::fromUtf8("Поточна схема недоступна"));
-        QStringList predicates;if(!owner.isEmpty())predicates<<"order_uid=?";if(!recordUid.isEmpty())predicates<<uidColumn+"=?";
+        QStringList predicates;if(!owner.isEmpty())predicates<<"order_uid=?";if(!recordUid.isEmpty())predicates<<filterColumn+"=?";
         q.prepare("SELECT "+fields.join(',')+","+types.join(',')+" FROM "+quoted+(predicates.isEmpty()?QString():QString(" WHERE ")+predicates.join(" AND "))+" ORDER BY "+fields.join(',')+" LIMIT ? OFFSET ?");
         if(!owner.isEmpty())q.addBindValue(owner);if(!recordUid.isEmpty())q.addBindValue(recordUid);q.addBindValue(limit);q.addBindValue(offset);
         if(!q.exec())return fail(error,q.lastError().text());

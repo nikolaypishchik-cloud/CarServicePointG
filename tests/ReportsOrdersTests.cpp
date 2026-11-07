@@ -1708,6 +1708,12 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             QVERIFY2(HistoricalVersionsService::read({},"current","parts_catalog",0,100,&currentCatalog,&setupError),qPrintable(setupError));
             auto catalogPrice=[](const HistoricalVersionsService::Page& page){for(const auto& row:page.rows)if(row.value(page.columns.indexOf("id")).toInt()==9000)return qRound(row.value(page.columns.indexOf("price")).toDouble()*100);return -1;};
             QCOMPARE(catalogPrice(oldCatalog),3850);QCOMPARE(catalogPrice(currentCatalog),4000);
+            HistoricalVersionsService::Page locator;
+            QVERIFY2(HistoricalVersionsService::read({},historicalId,"order_registry",0,5,&locator,&setupError,"existing-target-order"),qPrintable(setupError));
+            QCOMPARE(locator.rows.size(),1);
+            QCOMPARE(locator.rows.first().value(locator.columns.indexOf("order_uid")).toString(),QString("existing-target-order"));
+            QVERIFY2(HistoricalVersionsService::read({},historicalId,"order_registry",0,5,&locator,&setupError,"nonexistent-order"),qPrintable(setupError));
+            QVERIFY(locator.rows.isEmpty());
             HistoricalVersionsService::Page journal;
             QVERIFY2(HistoricalVersionsService::read({},historicalId,"legacy_mutation_log",0,100,&journal,&setupError),qPrintable(setupError));
             const int ownerCol=journal.columns.indexOf("order_uid"),actionCol=journal.columns.indexOf("action");
@@ -1731,6 +1737,8 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             QVERIFY(!HistoricalVersionsService::versions({},&denied,&accessError));QVERIFY(denied.isEmpty());
             HistoricalVersionsService::Page journal;
             QVERIFY(!HistoricalVersionsService::read({},historicalId,"legacy_mutation_log",0,100,&journal,&accessError));
+            QVERIFY(journal.rows.isEmpty());
+            QVERIFY(!HistoricalVersionsService::read({},historicalId,"order_registry",0,5,&journal,&accessError,"existing-target-order"));
             QVERIFY(journal.rows.isEmpty());
         }
         QSqlQuery count(Database::db());QVERIFY(count.exec("SELECT COUNT(*) FROM historical_records"));QVERIFY(count.next());const auto historyCount=count.value(0).toLongLong();count.finish();
