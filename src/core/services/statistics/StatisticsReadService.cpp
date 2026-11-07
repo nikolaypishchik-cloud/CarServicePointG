@@ -28,14 +28,14 @@ bool databaseObjectExists(QSqlDatabase database, const QString& name)
     });
 }
 
-QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const QDate& to, const QString& search, const std::shared_ptr<std::atomic_bool>& cancel)
+QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const QDate& to, const QString& search, const std::shared_ptr<std::atomic_bool>& cancel, QString* error)
 {
     QVector<PartTraceRow> rows;
     const QString partsSource = databaseObjectExists(database, QStringLiteral("router_work_order_parts"))
         ? QStringLiteral("router_work_order_parts") : QStringLiteral("work_order_parts");
     const QString ordersSource = databaseObjectExists(database, QStringLiteral("router_work_orders"))
         ? QStringLiteral("router_work_orders") : QStringLiteral("work_orders");
-    if (!databaseObjectExists(database, partsSource) || !databaseObjectExists(database, ordersSource)) return rows;
+    if (!databaseObjectExists(database, partsSource) || !databaseObjectExists(database, ordersSource)) {*error=QStringLiteral("Statistics order/part source is missing");return {};}
 
     QSqlQuery query(database);
     const QString sql = QStringLiteral(
@@ -48,7 +48,7 @@ QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const 
         "WHERE TRIM(COALESCE(p.name,''))<>'' "
         "ORDER BY date(CASE WHEN substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),3,1)='.' AND substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),7,2) END||'-'||substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),4,2)||'-'||substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),1,2) ELSE COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,'')) END) DESC, p.id DESC")
         .arg(partsSource, ordersSource);
-    if (!query.exec(sql)) return rows;
+    if (!query.exec(sql)) {*error=query.lastError().text();return {};}
 
     const QDate today = QDate::currentDate();
     while (!cancel->load() && query.next()) {
@@ -84,6 +84,7 @@ QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const 
         }
         rows.append(row);
     }
+    if(query.lastError().isValid()){*error=query.lastError().text();return {};}
     // Resolve invoice links once, after date/search filtering, not once per part.
     QList<int> partIds;
     partIds.reserve(rows.size());
@@ -110,14 +111,16 @@ Request capture(const QDate& from,const QDate& to,bool performance)
 Snapshot run(const Request& r,const std::shared_ptr<std::atomic_bool>& cancel)
 {
     Snapshot result;
-    if(cancel->load() || !r.allowed)return result;
+    if(cancel->load())return result;
+    if(!r.allowed){result.error=QString::fromUtf8("Немає дозволу на перегляд статистики.");return result;}
     QString error;
-    ScopedSqliteConnection connection(r.path,QStringLiteral("statistics_snapshot"),&error);
+    ScopedSqliteConnection connection(r.path,QStringLiteral("statistics_snapshot"),&error,true);
     const auto db=connection.db();
     if(!db.isOpen() || db.databaseName()!=r.path) {
         result.error=error.isEmpty()?QString::fromUtf8("Профіль статистики змінився або недоступний."):error;return result;
     }
-    return load(db,r.from,r.to,r.performance,r.scope,r.ownMaster,cancel);
+    if(!r.performance && !AccessControlService::currentUserHasPermission(db,QStringLiteral("nav.statistics"))) {result.error=QString::fromUtf8("Немає дозволу на перегляд статистики.");return result;}
+    return load(db,r.from,r.to,r.performance,AccessControlService::currentOrderScope(db),AccessControlService::currentMasterId(db),cancel);
 }
 Snapshot load(QSqlDatabase db, const QDate& fromDate, const QDate& toDate,
               bool performance, const AccessControlService::OrderScope& scope,
@@ -125,6 +128,7 @@ Snapshot load(QSqlDatabase db, const QDate& fromDate, const QDate& toDate,
 {
     Snapshot result;
     if(cancel->load()) return result;
+    if(!db.isOpen()){result.error=QStringLiteral("Statistics database is not open");return result;}
     if(performance) {
     QVariantList staff, orders, stock;
     QStringList errors;
@@ -141,6 +145,7 @@ Snapshot load(QSqlDatabase db, const QDate& fromDate, const QDate& toDate,
                 staff.append(QVariantMap{{"id",q.value(0)},{"name",q.value(1)}});
         }
     } else errors << QString::fromUtf8("Не вдалося завантажити персонал.");
+    if(q.lastError().isValid()) errors<<q.lastError().text();
     const QString source = databaseObjectExists(db,"router_work_orders") ? "router_work_orders" : "work_orders";
     if (q.exec("SELECT number,order_uid,order_number,master_id,master_name_closed,car,plate,opened_at,closed_at,status FROM "+source)) {
         while (!cancel->load() && q.next()) {
@@ -159,6 +164,9 @@ Snapshot load(QSqlDatabase db, const QDate& fromDate, const QDate& toDate,
                 {"closed",closed},{"completed",completed},{"opened",opened}});
         }
     } else errors << QString::fromUtf8("Не вдалося завантажити наряди.");
+    if(q.lastError().isValid()) errors<<q.lastError().text();
+    if(databaseObjectExists(db,"workshop_spare_orders") != databaseObjectExists(db,"workshop_spare_movements"))
+        errors<<QStringLiteral("Incomplete statistics stock schema");
     // Read only: do not call the stock service's schema/backfill path while rendering statistics.
     if (databaseObjectExists(db,"workshop_spare_orders") && databaseObjectExists(db,"workshop_spare_movements")) {
         if (q.exec("SELECT s.id,s.master_id,s.name,s.article,s.brand,s.model,s.plate,s.quantity,s.ordered_on,"
@@ -180,6 +188,7 @@ Snapshot load(QSqlDatabase db, const QDate& fromDate, const QDate& toDate,
         } else errors << QString::fromUtf8("Не вдалося завантажити склад.");
     }
 
+        if(q.lastError().isValid()) errors<<q.lastError().text();
         result.staff=staff;result.orders=orders;result.stock=stock;result.error=errors.join(' ');
     } else {
         ActivityAuditFilter filter;
@@ -211,7 +220,8 @@ Snapshot load(QSqlDatabase db, const QDate& fromDate, const QDate& toDate,
         result.events=serialised;
     }
     if(!cancel->load() && result.error.isEmpty() && !performance)
-        result.parts=loadParts(db,fromDate,toDate,{},cancel);
+        result.parts=loadParts(db,fromDate,toDate,{},cancel,&result.error);
+    if(!result.error.isEmpty()){const auto error=result.error;result={};result.error=error;}
     return result;
 }
 }

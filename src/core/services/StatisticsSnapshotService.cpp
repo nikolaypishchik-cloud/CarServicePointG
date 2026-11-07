@@ -1,5 +1,5 @@
 #include "core/services/StatisticsSnapshotService.h"
-#include "infrastructure/db/sqlite/Db.h"
+#include "infrastructure/db/sqlite/DbFacadeSupport.h"
 #include "infrastructure/db/sqlite/ScopedConnectionManager.h"
 
 #include "core/services/ReportsDateUtils.h"
@@ -60,7 +60,7 @@ QList<StatisticsSeriesPoint> topSeriesInt(const QMap<QString,int>& map, int limi
     return out;
 }
 
-double periodExpenses(QSqlDatabase db, const QDate& from, const QDate& to, QList<StatisticsSeriesPoint>* structure = nullptr)
+double periodExpenses(QSqlDatabase db, const QDate& from, const QDate& to, QList<StatisticsSeriesPoint>* structure, QString* error)
 {
     double elec = 0.0, clean = 0.0, heat = 0.0, rent = 0.0, amort = 0.0, sw = 0.0, other = 0.0;
     QSqlQuery q(db);
@@ -93,12 +93,14 @@ double periodExpenses(QSqlDatabase db, const QDate& from, const QDate& to, QList
         extra.addBindValue(from.toString(Qt::ISODate));
         extra.addBindValue(to.toString(Qt::ISODate));
         if (extra.exec() && extra.next()) other += extra.value(0).toLongLong() / 100.0;
+        extra.next();if(extra.lastError().isValid()) *error=extra.lastError().text();
     }
+    if(q.lastError().isValid()) *error=q.lastError().text();
     if (structure) *structure = {{QString::fromUtf8("Електрика"), elec},{QString::fromUtf8("Миючі"), clean},{QString::fromUtf8("Опалення"), heat},{QString::fromUtf8("Оренда"), rent},{QString::fromUtf8("Амортизація"), amort},{QString::fromUtf8("ПЗ"), sw},{QString::fromUtf8("Інше"), other}};
     return elec + clean + heat + rent + amort + sw + other;
 }
 
-double periodPayroll(QSqlDatabase db, const QDate& from, const QDate& to, QList<StatisticsSeriesPoint>* byMaster = nullptr, QList<StatisticsRowItem>* rows = nullptr)
+double periodPayroll(QSqlDatabase db, const QDate& from, const QDate& to, QList<StatisticsSeriesPoint>* byMaster, QList<StatisticsRowItem>* rows, QString* error)
 {
     QMap<QString, double> revenueByMaster;
     QMap<QString, int> jobsByMaster;
@@ -138,6 +140,7 @@ double periodPayroll(QSqlDatabase db, const QDate& from, const QDate& to, QList<
         }
     }
 
+    if(q.lastError().isValid()) *error=q.lastError().text();
     QList<StatisticsSeriesPoint> masterPoints;
     QList<StatisticsRowItem> masterRows;
     for (auto it = revenueByMaster.begin(); it != revenueByMaster.end(); ++it) {
@@ -238,8 +241,8 @@ StatisticsSnapshot collectSnapshot(QSqlDatabase db, const QDate& from, const QDa
         }
     }
 
-    s.expenses = periodExpenses(db, from, to, &s.expenseStructure);
-    s.payroll = periodPayroll(db, from, to, &s.masterRevenue, &s.masterRows);
+    s.expenses = periodExpenses(db, from, to, &s.expenseStructure, &s.error);
+    s.payroll = periodPayroll(db, from, to, &s.masterRevenue, &s.masterRows, &s.error);
 
     QSqlQuery partsQ(db);
     partsQ.setForwardOnly(true);
@@ -306,6 +309,9 @@ StatisticsSnapshot collectSnapshot(QSqlDatabase db, const QDate& from, const QDa
         }
     }
 
+    outsourceQ.next();
+    for(const auto* query : {&svcCounts,&closedQ,&openQ,&partsQ,&outsourceQ,&masterJobsQ})
+        if(query->lastError().isValid()) s.error=query->lastError().text();
     s.outsourceMargin = s.outsourceRevenue - s.outsourceCost;
     s.grossProfit = s.revenueLabor + s.revenueParts - s.purchaseParts - s.payroll + s.outsourceMargin;
     s.netProfit = s.grossProfit - s.expenses;
@@ -337,7 +343,7 @@ namespace StatisticsSnapshotService {
 
 QString currentDatabasePath()
 {
-    return Database::db().databaseName();
+    return QSqlDatabase::database(currentConnectionName(),false).databaseName();
 }
 
 StatisticsSnapshot collectCurrent(const QDate& from, const QDate& to)
@@ -352,7 +358,8 @@ StatisticsSnapshot collectFromPath(const QString& dbPath, const QDate& from, con
         StatisticsSnapshot s;
         s.from = from;
         s.to = to;
-        s.problems << QString::fromUtf8("Не вдалося визначити шлях до робочої бази даних");
+        s.error=QString::fromUtf8("Не вдалося визначити шлях до робочої бази даних");
+        s.problems << s.error;
         return s;
     }
 
@@ -362,17 +369,23 @@ StatisticsSnapshot collectFromPath(const QString& dbPath, const QDate& from, con
 
     QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
     db.setDatabaseName(dbPath);
+    db.setConnectOptions("QSQLITE_OPEN_READONLY");
     if (!db.open()) {
         StatisticsSnapshot s;
         s.from = from;
         s.to = to;
-        s.problems << QString::fromUtf8("Не вдалося відкрити базу для статистики: %1").arg(db.lastError().text());
+        s.error=QString::fromUtf8("Не вдалося відкрити базу для статистики: %1").arg(db.lastError().text());
+        s.problems << s.error;
         db = QSqlDatabase();
         SqliteConnectionUtils::safeCloseAndRemoveDatabase(connectionName);
         return s;
     }
 
-    StatisticsSnapshot out = collectSnapshot(db, from, to);
+    StatisticsSnapshot out;
+    if(!from.isValid() || !to.isValid() || from>to) out.error=QStringLiteral("Invalid statistics period");
+    else if(!db.transaction()) out.error=db.lastError().text();
+    else {out=collectSnapshot(db,from,to);if(out.error.isEmpty() && !db.commit())out.error=db.lastError().text();}
+    if(!out.error.isEmpty()){const auto error=out.error;db.rollback();out={};out.from=from;out.to=to;out.error=error;out.problems<<error;}
     db.close();
     db = QSqlDatabase();
     SqliteConnectionUtils::safeCloseAndRemoveDatabase(connectionName);

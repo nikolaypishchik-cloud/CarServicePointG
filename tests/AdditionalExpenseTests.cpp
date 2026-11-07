@@ -1,3 +1,5 @@
+#include "StatisticsReadFixture.h"
+#include "core/services/statistics/StatisticsReadService.h"
 #include <QtTest/QtTest>
 #include "PayrollReadFixture.h"
 #include "infrastructure/db/sqlite/DbBootstrapEnsureSchema.h"
@@ -132,6 +134,27 @@ private slots:
         QCOMPARE(QSqlDatabase::connectionNames(), before);
     }
 
+    void statisticsReadFailuresAndRecovery() {
+        QString error;QVERIFY2(StatisticsReadFixture::run(&error),qPrintable(error));
+    }
+    void statisticsWorkerFailuresAndCurrentRights() {
+        QString error;QVERIFY(ensureWorkspaceSchema(db));QVERIFY(ensureRouterCacheSchema(db));QVERIFY(rebuildRouterViews(db));
+        QVERIFY(StaffAccountService::ensureSchema(db,&error));QVERIFY(AccessControlService::ensureSchema(db,&error));QVERIFY(ActivityAuditService::ensureSchema(db,&error));
+        QSqlQuery q(db);QVERIFY(q.exec("INSERT INTO staff_accounts(id,display_name,role,active) VALUES('stats-owner','Synthetic owner','owner',1)"));
+        ActivityAuditService::setCurrentActor({"stats-owner","Synthetic owner","owner","test"});
+        const auto cancel=std::make_shared<std::atomic_bool>(false);
+        auto request=StatisticsReadService::capture(QDate(2026,1,1),QDate(2026,1,31),false);QVERIFY(request.allowed);
+        const auto read=[&]{return StatisticsReadService::run(request,cancel);};
+        auto empty=read();QVERIFY2(empty.error.isEmpty(),qPrintable(empty.error));QVERIFY(empty.parts.isEmpty());QVERIFY(empty.events.isEmpty());
+        QVERIFY(q.exec("ALTER TABLE work_order_parts RENAME COLUMN name TO broken_name"));
+        auto failed=read();QVERIFY(!failed.error.isEmpty());QVERIFY(failed.parts.isEmpty());QVERIFY(failed.events.isEmpty());
+        QVERIFY(q.exec("ALTER TABLE work_order_parts RENAME COLUMN broken_name TO name"));QVERIFY2(read().error.isEmpty(),qPrintable(read().error));
+        // A request captured before revocation must not authorize the later worker.
+        QVERIFY(q.exec("UPDATE staff_accounts SET active=0 WHERE id='stats-owner'"));QVERIFY(!read().error.isEmpty());
+        QVERIFY(q.exec("UPDATE staff_accounts SET active=1 WHERE id='stats-owner'"));QVERIFY(read().error.isEmpty());
+        request.path=dir.filePath("missing-statistics-worker.db");QVERIFY(!read().error.isEmpty());QVERIFY(!QFile::exists(request.path));
+        request.allowed=false;QVERIFY(!read().error.isEmpty());QVERIFY(!QFile::exists(request.path));
+    }
     void periodPdfFailuresAndUidRows() {
         QString error;QVERIFY(ensureWorkspaceSchema(db));QVERIFY(ensureRouterCacheSchema(db));QVERIFY(rebuildRouterViews(db));QVERIFY(WorkshopSpareStockService::ensureSchema(db,&error));
         QVERIFY(StaffAccountService::ensureSchema(db,&error));QVERIFY(AccessControlService::ensureSchema(db,&error));QSqlQuery q(db);
