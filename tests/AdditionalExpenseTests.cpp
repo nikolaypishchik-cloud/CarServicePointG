@@ -4,6 +4,7 @@
 #include <QtTest/QtTest>
 #include "PayrollReadFixture.h"
 #include "infrastructure/db/sqlite/DbBootstrapEnsureSchema.h"
+#include "infrastructure/db/sqlite/Db.h"
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
 #include "core/services/WorkshopSpareStockService.h"
 #include "core/services/PartsQueryService.h"
@@ -44,6 +45,12 @@ class AdditionalExpenseTests : public QObject {
     Q_OBJECT
     QTemporaryDir dir;
     QSqlDatabase db;
+    void configureFinancialReportDirectory() {
+        const auto root=qEnvironmentVariable("CS_TEST_DATA_ROOT",dir.path());
+        const auto reports=QDir(root).filePath("financial-pdf-output");
+        QVERIFY(QDir().mkpath(reports));
+        QVERIFY(Database::setSetting("settings.int.directories.reports_dir",reports));
+    }
 private slots:
     void initTestCase() {
         QStandardPaths::setTestModeEnabled(true);
@@ -141,6 +148,7 @@ private slots:
     }
     void expensePdfFailuresRightsAndRepeat() {
         QString error;QVERIFY2(FinancialPdfReadFixture::run(db,&error),qPrintable(error));
+        configureFinancialReportDirectory();
         ReportsPdfRenderer::ExpensesFormData data;data.cleaning=12.25;data.other=7.10;data.total=19.35;
         ReportsPdfRenderer::ExportResult result;
         const auto render=[&]{return ReportsPdfRenderer::renderExpensesPdf(QDate(2026,1,1),QDate(2026,1,31),data,&result);};
@@ -152,14 +160,18 @@ private slots:
         QVERIFY(q.exec("UPDATE staff_accounts SET active=0"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());
         QVERIFY(q.exec("UPDATE staff_accounts SET active=1"));QVERIFY2(render(),qPrintable(result.errorText));
         QVERIFY(q.exec("DROP TABLE settings"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());
-        QVERIFY(q.exec("CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)"));QVERIFY2(render(),qPrintable(result.errorText));
+        QVERIFY(q.exec("CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)"));
+        configureFinancialReportDirectory();QVERIFY2(render(),qPrintable(result.errorText));
     }
     void outsourcePdfFailuresRightsAndRepeat() {
         QString error;QVERIFY2(FinancialPdfReadFixture::run(db,&error),qPrintable(error));
+        configureFinancialReportDirectory();
         ReportsPdfRenderer::ExportResult result;
         const auto render=[&]{return ReportsPdfRenderer::renderOutsourcePdf(QDate(2026,1,1),QDate(2026,1,31),&result);};
         QVERIFY2(render(),qPrintable(result.errorText));QCOMPARE(result.recordCount,2);QVERIFY(result.fileSizeBytes>0);
         const auto path=result.path;const auto original=PayrollReadFixture::bytes(path);
+        const auto sample=QFileInfo(path).absoluteDir().filePath("populated-outsource.pdf");
+        QFile evidence(sample);QVERIFY(evidence.open(QIODevice::WriteOnly));QCOMPARE(evidence.write(original),original.size());evidence.close();
         QSqlQuery q(db);QVERIFY(q.exec("ALTER TABLE outsource_jobs RENAME COLUMN client_price TO invalid_price"));
         QVERIFY(!render());QVERIFY(!result.success);QVERIFY(!result.errorText.isEmpty());QCOMPARE(result.recordCount,0);QCOMPARE(PayrollReadFixture::bytes(path),original);
         QVERIFY(q.exec("ALTER TABLE outsource_jobs RENAME COLUMN invalid_price TO client_price"));QVERIFY2(render(),qPrintable(result.errorText));

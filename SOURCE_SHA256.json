@@ -1212,7 +1212,7 @@
   "src/ui/theme/ThemeManager.h": "b17d8610711a79d99019543cdeea93f7f9031961c7eab8d4df024079d24b6299",
   "src/ui/theme/common.qss": "d09469b4148f33518598f7ceb344afffa23ad61bf7c9f316acbfaac069496410",
   "src/ui/theme/planning.qss": "c07c82766c0c0a4c43ed0a1a93e14530d12a2db14927a801331665ab2305c2e2",
-  "tests/AdditionalExpenseTests.cpp": "6eb869ac1c7a429d8bec425730538a68c1c5a701c14a830004ecabfde4032424",
+  "tests/AdditionalExpenseTests.cpp": "a2ea0e0abf37ae1e3b9457a0dea84392cc24a4d6905509a5581047a8cd7ddad5",
   "tests/ArchiveCrashRecoveryTests.cpp": "7f5c81794a3d18898285efe725fa2017b3c0c94596f2a3347d560b163d9b614a",
   "tests/BackupManagerCriticalFlowTests.cpp": "43b5ffaefe7d3d89c131377e5e143db927b6a7efeed882b490981997b0872d6d",
   "tests/BackupRecoveryAcceptanceTests.cpp": "2217cf807e11138588d878641911df3ec5a717d690dabbe686fb8298d9a30f58",
