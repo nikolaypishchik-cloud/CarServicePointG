@@ -210,7 +210,8 @@ private slots:
         const auto text=ReportsSyncSupport::payrollWorksTextForMaster("11","pdf-master",50,&error);QVERIFY2(error.isEmpty(),qPrintable(error));QCOMPARE(text.count("0.03"),2);
         ReportsPdfRenderer::ExportResult result;auto render=[&]{return ReportsPdfRenderer::renderPayrollPdf(QDate(2026,1,1),QDate(2026,1,31),&result);};
         QVERIFY2(render(),qPrintable(result.errorText));const auto path=result.path;const auto good=PayrollReadFixture::bytes(path);QVERIFY(good.startsWith("%PDF"));
-        QVERIFY(q.exec("INSERT INTO router_cache_work_orders(number,order_uid,order_number,order_year,opened_at,closed_at,status) VALUES(12,'pdf-collision-order',8,2025,'2025-01-01','2026-01-02','closed')"));
+        QVERIFY2(q.exec("INSERT INTO router_cache_work_orders(number,order_uid,order_number,order_year,opened_at,closed_at,status,plate,plate_norm,car,client) "
+                        "VALUES(12,'pdf-collision-order',8,2025,'2025-01-01','2026-01-02','closed','','','Archived car','Archived client')"),qPrintable(q.lastError().text()));
         QVERIFY(q.exec("INSERT INTO router_cache_work_order_services(id,order_number,order_uid,service_uid,title,qty,price,amount) VALUES(31,12,'pdf-collision-order','pdf-collision-service','Foreign work',1,100,100)"));
         QVERIFY(read().isEmpty());QVERIFY(!error.isEmpty());
         QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());QCOMPARE(PayrollReadFixture::bytes(path),good);

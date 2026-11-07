@@ -239,7 +239,9 @@ void renderPayrollPages(
 
         const int summaryRowH = mmToPx(&pdf, 7.0);
         x = theme.left;
-        const double grossAccrued = FormatUtils::roundMoneyValue(m.worksTotal * m.percent / 100.0);
+        qint64 grossCents = 0;
+        for (const auto& order : m.orders) grossCents += qRound64(order.masterAmount * 100.0);
+        const double grossAccrued = grossCents / 100.0;
         drawCell(painter, QRect(x, y, w[0] + w[1] + w[2] + w[3], summaryRowH), QString::fromUtf8("ПІДСУМОК"), fonts.summary,
                  Qt::AlignCenter, Qt::white, kPdfTablePenWidth);
         drawCell(painter, QRect(x + w[0] + w[1] + w[2] + w[3], y, w[4], summaryRowH), money2(grossAccrued) + QString::fromUtf8(" грн"),
