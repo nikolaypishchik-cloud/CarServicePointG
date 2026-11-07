@@ -1,3 +1,4 @@
+#include "FinancialPdfReadFixture.h"
 #include "StatisticsReadFixture.h"
 #include "core/services/statistics/StatisticsReadService.h"
 #include <QtTest/QtTest>
@@ -135,6 +136,39 @@ private slots:
         QCOMPARE(QSqlDatabase::connectionNames(), before);
     }
 
+    void financialPdfReadFailuresAndRecovery() {
+        QString error;QVERIFY2(FinancialPdfReadFixture::run(db,&error),qPrintable(error));
+    }
+    void expensePdfFailuresRightsAndRepeat() {
+        QString error;QVERIFY2(FinancialPdfReadFixture::run(db,&error),qPrintable(error));
+        ReportsPdfRenderer::ExpensesFormData data;data.cleaning=12.25;data.other=7.10;data.total=19.35;
+        ReportsPdfRenderer::ExportResult result;
+        const auto render=[&]{return ReportsPdfRenderer::renderExpensesPdf(QDate(2026,1,1),QDate(2026,1,31),data,&result);};
+        QVERIFY2(render(),qPrintable(result.errorText));QVERIFY(result.success);QVERIFY(result.fileSizeBytes>0);
+        const auto path=result.path;const auto original=PayrollReadFixture::bytes(path);QVERIFY(original.startsWith("%PDF"));
+        QSqlQuery q(db);QVERIFY(q.exec("ALTER TABLE expenses RENAME COLUMN cleaning TO invalid_cleaning"));
+        QVERIFY(!render());QVERIFY(!result.success);QVERIFY(!result.errorText.isEmpty());QCOMPARE(result.recordCount,0);QCOMPARE(PayrollReadFixture::bytes(path),original);
+        QVERIFY(q.exec("ALTER TABLE expenses RENAME COLUMN invalid_cleaning TO cleaning"));QVERIFY2(render(),qPrintable(result.errorText));
+        QVERIFY(q.exec("UPDATE staff_accounts SET active=0"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());
+        QVERIFY(q.exec("UPDATE staff_accounts SET active=1"));QVERIFY2(render(),qPrintable(result.errorText));
+        QVERIFY(q.exec("DROP TABLE settings"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());
+        QVERIFY(q.exec("CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)"));QVERIFY2(render(),qPrintable(result.errorText));
+    }
+    void outsourcePdfFailuresRightsAndRepeat() {
+        QString error;QVERIFY2(FinancialPdfReadFixture::run(db,&error),qPrintable(error));
+        ReportsPdfRenderer::ExportResult result;
+        const auto render=[&]{return ReportsPdfRenderer::renderOutsourcePdf(QDate(2026,1,1),QDate(2026,1,31),&result);};
+        QVERIFY2(render(),qPrintable(result.errorText));QCOMPARE(result.recordCount,2);QVERIFY(result.fileSizeBytes>0);
+        const auto path=result.path;const auto original=PayrollReadFixture::bytes(path);
+        QSqlQuery q(db);QVERIFY(q.exec("ALTER TABLE outsource_jobs RENAME COLUMN client_price TO invalid_price"));
+        QVERIFY(!render());QVERIFY(!result.success);QVERIFY(!result.errorText.isEmpty());QCOMPARE(result.recordCount,0);QCOMPARE(PayrollReadFixture::bytes(path),original);
+        QVERIFY(q.exec("ALTER TABLE outsource_jobs RENAME COLUMN invalid_price TO client_price"));QVERIFY2(render(),qPrintable(result.errorText));
+        QVERIFY(q.exec("ALTER TABLE router_work_orders RENAME TO missing_orders"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());
+        QVERIFY(q.exec("ALTER TABLE missing_orders RENAME TO router_work_orders"));QVERIFY2(render(),qPrintable(result.errorText));
+        QVERIFY(q.exec("UPDATE staff_accounts SET active=0"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());
+        QVERIFY(q.exec("UPDATE staff_accounts SET active=1"));QVERIFY2(render(),qPrintable(result.errorText));QCOMPARE(result.recordCount,2);
+        QVERIFY(q.exec("DELETE FROM outsource_jobs"));QVERIFY2(render(),qPrintable(result.errorText));QCOMPARE(result.recordCount,0);
+    }
     void statisticsReadFailuresAndRecovery() {
         QString error;QVERIFY2(StatisticsReadFixture::run(&error),qPrintable(error));
     }

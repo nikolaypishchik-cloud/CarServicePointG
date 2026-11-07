@@ -13,9 +13,9 @@
 
 namespace {
 
-QString money0(double value)
+QString money2(double value)
 {
-    return FormatUtils::money(value, 0);
+    return FormatUtils::money(value, 2);
 }
 
 } // namespace
@@ -124,8 +124,8 @@ void renderOutsourcePages(
                 row.company,
                 row.orderNumber,
                 row.partName,
-                money0(row.repairCost),
-                money0(row.clientPrice)
+                money2(row.repairCost),
+                money2(row.clientPrice)
             };
             int rowH = mmToPx(&pdf, 14.0);
             for (int i = 0; i < cells.size(); ++i) {
@@ -170,8 +170,8 @@ void renderOutsourcePages(
     };
 
     summaryLine(QString::fromUtf8("Відправлено на ремонт"), QString::number(count));
-    summaryLine(QString::fromUtf8("Вартість ремонту:"), money0(repairTotal) + QString::fromUtf8(" грн"));
-    summaryLine(QString::fromUtf8("Маржа:"), money0(marginTotal) + QString::fromUtf8(" грн"));
+    summaryLine(QString::fromUtf8("Вартість ремонту:"), money2(repairTotal) + QString::fromUtf8(" грн"));
+    summaryLine(QString::fromUtf8("Маржа:"), money2(marginTotal) + QString::fromUtf8(" грн"));
 }
 
 } // namespace ReportsPdfOutsourcePageSupport

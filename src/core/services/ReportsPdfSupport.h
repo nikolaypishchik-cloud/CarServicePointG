@@ -114,7 +114,9 @@ QList<PeriodPdfRow> collectPeriodPdfRows(const QString& df, const QString& dt,
                                          double& outsourceMargin, double& salaryTotal, double& expensesTotal, QString* error = nullptr);
 QMap<QString, QList<PartPdfRow>> collectPartsPdfGroups(const QString& df, const QString& dt);
 QMap<QString, QList<OutsourcePdfRow>> collectOutsourceGroups(const QString& df, const QString& dt,
-                                                             int& count, double& repairTotal, double& clientTotal);
+                                                             int& count, double& repairTotal, double& clientTotal, QString* error = nullptr);
+bool validateFinancialPdfSource(const QDate& from, const QDate& to, QString* error);
+bool validateExpensesPdfSource(const QDate& from, const QDate& to, QString* error);
 QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& dt, QString* error = nullptr, bool includeWorkText = true);
 QMap<QString,double> loadMarkupMapForReports(const QString& key);
 bool isMotorOilName(QString name);
