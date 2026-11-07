@@ -1,3 +1,4 @@
+#include "core/services/PayrollIdentityRead.h"
 #include "core/services/ReportsSyncSupport.h"
 #include "core/services/LegacyAncillaryMutationLogSupport.h"
 #include "core/services/ReportsDateUtils.h"
@@ -76,39 +77,8 @@ double resolvePayrollPercent(const MasterRow& master, const PayrollPercentResolv
 
 QString payrollWorksTextForMasterImpl(QSqlDatabase db,const QString& orderNumber, const QString& masterId, double payrollPercent, QString* error)
 {
-    QSqlQuery dq(db);
-    dq.prepare(QStringLiteral("SELECT COALESCE(discount,0), COALESCE(works_sum,0), COALESCE(discount_mode,'legacy') FROM router_work_orders WHERE number=?"));
-    dq.addBindValue(orderNumber);
-    if(error)error->clear();
-    double discountPct = 0.0;
-    if(!dq.exec() || !dq.next()){if(error)*error=dq.lastError().isValid()?dq.lastError().text():QStringLiteral("Payroll order is unavailable");return {};}
-    {
-        discountPct = FormatUtils::discountPercent(dq.value(0).toDouble(), dq.value(2).toString(), dq.value(1).toDouble());
-    }
-
-    QStringList works;
-    QSqlQuery svcQ(db);
-    svcQ.prepare(
-        QStringLiteral("SELECT COALESCE(s.title,''), COALESCE(s.amount,0), COALESCE(sm.share_percent,0) "
-                       "FROM router_work_order_services s "
-                       "JOIN router_service_masters sm ON sm.service_id = s.id "
-                       "WHERE s.order_number=? AND sm.master_id=? "
-                       "AND NOT EXISTS (SELECT 1 FROM outsource_jobs oj WHERE oj.service_id = s.id) "
-                       "ORDER BY s.id ASC"));
-    svcQ.addBindValue(orderNumber);
-    svcQ.addBindValue(masterId);
-    if(!svcQ.exec()){if(error)*error=svcQ.lastError().text();return {};}
-    {
-        while (svcQ.next()) {
-            const QString title = svcQ.value(0).toString();
-            const double sharedAmount = svcQ.value(1).toDouble() * svcQ.value(2).toDouble() / 100.0;
-            const double discountedAmount = qMax(0.0, FormatUtils::roundMoneyValue(sharedAmount * (1.0 - discountPct / 100.0)));
-            const double payrollAmount = FormatUtils::roundMoneyValue(discountedAmount * payrollPercent / 100.0);
-            works << QString::fromUtf8("%1 — %2 грн").arg(title, FormatUtils::money(payrollAmount, 2));
-        }
-    }
-    if(svcQ.lastError().isValid()){if(error)*error=svcQ.lastError().text();return {};}
-    return works.join(QStringLiteral("\n"));
+    const auto rows=PayrollIdentityRead::read(db,masterId,{}, {},payrollPercent,error,orderNumber);
+    return rows.isEmpty()?QString():rows.first().works;
 }
 
 void ensurePayrollOrderAdjustmentsTable()
@@ -140,6 +110,14 @@ bool upsertPayrollOrderAdjustment(const QString& masterId,
         return false;
     }
 
+    QSqlQuery owner(Database::db());
+    owner.prepare(QStringLiteral("SELECT COUNT(*) FROM router_work_orders WHERE number=?"));
+    owner.addBindValue(orderNumber);
+    if(!owner.exec()||!owner.next()||owner.value(0).toInt()!=1) {
+        if(errorMessage)*errorMessage=owner.lastError().isValid()?owner.lastError().text():QStringLiteral("Payroll adjustment order identity is ambiguous or unavailable");
+        return false;
+    }
+    owner.finish();
     ensurePayrollOrderAdjustmentsTable();
     QSqlQuery q(Database::db());
     q.prepare(QStringLiteral(
@@ -227,50 +205,7 @@ QList<PayrollOrderRow> collectPayrollOrdersForMaster(QSqlDatabase db,const QStri
         return out;
     }
 
-    QSqlQuery q(db);
-    q.prepare(
-        QStringLiteral("SELECT wo.number, COALESCE(wo.order_number,wo.number), substr(COALESCE(NULLIF(wo.opened_at,''),''),1,10), substr(NULLIF(TRIM(wo.closed_at),''),1,10), "
-                       "COALESCE(wo.plate,''), COALESCE(wo.car,''), "
-                       "COALESCE(SUM(COALESCE(s.amount,0) * COALESCE(sm.share_percent,0) / 100.0), 0) AS share_raw, "
-                       "COALESCE(wo.discount,0), COALESCE(wo.works_sum,0), COALESCE(adj.absent,0), COALESCE(wo.discount_mode,'legacy') "
-                       "FROM router_work_orders wo "
-                       "JOIN router_work_order_services s ON s.order_number = wo.number "
-                       "JOIN router_service_masters sm ON sm.service_id = s.id "
-                       "LEFT JOIN payroll_order_adjustments adj ON adj.master_id = sm.master_id AND adj.order_number = wo.number "
-                       "WHERE wo.status='closed' AND sm.master_id=? "
-                       "AND COALESCE(adj.deleted,0)=0 "
-                       "AND NOT EXISTS (SELECT 1 FROM outsource_jobs oj WHERE oj.service_id = s.id) "
-                       "AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) >= date(?) "
-                       "AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) <= date(?) "
-                       "GROUP BY wo.number, wo.order_number, wo.opened_at, wo.closed_at, wo.plate, wo.car, wo.discount, wo.works_sum, adj.absent "
-                       "ORDER BY date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) ASC, wo.number ASC"));
-    q.addBindValue(masterId);
-    q.addBindValue(df);
-    q.addBindValue(dt);
-
-    if(!q.exec()){failure=q.lastError().text();return fail();}
-    {
-        while (q.next()) {
-            PayrollOrderRow row;
-            row.internalOrderNumber = q.value(0).toInt();
-            row.orderNumber = q.value(1).toString();
-            row.dateStart = ReportsDateUtils::displayDate(q.value(2).toString());
-            row.dateEnd = ReportsDateUtils::displayDate(q.value(3).toString(), q.value(2).toString());
-            row.car = composePlateCarForUi(q.value(4).toString(), q.value(5).toString());
-            const double shareRaw = q.value(6).toDouble();
-            const double discountRaw = q.value(7).toDouble();
-            const double worksTotal = q.value(8).toDouble();
-            const double discountPct = FormatUtils::discountPercent(discountRaw, q.value(10).toString(), worksTotal);
-            row.absent = q.value(9).toInt() != 0;
-            row.amount = qMax(0.0, FormatUtils::roundMoneyValue(shareRaw * (1.0 - discountPct / 100.0)));
-            row.masterAmount = row.absent ? 0.0 : FormatUtils::roundMoneyValue(row.amount * percent / 100.0);
-            row.works = payrollWorksTextForMasterImpl(db,QString::number(row.internalOrderNumber), masterId, percent,&failure);
-            if(!failure.isEmpty())return fail();
-            out.append(row);
-        }
-    }
-    if(q.lastError().isValid()){failure=q.lastError().text();return fail();}
-    return out;
+    return PayrollIdentityRead::read(db,masterId,df,dt,percent,error);
 }
 
 bool setPayrollOrderAbsent(const QString& masterId, int orderNumber, bool absent, QString* errorMessage)

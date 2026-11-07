@@ -41,3 +41,5 @@
 7. Приймальні сценарії: однакові номери різних років/джерел; дубль UID; повтор одного джерела; суперечливі батьківські ключі; сирітські залежності; відсутні/пошкоджені дати; аварія на кожному етапі; повтор після явного розв'язання неоднозначності.
 
 DBY-T189 (DBY-04/06/07): invoice import selects by visible number and stable UID without using invoice year or creating missing orders. Active/archive owner and v1 receipt guards have portable Qt evidence; public service/review/archive native slots await Windows. See DBY_T189_INVOICE_OWNER.md; these workstreams remain IN_PROGRESS.
+
+DBY-T190 (DBY-02/06): master payroll detail/text/PDF/snapshot now share checked UID ownership and per-work half-up amounts. Numeric-only ambiguous assignments/adjustments reject unconfirmed earnings. Linux public-read evidence and exact Windows slots: DBY_T190_PAYROLL_IDENTITY.md; native/full-suite acceptance remains pending.

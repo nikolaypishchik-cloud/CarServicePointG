@@ -1,4 +1,5 @@
 #include "ReportsDialogSupport.h"
+#include "core/util/FormatUtils.h"
 
 #include <QAbstractItemView>
 #include <QCheckBox>
@@ -106,7 +107,7 @@ QVector<ReportsTableSupport::ReportsSnapshotTableModel::Row> buildPayrollOrdersR
             makePayrollOrdersCell(order.orderNumber, int(Qt::AlignLeft | Qt::AlignVCenter), order.internalOrderNumber),
             makePayrollOrdersCell(order.car),
             makePayrollOrdersCell(order.works),
-            makePayrollOrdersCell(ReportsUiSupport::money0(payrollAmount), int(Qt::AlignRight | Qt::AlignVCenter), payrollAmount),
+            makePayrollOrdersCell(FormatUtils::money(payrollAmount,2), int(Qt::AlignRight | Qt::AlignVCenter), payrollAmount),
             makePayrollOrdersCell(QString(), int(Qt::AlignCenter | Qt::AlignVCenter), order.absent),
             makePayrollOrdersCell(QString(), int(Qt::AlignCenter | Qt::AlignVCenter))
         };
@@ -137,7 +138,7 @@ void updatePayrollSummaryLabel(QLabel* label, const QList<PayrollOrderRow>& orde
 {
     if (!label) return;
     label->setText(QString::fromUtf8("%1 — нараховано: %2 грн")
-        .arg(masterLabel, ReportsUiSupport::money0(recalcPayrollSummary(orders))));
+        .arg(masterLabel, FormatUtils::money(recalcPayrollSummary(orders),2)));
 }
 
 int rowForWidget(QTableView* table, QWidget* widget)

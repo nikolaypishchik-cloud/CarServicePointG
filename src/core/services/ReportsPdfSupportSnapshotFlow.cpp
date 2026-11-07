@@ -1,3 +1,4 @@
+#include "core/services/PayrollIdentityRead.h"
 #include "core/util/DateFormats.h"
 // P2 architecture migration: implementation module converted from legacy .ipp implementation-fragment decomposition.
 // Compiled as a separate P2 implementation module; include-order dependencies are isolated in the module prelude.
@@ -313,6 +314,8 @@ QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& 
     int activeMasterCount=0;for(const auto& m:masters)if(m.role=="master")++activeMasterCount;
     const double sharedExpensesPerMaster=activeMasterCount>0?periodExpensesTotal(df,dt,&failure)/activeMasterCount:0;
     if(!failure.isEmpty())return fail();
+    PayrollIdentityRead::Graph payrollGraph;
+    if(!PayrollIdentityRead::loadGraph(db,&payrollGraph,&failure))return fail();
     for (const auto& m : masters) {
         PayrollMasterPdf pm; pm.masterId = m.id; pm.masterName = m.role == QStringLiteral("admin") ? QString::fromUtf8("Адмін: %1").arg(m.name) : m.name; pm.percent = resolvePayrollPercent(m, payrollResolver);
         if (m.role == QStringLiteral("admin")) {
@@ -322,29 +325,17 @@ QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& 
             if (pm.accrued > 0.0 || pm.toIssue > 0.0) mastersOut.append(pm);
             continue;
         }
-        QSqlQuery ordersQ(Database::db());
-        ordersQ.prepare(QStringLiteral("SELECT wo.number, COALESCE(wo.order_number,wo.number), substr(wo.opened_at,1,10), substr(NULLIF(TRIM(wo.closed_at),''),1,10), wo.plate, wo.car, wo.engine_type, wo.engine_volume, COALESCE(SUM(COALESCE(s.amount,0) * COALESCE(sm.share_percent,0) / 100.0), 0), COALESCE(wo.discount,0), COALESCE(wo.works_sum,0), COALESCE(wo.discount_mode,'legacy') FROM router_work_orders wo JOIN router_work_order_services s ON s.order_number = wo.number JOIN router_service_masters sm ON sm.service_id = s.id LEFT JOIN payroll_order_adjustments adj ON adj.master_id = sm.master_id AND adj.order_number = wo.number WHERE wo.status='closed' AND sm.master_id=? AND COALESCE(adj.absent,0)=0 AND COALESCE(adj.deleted,0)=0 AND NOT EXISTS (SELECT 1 FROM outsource_jobs oj WHERE oj.service_id = s.id) AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) >= date(?) AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) <= date(?) GROUP BY wo.number, wo.order_number, wo.opened_at, wo.closed_at, wo.plate, wo.car, wo.engine_type, wo.engine_volume, wo.discount, wo.works_sum ORDER BY wo.number ASC"));
-        ordersQ.addBindValue(m.id); ordersQ.addBindValue(df); ordersQ.addBindValue(dt);
-        if(!ordersQ.exec()){failure=ordersQ.lastError().text();return fail();}
-        while (ordersQ.next()) {
-            PayrollOrderRow row;
-            row.internalOrderNumber = ordersQ.value(0).toInt();
-            const QString orderNumber = ordersQ.value(1).toString();
-            row.dateStart = ReportsDateUtils::dmy(ordersQ.value(2).toString());
-            row.dateEnd = ReportsDateUtils::dmy(ordersQ.value(3).toString());
-            row.orderNumber = orderNumber;
-            row.car = composePlateCarForUi(ordersQ.value(4).toString(), ordersQ.value(5).toString());
-            row.engine = QStringLiteral("%1\n%2").arg(ordersQ.value(6).toString(), ordersQ.value(7).toString());
-            row.amount = FormatUtils::roundMoneyValue(ordersQ.value(8).toDouble() * (1.0 - FormatUtils::discountPercent(ordersQ.value(9).toDouble(), ordersQ.value(11).toString(), ordersQ.value(10).toDouble()) / 100.0));
-            row.masterAmount = FormatUtils::roundMoneyValue(row.amount * pm.percent / 100.0);
-            if(includeWorkText)row.works = ReportsSyncSupport::payrollWorksTextForMaster(QString::number(row.internalOrderNumber), m.id, pm.percent,&failure);
-            if(!failure.isEmpty())return fail();
-            pm.orders.append(row);
-            pm.ordersCount += 1;
-            pm.worksTotal += row.amount;
+        const auto orders=PayrollIdentityRead::read(db,m.id,df,dt,pm.percent,&failure,{},&payrollGraph);
+        if(!failure.isEmpty())return fail();
+        for(auto row:orders) {
+            if(row.absent)continue;
+            if(!includeWorkText)row.works.clear();
+            pm.orders.append(row);++pm.ordersCount;pm.worksTotal+=row.amount;pm.accrued+=row.masterAmount;
         }
-        if(ordersQ.lastError().isValid()){failure=ordersQ.lastError().text();return fail();}
-        pm.accrued=FormatUtils::roundMoneyValue(pm.worksTotal * pm.percent / 100.0); pm.sharedExpenses=sharedExpensesPerMaster; pm.accrued=qMax(0.0, pm.accrued - sharedExpensesPerMaster);
+        std::stable_sort(pm.orders.begin(),pm.orders.end(),[](const PayrollOrderRow& a,const PayrollOrderRow& b){return a.internalOrderNumber<b.internalOrderNumber;});
+        pm.worksTotal=FormatUtils::roundMoneyValue(pm.worksTotal);
+        pm.sharedExpenses=sharedExpensesPerMaster;
+        pm.accrued=qMax(0.0,FormatUtils::roundMoneyValue(pm.accrued-sharedExpensesPerMaster));
         pm.issued = issuedPayrollForMaster(issuedTotals, m);
         pm.toIssue = qMax(0.0, pm.accrued - pm.issued);
         if (pm.accrued > 0.0 || pm.toIssue > 0.0) mastersOut.append(pm);

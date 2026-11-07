@@ -1,3 +1,4 @@
+#include "core/services/PayrollIdentityRead.h"
 #include "core/services/orders/ClientReceiptReader.h"
 #include "core/util/DateFormats.h"
 // P2 architecture migration: implementation module converted from legacy .ipp implementation-fragment decomposition.
@@ -648,6 +649,8 @@ PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, c
 
             if(!snapshot.error.isEmpty())return;
             int activeMasterCount = 0;
+            PayrollIdentityRead::Graph payrollGraph;
+            if(!PayrollIdentityRead::loadGraph(db,&payrollGraph,&snapshot.error))return;
             for (const auto& m : masters) if (m.role == QStringLiteral("master")) ++activeMasterCount;
             const double sharedExpensesPerMaster = activeMasterCount > 0 ? periodExpensesTotalForReports(db, df, dt,&snapshot.error) / activeMasterCount : 0.0;
 
@@ -678,45 +681,18 @@ PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, c
                     accrued = FormatUtils::roundMoneyValue(baseSum * percent / 100.0);
                     if (!(m.active || baseSum > 0.0)) continue;
                 } else {
-                    QSqlQuery q(db);
-                    q.prepare(QStringLiteral(
-                        "SELECT wo.number, COALESCE(SUM(COALESCE(s.amount,0) * COALESCE(sm.share_percent,0) / 100.0), 0) AS share_raw, "
-                        "COALESCE(wo.discount,0), COALESCE(wo.works_sum,0), COALESCE(wo.discount_mode,'legacy') "
-                        "FROM router_work_orders wo "
-                        "JOIN router_work_order_services s ON s.order_number = wo.number "
-                        "JOIN router_service_masters sm ON sm.service_id = s.id "
-                        "LEFT JOIN payroll_order_adjustments adj ON adj.master_id = sm.master_id AND adj.order_number = wo.number "
-                        "WHERE wo.status='closed' AND sm.master_id=? "
-                        "AND COALESCE(adj.absent,0)=0 AND COALESCE(adj.deleted,0)=0 "
-                        "AND NOT EXISTS (SELECT 1 FROM outsource_jobs oj WHERE oj.service_id = s.id) "
-                        "AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) >= date(?) "
-                        "AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) <= date(?) "
-                        "GROUP BY wo.number "
-                        "ORDER BY wo.number ASC"));
-                    q.addBindValue(m.id);
-                    q.addBindValue(df);
-                    q.addBindValue(dt);
-                    if (!q.exec()){snapshot.error=q.lastError().text();return;}
-                    {
-                        while (q.next()) {
-                            ordersCount += 1;
-                            const double shareRaw = q.value(1).toDouble();
-                            const double discountRaw = q.value(2).toDouble();
-                            const double worksTotal = q.value(3).toDouble();
-                            const double discountPct = FormatUtils::discountPercent(discountRaw, q.value(4).toString(), worksTotal);
-                            baseSum += qMax(0.0, FormatUtils::roundMoneyValue(shareRaw * (1.0 - discountPct / 100.0)));
-                        }
-                    }
-                    if(q.lastError().isValid()){snapshot.error=q.lastError().text();return;}
-                    accrued = FormatUtils::roundMoneyValue(baseSum * percent / 100.0);
-                    accrued = qMax(0.0, accrued - sharedExpensesPerMaster);
+                    const auto orders=PayrollIdentityRead::read(db,m.id,df,dt,percent,&snapshot.error,{},&payrollGraph);
+                    if(!snapshot.error.isEmpty())return;
+                    for(const auto& order:orders)if(!order.absent){++ordersCount;baseSum+=order.amount;accrued+=order.masterAmount;}
+                    baseSum=FormatUtils::roundMoneyValue(baseSum);
+                    accrued=qMax(0.0,FormatUtils::roundMoneyValue(accrued-sharedExpensesPerMaster));
                     if (!(m.active || ordersCount > 0 || baseSum > 0.0)) continue;
                 }
 
                 row.ordersCount = QString::number(ordersCount);
-                row.baseSum = money0(baseSum);
+                row.baseSum = FormatUtils::money(baseSum,2);
                 row.percent = QString::number(percent, 'f', 2);
-                row.accrued = money0(accrued);
+                row.accrued = FormatUtils::money(accrued,2);
                 row.accruedValue = accrued;
                 snapshot.rows.append(row);
                 total += accrued;
@@ -724,7 +700,7 @@ PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, c
 
             snapshot.stats = {
                 QString::fromUtf8("Співробітників:  %1").arg(snapshot.rows.size()),
-                QString::fromUtf8("Нараховано:  %1  грн.").arg(money0(total))
+                QString::fromUtf8("Нараховано:  %1  грн.").arg(FormatUtils::money(total,2))
             };
             };read();
             if(snapshot.error.isEmpty() && !db.commit())snapshot.error=db.lastError().text();
