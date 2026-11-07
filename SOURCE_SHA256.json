@@ -1290,7 +1290,7 @@
   "tests/PayrollReadFailureTests.cpp": "9ff225811284e774dcb4e302e43412e60e8a02f11c2f838919908567f34fb16c",
   "tests/PayrollReadFixture.h": "e5655d640d73822b78296809a4c11124f8fb5754ea0b415e76cb678f71672928",
   "tests/PayrollSupplementReadTests.cpp": "392987085bd9ce74ef149afe08e5dabb7ee5a195d1fb4568ecfeae59a9d4fe7e",
-  "tests/PerformanceAuditScenarios.h": "bf37cdf7551b0cf18510a45344d7869df28e3b6920a4eed048476bd99c553912",
+  "tests/PerformanceAuditScenarios.h": "267bcde8fca0b88190c26938f176609b5f89ef2da5e1fe3cc56e7ddbef389c20",
   "tests/PerformanceAuditSupport.h": "f48e39faaf999daa792a0271c1c5fe3fb06d7ca21e60fa69383ad4688bf1afdf",
   "tests/PerformanceSamples.h": "a3e0f3641883926802ae6a9c01e9f6b1d2621b368f063bc5ce36198ad4e164c6",
   "tests/PeriodReportGraphTests.cpp": "92385e8370dac7b95e53f64456c8c41ae38b635e4859cef779d9563921c293e7",

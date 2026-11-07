@@ -92,7 +92,10 @@ inline int runAudit(QSqlDatabase db, const QString& output) {
     rec.run("parts.all","service",[&]{QString e;auto r=PartsQueryService::loadRows(db,{},from,to,&e);return checked(r.size(),e);},reset);
     auto snap=[](int n,const QStringList& stats){QString e;for(const auto& s:stats)if(s.contains(QString::fromUtf8("Не вдалося")))e="snapshot_error";return checked(n,e);};
     rec.run("reports.period","service",[&]{auto r=ReportsDataLoader::buildPeriodSnapshot(dbPath,df,dt);return snap(r.rows.size(),r.stats);},reset);
-    rec.run("reports.orders","service",[&]{auto r=ReportsDataLoader::buildOrdersSnapshot(dbPath,df,dt);return snap(r.rows.size(),r.stats);},reset);
+    rec.run("reports.orders","service",[&]{
+        const auto r=ReportsDataLoader::buildOrdersSnapshot(dbPath,df,dt);
+        return r.clientPaymentError.isEmpty() ? snap(r.rows.size(),r.stats) : checked(r.rows.size(),r.clientPaymentError);
+    },reset);
     rec.run("reports.parts","service",[&]{auto r=ReportsDataLoader::buildPartsSnapshot(dbPath,df,dt,0,0,{},{});return checked(r.rows.size(),r.error);},reset);
     if (qEnvironmentVariableIsSet("CS_PERF_PARTS_EVIDENCE")) {
         const auto report=ReportsDataLoader::buildPartsSnapshot(dbPath,df,dt,0,0,{},{});
@@ -189,7 +192,16 @@ inline int runAudit(QSqlDatabase db, const QString& output) {
         return checked(table->model()->rowCount(),error);
     },reset);
     rec.run("ui.crm.open-close","ui",[&]{CrmPage p;p.resize(1300,760);p.show();p.refresh();bool ok=waitUntil([&]{return tableReady(&p);});QCoreApplication::processEvents();int rows=0;for(auto* t:p.findChildren<QTableWidget*>())rows+=t->rowCount();return Result{ok,rows,ok?QString():"UI readiness timeout"};},reset);
-    rec.run("ui.statistics.open-close","ui",[&]{StatsPage p;p.resize(1300,760);p.show();p.refresh();QCoreApplication::processEvents();return checked(p.property("performanceOrders").toList().size());},reset);
+    rec.run("ui.statistics.open-close","ui",[&]{
+        StatsPage page;
+        page.resize(1300,760);page.show();page.refresh();
+        const bool ready=waitUntil([&]{
+            return !page.property("statisticsLoading").toBool() &&
+                   (page.property("performanceOrders").isValid() || !page.property("statisticsError").toString().isEmpty());
+        });
+        return checked(page.property("performanceOrders").toList().size(),
+                       ready ? page.property("statisticsError").toString() : QStringLiteral("UI readiness timeout"));
+    },reset);
 
     // Profile real history SQL and focused read-path SQL on the same Qt SQLite connection.
     QJsonArray profiles;
