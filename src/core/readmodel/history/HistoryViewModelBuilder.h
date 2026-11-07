@@ -5,6 +5,6 @@
 
 namespace HistoryViewModelBuilder {
 
-TabularReadModel build(const HistoryQueryResult& queryResult);
+TabularReadModel build(const HistoryQueryResult& queryResult, bool showOrderYear = false);
 
 } // namespace HistoryViewModelBuilder

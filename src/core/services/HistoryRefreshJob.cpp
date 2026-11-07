@@ -37,7 +37,7 @@ Result run(const HistoryQueryParams& params, const std::shared_ptr<std::atomic_b
         return result;
     }
 
-    result.readModel = HistoryViewModelBuilder::build(result.queryResult);
+    result.readModel = HistoryViewModelBuilder::build(result.queryResult, !params.filter.trimmed().isEmpty());
     OrderSnapshotCache::storeHistory(cacheKey, {result.queryResult, result.readModel});
     if (cancelled()) {
         result.cancelled = true;

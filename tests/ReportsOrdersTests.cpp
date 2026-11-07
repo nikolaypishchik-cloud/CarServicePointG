@@ -75,6 +75,7 @@
 #include "core/services/ReportsDateUtils.h"
 #include "infrastructure/db/sqlite/Db.h"
 #include "infrastructure/db/sqlite/DbBootstrapEnsureSchema.h"
+#include <QDateEdit>
 #include "core/services/ActivityAuditService.h"
 #include "core/services/StaffAccountService.h"
 #include "core/services/AccessControlService.h"
@@ -6251,7 +6252,7 @@ void ReportsOrdersTests::annualOrderUiPdfVisibleIdentity()
             const auto content=QString::fromUtf8(text.readAllStandardOutput());
             QFile evidence(QDir(output).filePath(QString("text-%1-%2.txt").arg(year).arg(parts)));
             QVERIFY(evidence.open(QIODevice::WriteOnly));evidence.write(content.toUtf8());evidence.close();
-            if(!QRegularExpression(QString::fromUtf8("№\\s*наряду\\s+7\\b")).match(content).hasMatch())failures<<QString("PDF number %1/%2").arg(year).arg(parts);
+            if(!QRegularExpression(QString::fromUtf8("№\\s*наряду\\s+(?:Дата\\s+)?7\\b")).match(content).hasMatch())failures<<QString("PDF number %1/%2").arg(year).arg(parts);
             QVERIFY(content.contains(QString("PART-ONLY-%1").arg(year)));
             QVERIFY(!content.contains(QString("PART-ONLY-%1").arg(year==2025?2026:2025)));
         }
@@ -6261,12 +6262,25 @@ void ReportsOrdersTests::annualOrderUiPdfVisibleIdentity()
     {
         HistoryPage page;page.resize(1400,900);page.show();
         auto* table=page.findChild<QTableView*>();QVERIFY(table);
-        const auto searches=page.findChildren<QLineEdit*>(QString(),Qt::FindDirectChildrenOnly);QVERIFY(!searches.isEmpty());
-        auto* search=searches.first();search->setFocus();QTest::keyClicks(search,"7");QTest::keyClick(search,Qt::Key_Return);
+        auto* from=page.findChild<QDateEdit*>("historyDateFrom");
+        auto* to=page.findChild<QDateEdit*>("historyDateTo");
+        auto* search=page.findChild<QLineEdit*>("historySearch");
+        QVERIFY(from && to && search);
+        from->setDate(QDate(2025,1,1));to->setDate(QDate(2026,12,31));
+        search->setFocus();QTest::keyClicks(search,"7");QTest::keyClick(search,Qt::Key_Return);
         const auto rowFor=[&](const QString& uid){auto* m=table->model();if(!m)return -1;
             int col=-1;for(int c=0;c<m->columnCount();++c)if(m->headerData(c,Qt::Horizontal).toString()=="__order_uid")col=c;
             if(col<0)return -1;for(int r=0;r<m->rowCount();++r)if(m->index(r,col).data().toString()==uid)return r;return -1;};
         QTRY_VERIFY_WITH_TIMEOUT(rowFor("year-2025")>=0&&rowFor("year-2026")>=0,15000);
+        const auto visibleYear=[&] {
+            for(int c=0;c<table->model()->columnCount();++c)
+                if(table->model()->headerData(c,Qt::Horizontal).toString()==QString::fromUtf8("Рік"))return c;
+            return -1;
+        };
+        const int yearColumn=visibleYear();
+        if(yearColumn<0 || table->isColumnHidden(yearColumn))failures<<"Archive search hides order year";
+        else for(int year:{2025,2026})
+            QCOMPARE(table->model()->index(rowFor(QString("year-%1").arg(year)),yearColumn).data().toInt(),year);
         QVERIFY(page.grab().save(QDir(output).filePath("archive-search.png")));
         for(const QString& uid:QStringList{"year-2025","year-2026"}) {
             search->clear();QTest::keyClicks(search,"7");QTest::keyClick(search,Qt::Key_Return);
@@ -6282,6 +6296,8 @@ void ReportsOrdersTests::annualOrderUiPdfVisibleIdentity()
             QVERIFY(QMetaObject::invokeMethod(table,"doubleClicked",Qt::DirectConnection,Q_ARG(QModelIndex,index)));
             closer.stop();watchdog.stop();QVERIFY(opened);QVERIFY(matched);
         }
+        search->clear();QTest::keyClick(search,Qt::Key_Return);
+        QTRY_VERIFY_WITH_TIMEOUT(visibleYear()<0,15000);
     }
     QVERIFY2(failures.isEmpty(),qPrintable(failures.join('\n')));
 }

@@ -247,6 +247,8 @@ HistoryPage::HistoryPage(QWidget* parent)
 
     m_dateFrom = new QDateEdit(QDate::currentDate().addMonths(-1), this);
     m_dateTo = new QDateEdit(QDate::currentDate(), this);
+    m_dateFrom->setObjectName("historyDateFrom");
+    m_dateTo->setObjectName("historyDateTo");
     for (auto* edit : {m_dateFrom, m_dateTo}) {
         edit->setCalendarPopup(true);
         edit->setDisplayFormat(QStringLiteral("dd.MM.yy"));
@@ -260,6 +262,7 @@ HistoryPage::HistoryPage(QWidget* parent)
     m_dateTo->setToolTip(QString::fromUtf8("Кінець періоду"));
 
     m_search = new QLineEdit(this);
+    m_search->setObjectName("historySearch");
     m_searchDebounce = new QTimer(this);
     m_searchDebounce->setSingleShot(true);
     m_searchDebounce->setInterval(200);
@@ -1009,6 +1012,11 @@ void HistoryPage::restoreHeaderState()
     const QString raw = UiStateSettingsService::loadString(QStringLiteral("ui.history.header_state.v2"));
     if (storedSchema != schema || raw.trimmed().isEmpty()) {
         configureHistoryHeaderForManualWidths(m_table);
+        const int yearColumn = modelColumnByHeader(m_table->model(), QString::fromUtf8("Рік"));
+        if (yearColumn >= 0) {
+            auto* header = m_table->horizontalHeader();
+            header->moveSection(header->visualIndex(yearColumn), 1);
+        }
         return;
     }
 
