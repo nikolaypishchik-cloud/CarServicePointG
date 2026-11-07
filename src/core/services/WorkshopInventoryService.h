@@ -113,8 +113,8 @@ bool ensureSchema(QSqlDatabase database, QString* errorText = nullptr);
 bool addPurchase(QSqlDatabase database, const WorkshopInventoryPurchaseInput& input, qint64* purchaseId = nullptr, QString* errorText = nullptr);
 bool removePurchase(QSqlDatabase database, qint64 purchaseId, QString* errorText = nullptr);
 bool setClientPrice(QSqlDatabase database, qint64 purchaseId, double price, QString* errorText = nullptr);
-QVector<WorkshopInventoryMaterial> loadMaterials(QSqlDatabase database, QString* errorText = nullptr);
-WorkshopInventorySnapshot buildSnapshot(QSqlDatabase database, const QDate& from, const QDate& to);
+QVector<WorkshopInventoryMaterial> loadMaterials(QSqlDatabase database, QString* errorText = nullptr, bool initializeSchema = true);
+WorkshopInventorySnapshot buildSnapshot(QSqlDatabase database, const QDate& from, const QDate& to, bool initializeSchema = true);
 
 bool addPurchase(const WorkshopInventoryPurchaseInput& input, qint64* purchaseId = nullptr, QString* errorText = nullptr);
 bool removePurchase(qint64 purchaseId, QString* errorText = nullptr);

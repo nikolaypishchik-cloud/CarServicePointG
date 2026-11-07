@@ -295,7 +295,7 @@ void ReportsPage::applyCachedTabUi(ReportTab tab)
     if(m_pdfButton) {
         const bool visible = tab!=ReportTab::TotalExpenses && !debtTab;
         m_pdfButton->setVisible(visible);
-        m_pdfButton->setEnabled(!m_pdfExportInFlight && (tab!=ReportTab::Payroll || m_tabKeys.contains(static_cast<int>(ReportTab::Payroll))));
+        m_pdfButton->setEnabled(!m_pdfExportInFlight && ((tab!=ReportTab::Payroll && tab!=ReportTab::Parts) || m_tabKeys.contains(static_cast<int>(tab))));
         if(auto* corner=m_tabs->cornerWidget(Qt::TopRightCorner)) corner->setVisible(visible);
     }
     if(auto* banners=findChild<QWidget*>("reportsBannersHost"))
@@ -501,6 +501,8 @@ void ReportsPage::applyPartsSnapshot(const PartsSnapshot& snapshot)
 
 void ReportsPage::refreshParts()
 {
+    m_tabKeys.remove(static_cast<int>(ReportTab::Parts));
+    if(m_pdfButton)m_pdfButton->setEnabled(false);
     const QString df = m_from->date().toString("yyyy-MM-dd");
     const QString dt = m_to->date().toString("yyyy-MM-dd");
     const QString key = ReportsAsyncSupport::buildTabKey(static_cast<int>(ReportTab::Parts), m_from->date(), m_to->date());
@@ -525,7 +527,8 @@ void ReportsPage::refreshParts()
         if (generation != m_asyncRefreshGeneration) return;
         if (activeTab() != ReportTab::Parts) return;
         applyPartsSnapshot(snapshot);
-        m_tabKeys[static_cast<int>(ReportTab::Parts)] = key;
+        if(snapshot.error.isEmpty())m_tabKeys[static_cast<int>(ReportTab::Parts)] = key;
+        else m_tabKeys.remove(static_cast<int>(ReportTab::Parts));
         applyCachedTabUi(ReportTab::Parts);
     });
 }

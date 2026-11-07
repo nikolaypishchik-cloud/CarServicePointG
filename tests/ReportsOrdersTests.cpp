@@ -1,4 +1,5 @@
 #include "ui/common/dialogs/HistoricalVersionsDialog.h"
+#include "core/services/WorkshopSpareStockService.h"
 #include "core/services/LegacyMutationLogSupport.h"
 #include "core/services/legacyimport/LegacyImportPolicySupport.h"
 #include "infrastructure/db/sqlite/MigrationOrderKeys.h"
@@ -5933,7 +5934,10 @@ void ReportsOrdersTests::orderListAndPrintData()
             "CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT)"
         };
         for (const auto& sql : reportSetup) QVERIFY2(q.exec(sql), qPrintable(q.lastError().text()));
+        QString partsSchemaError;QVERIFY2(WorkshopSpareStockService::ensureSchema(db,&partsSchemaError),qPrintable(partsSchemaError));
+        for(const auto& ddl:QStringList{"ALTER TABLE work_order_parts ADD COLUMN installed_at TEXT DEFAULT ''","ALTER TABLE work_order_parts ADD COLUMN delivery_date TEXT DEFAULT ''","ALTER TABLE work_order_parts ADD COLUMN paid INTEGER DEFAULT 0","ALTER TABLE router_work_orders ADD COLUMN vin TEXT DEFAULT ''"})QVERIFY2(q.exec(ddl),qPrintable(q.lastError().text()));
         const auto purchases = ReportsDataLoader::buildPartsSnapshot(path, "2026-09-01", "2026-09-30", 0, 0, {}, {});
+        QVERIFY2(purchases.error.isEmpty(),qPrintable(purchases.error));
         int linkedRows = 0;
         for (const auto& purchase : purchases.rows) {
             if (purchase.invoiceNumber.isEmpty()) continue;

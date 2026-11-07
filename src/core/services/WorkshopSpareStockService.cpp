@@ -311,15 +311,15 @@ bool addBatch(QSqlDatabase db, const QVector<BatchLine>& lines, const QDate& rec
     if(!tx.commit(error))return false;
     saved=true;changed(0);return true;
 }
-QVector<WorkshopSpareOrder> orders(QSqlDatabase db, QString* error) {
+QVector<WorkshopSpareOrder> orders(QSqlDatabase db, QString* error, bool initializeSchema) {
     QVector<WorkshopSpareOrder> result;
     if(error) error->clear();
-    if(!ensureSchema(db,error)) return result;
+    if(initializeSchema && !ensureSchema(db,error)) return result;
     const auto paid=PurchasePaymentService::balances(db,error);
     if(error && !error->isEmpty()) return result;
     QSet<qint64> returned;
     QSqlQuery returnRows(db);if(!returnRows.exec("SELECT spare_id FROM workshop_spare_returns")){fail(error,returnRows.lastError().text());return {};}
-    while(returnRows.next())returned.insert(returnRows.value(0).toLongLong());returnRows.finish();
+    while(returnRows.next())returned.insert(returnRows.value(0).toLongLong());if(returnRows.lastError().isValid()){fail(error,returnRows.lastError().text());return {};}returnRows.finish();
     QSqlQuery q(db);
     if(!q.exec("SELECT s.id,s.name,s.article,s.brand,s.model,s.plate,s.vin,s.master_id,s.master_name,s.supplier,s.shelf,s.document,s.ordered_on,s.expected_on,s.due_on,s.quantity,s.unit_cost,s.client_price,s.revision,COALESCE(SUM(CASE WHEN m.operation='receipt' THEN m.quantity ELSE 0 END),0),COALESCE(SUM(CASE WHEN m.operation='issue' THEN m.quantity ELSE 0 END),0),MAX(CASE WHEN m.operation='receipt' THEN m.moved_on END) FROM workshop_spare_orders s LEFT JOIN workshop_spare_movements m ON m.spare_id=s.id GROUP BY s.id ORDER BY s.id DESC")) { fail(error,q.lastError().text()); return result; }
     while(q.next()) {
@@ -332,12 +332,14 @@ QVector<WorkshopSpareOrder> orders(QSqlDatabase db, QString* error) {
         r.quantity=q.value(15).toDouble(); r.unitCost=q.value(16).toDouble(); r.clientPrice=q.value(17).toDouble(); r.revision=q.value(18).toInt();
         r.received=q.value(19).toDouble(); r.issued=q.value(20).toDouble(); r.deliveredOn=QDate::fromString(q.value(21).toString(),Qt::ISODate); result.append(r);
     }
+    if(q.lastError().isValid()){fail(error,q.lastError().text());return {};}
     QSqlQuery attachments(db);
     if (!attachments.exec("SELECT spare_id,file_path,display_name FROM workshop_spare_attachments")) {
         fail(error, attachments.lastError().text()); return {};
     }
     QHash<qint64, QPair<QString, QString>> files;
     while (attachments.next()) files.insert(attachments.value(0).toLongLong(), {attachments.value(1).toString(), attachments.value(2).toString()});
+    if(attachments.lastError().isValid()){fail(error,attachments.lastError().text());return {};}
     for (auto& r : result) {
         const auto file = files.value(r.id);
         r.invoicePath = file.first; r.invoiceName = file.second;
@@ -353,6 +355,7 @@ QVector<WorkshopSpareOrder> orders(QSqlDatabase db, QString* error) {
         const auto received=QDate::fromString(debt.value(4).toString(),Qt::ISODate);
         if(remaining>0 && received.isValid() && (!oldestUnpaid.value(id).isValid() || received<oldestUnpaid.value(id))) oldestUnpaid[id]=received;
     }
+    if(debt.lastError().isValid()){fail(error,debt.lastError().text());return {};}
     const auto today=QDate::currentDate();
     for(auto& r:result) {
         r.debtCents=totals.value(r.id);

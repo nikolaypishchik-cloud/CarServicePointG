@@ -1,5 +1,9 @@
 #include <QtTest/QtTest>
 #include "PayrollReadFixture.h"
+#include "infrastructure/db/sqlite/DbBootstrapEnsureSchema.h"
+#include "infrastructure/db/sqlite/DbFacadeSupport.h"
+#include "core/services/WorkshopSpareStockService.h"
+#include "core/services/PartsQueryService.h"
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -124,6 +128,37 @@ private slots:
         QCOMPARE(QSqlDatabase::connectionNames(), before);
     }
 
+    void partsReadFailuresAndRecovery() {
+        QString error;QVERIFY(ensureWorkspaceSchema(db));QVERIFY(ensureRouterCacheSchema(db));QVERIFY(rebuildRouterViews(db));
+        QVERIFY2(WorkshopSpareStockService::ensureSchema(db,&error),qPrintable(error));
+        const auto read=[&](const QString& path){return ReportsDataLoader::buildPartsSnapshot(path,"2026-01-01","2026-01-31",0,0,{},{});};
+        const auto missing=dir.filePath("missing-parts.db");QVERIFY(!read(missing).error.isEmpty());QVERIFY(!QFile::exists(missing));
+        QVERIFY(!read(dir.path()).error.isEmpty());
+        auto empty=read(db.databaseName());QVERIFY2(empty.error.isEmpty(),qPrintable(empty.error));QVERIFY(empty.rows.isEmpty());
+        QSqlQuery q(db);QVERIFY(q.exec("INSERT INTO work_orders(number,order_uid,order_number,order_year,opened_at,status,car) VALUES(11,'parts-report-order',7,2026,'2026-01-01','open','Synthetic')"));
+        QVERIFY(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,name,store,ordered_at,qty,purchase_price,purchase_amount,price,amount,markup_percent,manual_markup_override) VALUES(21,11,'parts-report-order','parts-report-part','Synthetic part','Shop','2026-01-01',1,30,30,45,45,50,1)"));
+        PartsQueryService::invalidateCache();
+        auto good=read(db.databaseName());QVERIFY2(good.error.isEmpty(),qPrintable(good.error));QCOMPARE(good.rows.size(),2);
+        QCOMPARE(good.rows.last().purchase,QString("30"));
+        const auto original=PayrollReadFixture::bytes(db.databaseName());
+        for(const auto& table:QStringList{"work_order_part_attachments","workshop_inventory_purchases","workshop_spare_movements","workshop_spare_returns","workshop_spare_attachments","settings"}) {
+            QVERIFY2(q.exec("ALTER TABLE "+table+" RENAME TO parts_broken"),qPrintable(q.lastError().text()));
+            const auto failed=read(db.databaseName());QVERIFY2(!failed.error.isEmpty(),qPrintable(table));QVERIFY(failed.rows.isEmpty());QVERIFY(failed.tileBodies.isEmpty());QCOMPARE(failed.stats.size(),1);
+            QVERIFY(q.exec("ALTER TABLE parts_broken RENAME TO "+table));
+            auto repaired=read(db.databaseName());QVERIFY2(repaired.error.isEmpty(),qPrintable(repaired.error));QCOMPARE(repaired.rows.size(),2);
+        }
+        const auto stable=PayrollReadFixture::bytes(db.databaseName());QVERIFY(!original.isEmpty());
+        QVERIFY(read(db.databaseName()).error.isEmpty());QCOMPARE(PayrollReadFixture::bytes(db.databaseName()),stable);
+    }
+    void partsUiRecoversAfterReadFailure() {
+        QString error;QVERIFY(ensureWorkspaceSchema(db));QVERIFY(ensureRouterCacheSchema(db));QVERIFY(rebuildRouterViews(db));QVERIFY(WorkshopSpareStockService::ensureSchema(db,&error));
+        QSqlQuery q(db);QVERIFY(q.exec("ALTER TABLE work_order_part_attachments RENAME TO parts_broken"));
+        ReportsPage page;page.show();auto* tabs=page.findChild<QTabWidget*>();auto* stats=page.findChild<QLabel*>("reportsStatsLabel");auto* pdf=page.findChild<QPushButton*>("reportsPdfButton");QVERIFY(tabs && stats && pdf);
+        int parts=-1;for(int i=0;i<tabs->count();++i)if(tabs->tabText(i)==QString::fromUtf8("Придбання запчастин"))parts=i;QVERIFY(parts>=0);tabs->setCurrentIndex(parts);
+        QTRY_VERIFY_WITH_TIMEOUT(stats->text().contains(QString::fromUtf8("Помилка читання запчастин")),10000);QVERIFY(!pdf->isEnabled());
+        QVERIFY(q.exec("ALTER TABLE parts_broken RENAME TO work_order_part_attachments"));page.refresh();
+        QTRY_VERIFY_WITH_TIMEOUT(pdf->isEnabled(),10000);QVERIFY(!stats->text().contains(QString::fromUtf8("Помилка читання запчастин")));
+    }
     void payrollReadFailuresAndRecovery() {
         QString error;QVERIFY2(PayrollReadFixture::run(&error),qPrintable(error));
     }

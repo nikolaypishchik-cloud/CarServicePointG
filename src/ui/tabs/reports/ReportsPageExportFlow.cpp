@@ -403,6 +403,8 @@ void ReportsPage::exportOrdersPdf()
 
 void ReportsPage::exportPartsPdf()
 {
+    const auto key=ReportsAsyncSupport::buildTabKey(static_cast<int>(ReportTab::Parts),m_from->date(),m_to->date());
+    if(m_tabKeys.value(static_cast<int>(ReportTab::Parts))!=key)return;
     const QDate fromDate = m_from->date();
     const QDate toDate = m_to->date();
     runPdfExportTask(QString::fromUtf8("Формування PDF звіту по запчастинах..."), [fromDate, toDate]() {
