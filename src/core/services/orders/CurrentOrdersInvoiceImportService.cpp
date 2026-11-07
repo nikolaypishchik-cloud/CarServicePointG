@@ -8,6 +8,7 @@
 #include "core/util/FormatUtils.h"
 #include "core/util/OilServiceClassifier.h"
 #include "core/services/orders/InvoiceImportOwnerSupport.h"
+#include "core/services/AccessControlService.h"
 #include "core/services/orders/OrderFinancialService.h"
 #include "core/services/orders/OrderStatusService.h"
 #include "core/services/orders/OrderAttachmentService.h"
@@ -92,7 +93,7 @@ static void logInvoiceRowStage(const QString& traceId, const QString& stage, con
 static bool bindOwners(QList<CurrentOrdersImportServiceRow>& rows, QString* error)
 {
     for (auto& row : rows) {
-        const auto hits=InvoiceImportOwnerSupport::candidates(Database::db(),row.orderNumberText.toInt(),error);
+        const auto hits=CurrentOrdersInvoiceImportService::findOrderCandidates(row.orderNumberText.toInt(),error);
         if (error && !error->isEmpty()) return false;
         row.orderUid=InvoiceImportOwnerSupport::select(hits,row.orderUid,error);
         if (row.orderUid.isEmpty()) return false;
@@ -179,7 +180,14 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailed(const QList
 
 QList<OrderSearchHit> CurrentOrdersInvoiceImportService::findOrderCandidates(int visibleNumber, QString* errorText)
 {
-    return InvoiceImportOwnerSupport::candidates(Database::db(),visibleNumber,errorText);
+    const auto db=Database::db();
+    if (!AccessControlService::currentUserHasPermission(db,"parts.order")) {
+        if (errorText) *errorText=QStringLiteral("Немає дозволу на імпорт запчастин.");
+        return {};
+    }
+    auto owners=InvoiceImportOwnerSupport::candidates(db,visibleNumber,errorText);
+    owners.removeIf([&](const OrderSearchHit& owner){return !AccessControlService::canAccessOrder(db,owner.internalNumber);});
+    return owners;
 }
 
 MutationResult CurrentOrdersInvoiceImportService::importRowsDetailedImpl(const QList<CurrentOrdersImportServiceRow>& rows,
@@ -202,6 +210,7 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailedImpl(const Q
         MutationResult failed; failed.errorText=ownerError; return failed;
     }
     QSet<int> uniqueOrders;
+    QHash<QString,int> preparedOwners;
     QHash<int, int> resolvedOrderBySourceRow;
     for (int sourceRowIndex = 0; sourceRowIndex < rows.size(); ++sourceRowIndex) {
         const CurrentOrdersImportServiceRow& row = boundRows.at(sourceRowIndex);
@@ -213,19 +222,15 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailedImpl(const Q
         }
 
         QString resolveError;
-        int orderNumber=0;
-        QSqlQuery active(db);
-        active.prepare(QStringLiteral("SELECT number FROM work_orders WHERE order_uid=?"));
-        active.addBindValue(row.orderUid);
-        if (!active.exec()) resolveError=active.lastError().text();
-        else if (active.next()) orderNumber=active.value(0).toInt();
-        else if (Database::ensureOrderAvailableInActiveByUid(row.orderUid,&resolveError))
+        int orderNumber=preparedOwners.value(row.orderUid);
+        if (!orderNumber && Database::ensureOrderAvailableInActiveByUid(row.orderUid,&resolveError))
             orderNumber=Database::resolveOrderInternalNumberByUid(row.orderUid);
         if (orderNumber>0 && !InvoiceImportOwnerSupport::validateActive(db,orderNumber,displayedOrderNumber,row.orderUid,&resolveError)) orderNumber=0;
         if (orderNumber <= 0) {
             MutationResult r; r.sourceModule = QStringLiteral("CurrentOrdersInvoiceImportService"); r.entityType = QStringLiteral("work_order_parts_invoice_batch"); r.entityId = row.orderNumberText; r.operation = QStringLiteral("import_invoice_rows"); r.description = QString::fromUtf8("Імпорт рядків накладної в наряди"); r.changedTables = {QStringLiteral("work_order_parts"), QStringLiteral("work_orders")}; r.errorText = resolveError.trimmed().isEmpty() ? QString::fromUtf8("Не вдалося визначити внутрішній № наряду для %1.").arg(row.orderNumberText) : resolveError; return r;
         }
 
+        preparedOwners.insert(row.orderUid,orderNumber);
         resolvedOrderBySourceRow.insert(sourceRowIndex, orderNumber);
         uniqueOrders.insert(orderNumber);
     }
@@ -244,6 +249,13 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailedImpl(const Q
     request.commitErrorFallback = QString::fromUtf8("Не вдалося завершити імпорт.");
 
     const auto execResult = WorkPartsMutationService::execute(request, [&](QSqlDatabase& txDb, QString* txError) {
+        const auto allowed = [&] {
+            if (AccessControlService::currentUserHasPermission(txDb,"parts.order") &&
+                std::all_of(uniqueOrders.cbegin(),uniqueOrders.cend(),[&](int number){return AccessControlService::canAccessOrder(txDb,number);})) return true;
+            if (txError) *txError=QStringLiteral("Немає дозволу на імпорт запчастин до вибраного наряду.");
+            return false;
+        };
+        if (!allowed()) return false;
         QList<QString> owners;
         for (int i=0;i<boundRows.size();++i) {
             const auto& row=boundRows.at(i);
@@ -337,6 +349,7 @@ MutationResult CurrentOrdersInvoiceImportService::importRowsDetailedImpl(const Q
             }
         }
 
+        if (!allowed()) return false;
         for (int i=0;i<boundRows.size();++i) {
             const auto& row=boundRows.at(i);
             if (!InvoiceImportOwnerSupport::validateActive(txDb,resolvedOrderBySourceRow.value(i),

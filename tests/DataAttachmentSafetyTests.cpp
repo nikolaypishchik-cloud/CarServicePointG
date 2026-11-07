@@ -96,6 +96,17 @@ class DataAttachmentSafetyTests final : public QObject {
         sql("INSERT INTO work_orders(number,order_number,order_year,order_uid,opened_at,status,plate,plate_norm,car,client,master_id) "
             "VALUES(1,1,2026,'stage1-order','02.10.26 10:00:00','in_progress','AA 0001 AA','aa0001aa','Test car','Test client','stage1-master')");
     }
+    void addInvoiceOwner(int number,int visible,int year,const QString& uid,bool closed=false) {
+        sql("INSERT OR IGNORE INTO masters(id,name) VALUES('stage1-master','Test Master')");
+        QSqlQuery q(db);
+        q.prepare("INSERT INTO work_orders(number,order_number,order_year,order_uid,opened_at,closed_at,status,plate,plate_norm,car,client,master_id) "
+                  "VALUES(?,?,?,?,?,?,?,'TEST','test','Synthetic car','Synthetic client','stage1-master')");
+        const QDate opened(year,1,1);
+        for (const QVariant& value : QVariantList{number,visible,year,uid,opened.toString(Qt::ISODate),
+                 closed ? opened.addMonths(1).toString(Qt::ISODate) : QString(), closed ? "closed" : "in_progress"})
+            q.addBindValue(value);
+        QVERIFY2(q.exec(),qPrintable(q.lastError().text()));
+    }
 private slots:
     void initTestCase() {
         QVERIFY(scratch.isValid());
@@ -220,7 +231,11 @@ private slots:
     }
     void invoiceImportArchiveOwnerRoute() {
         QString error;
-        sql("INSERT INTO work_orders(number,order_number,order_year,order_uid,opened_at,closed_at,status,plate,car) VALUES(917,917,2024,'invoice-archive-owner','2024-01-01','2024-02-01','closed','TEST 917','Synthetic archived car')");
+        QVERIFY2(Database::runStartupSchemaCheck(&error),qPrintable(error));
+        QVERIFY2(Database::runStartupMigrationCheck(&error),qPrintable(error));
+        QVERIFY2(Database::runStartupRegistryRefresh(&error),qPrintable(error));
+        addInvoiceOwner(917,917,2024,"invoice-archive-owner",true);
+        QVERIFY2(Database::ensureOrderReadyForInteractiveOpen(917,&error),qPrintable(error));
         QVERIFY2(Database::refreshOrderRegistry(917,&error),qPrintable(error));
         QVERIFY2(Database::archiveSingleActiveOrderToArchive(917,&error),qPrintable(error));
         QSqlQuery absent(db);QVERIFY(absent.exec("SELECT COUNT(*) FROM work_orders WHERE order_uid='invoice-archive-owner'"));QVERIFY(absent.next());QCOMPARE(absent.value(0).toInt(),0);absent.finish();
@@ -237,7 +252,7 @@ private slots:
     void invoiceImportVisibleOwnerSelectionAndNoDraft() {
         addOrder(); QString error;
         sql("UPDATE work_orders SET order_number=712,order_year=2024 WHERE number=1");
-        sql("INSERT INTO work_orders(number,order_number,order_year,order_uid,opened_at,status) VALUES(712,713,2026,'invoice-physical-owner','2026-01-01','in_progress')");
+        addInvoiceOwner(712,713,2026,"invoice-physical-owner");
         auto input=rows(); for(auto& row:input) {row.orderNumberText="712";row.priceText="10.25";}
         CurrentOrdersInvoiceAttachmentSpec spec;spec.sourceFilePath=pdfFile("owner-visible.pdf");spec.invoiceNumber="OWNER-1";
         CurrentOrdersInvoiceImportResult result;
@@ -273,7 +288,7 @@ private slots:
             QTest::ignoreMessage(QtCriticalMsg,QRegularExpression("^INVOICE_IMPORT_END trace=INV-[0-9]+ status=failed error="+QRegularExpression::escape(message)+"$"));
             QVERIFY(!CurrentOrdersInvoiceImportService::importRows(input,spec,nullptr,&error));QCOMPARE(error,message);QCOMPARE(count("work_order_parts"),2);
         };
-        sql("INSERT INTO work_orders(number,order_number,order_year,order_uid,opened_at,status) VALUES(914,714,2025,'invoice-other-owner','2025-01-01','in_progress')");
+        addInvoiceOwner(914,714,2025,"invoice-other-owner");
         for(auto& row:input)row.orderUid="invoice-other-owner";
         expectRejected();QCOMPARE(bytes(path),original);
         for(auto& row:input){row.orderUid="stage1-order";row.orderNumberText="714";}
@@ -283,6 +298,39 @@ private slots:
         QVERIFY2(CurrentOrdersInvoiceImportService::importRows(input,spec,nullptr,&error),qPrintable(error));QCOMPARE(count("work_order_parts"),2);
         db.close();QVERIFY(db.open());
         QVERIFY2(CurrentOrdersInvoiceImportService::importRows(input,spec,nullptr,&error),qPrintable(error));QCOMPARE(count("work_order_parts"),2);
+    }
+    void invoiceImportChecksAccessBeforeStaging() {
+        addOrder();
+        addInvoiceOwner(407,1,2025,"other-master-order");
+        sql("INSERT INTO masters(id,name) VALUES('invoice-other-master','Second master')");
+        sql("UPDATE work_orders SET master_id='invoice-other-master' WHERE number=407");
+        sql("INSERT INTO staff_accounts(id,display_name,role,active,master_id) VALUES('invoice-scoped','Scoped master','master',1,'stage1-master')");
+        QString error;
+        QCOMPARE(CurrentOrdersInvoiceImportService::findOrderCandidates(1,&error).size(),2);
+        const auto previous=AccessControlService::grantedPermissions(db,"master",&error);
+        auto permissions=previous; permissions.insert("parts.order");
+        QVERIFY2(AccessControlService::setRolePermissions(db,"master",permissions,&error),qPrintable(error));
+        const auto restore=qScopeGuard([&] {
+            ActivityAuditService::setCurrentActor({"evidence-owner","Test Owner","owner","test"});
+            QVERIFY(AccessControlService::setRolePermissions(db,"master",previous,&error));
+        });
+        ActivityAuditService::setCurrentActor({"invoice-scoped","Scoped master","master","test"});
+        const auto hits=CurrentOrdersInvoiceImportService::findOrderCandidates(1,&error);
+        QVERIFY2(error.isEmpty(),qPrintable(error)); QCOMPARE(hits.size(),1); QCOMPARE(hits.first().orderUid,QString("stage1-order"));
+        auto input=rows();
+        CurrentOrdersInvoiceAttachmentSpec spec;spec.sourceFilePath=pdfFile("scoped-invoice.pdf");spec.invoiceNumber="SCOPED";
+        for(auto& row:input)row.orderUid="other-master-order";
+        QVERIFY(!CurrentOrdersInvoiceImportService::importRows(input,spec,nullptr,&error));
+        QCOMPARE(count("work_order_parts"),0);QCOMPARE(count("work_order_part_attachments"),0);
+        sql("UPDATE staff_accounts SET active=0 WHERE id='invoice-scoped'");
+        QVERIFY(CurrentOrdersInvoiceImportService::findOrderCandidates(1,&error).isEmpty());
+        QVERIFY(!error.isEmpty());
+        for(auto& row:input)row.orderUid="stage1-order";
+        QVERIFY(!CurrentOrdersInvoiceImportService::importRows(input,spec,nullptr,&error));
+        QCOMPARE(count("work_order_parts"),0);
+        sql("UPDATE staff_accounts SET active=1 WHERE id='invoice-scoped'");
+        QVERIFY2(CurrentOrdersInvoiceImportService::importRows(input,spec,nullptr,&error),qPrintable(error));
+        QCOMPARE(count("work_order_parts"),2);
     }
     void invoiceImportOwnerChangeRollsBack() {
         addOrder();QString error;auto input=rows();input=input.mid(0,1);
@@ -297,7 +345,7 @@ private slots:
     }
     void invoiceReviewCsvPdfOwnerSelection() {
         addOrder();QString error;sql("UPDATE work_orders SET order_number=918 WHERE number=1");
-        sql("INSERT INTO work_orders(number,order_number,order_year,order_uid,opened_at,status,plate,car) VALUES(915,918,2025,'invoice-form-owner','2025-01-01','in_progress','TEST 915','Synthetic car')");
+        addInvoiceOwner(915,918,2025,"invoice-form-owner");
         InvoiceImport::ImportedPartDraft draft;draft.orderNumberText="918";draft.name="Synthetic part";draft.oemNumber="FORM-1";draft.qtyText="2";draft.priceText="10.25";
         InvoiceImport::ExcelReadResult data;data.documentDate="2026-10-02";data.documentNumber="FORM-CSV";data.canonicalPdfAttachmentPath=pdfFile("form-csv.pdf");
         const QString csv=file("form.csv","Name,Qty,Price\nSynthetic part,2,10.25\n");
