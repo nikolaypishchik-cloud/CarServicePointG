@@ -18,6 +18,37 @@
 #include <QSqlQuery>
 #include <QVariant>
 
+namespace {
+bool inspectRewriteTarget(QSqlDatabase database, bool* populated, QString* errorText)
+{
+    // Only an empty workspace is a bootstrap target. An archive can legitimately
+    // predate local orders, payments and catalogue edits after a normal restart.
+    *populated = false;
+    const QStringList tables = {"workspace_order_state", "order_registry", "work_orders",
+        "work_order_parts", "work_order_services", "service_masters", "outsource_repairs",
+        "planning_calendar", "expenses", "parts_catalog", "deleted_imports", "masters"};
+    for (const auto& table : tables) {
+        if (SqliteSchemaInspection::tableAbsent(database, "main", table)) continue;
+        QString sql = QStringLiteral("SELECT EXISTS(SELECT 1 FROM main.%1").arg(sqlQuoteIdent(table));
+        if (table == QStringLiteral("masters")) {
+            // DbBootstrapEnsureSchema inserts this one default row into a fresh database.
+            sql += QStringLiteral(" WHERE NOT (id IS 'm1' AND name IS 'Майстер 1' AND role IS 'master'"
+                                  " AND admin_percent IS 0 AND active IS 1 AND active_from IS '' AND active_to IS '')");
+        }
+        QSqlQuery query(database);
+        if (!query.exec(sql + ')') || !query.next()) {
+            if (errorText) *errorText = query.lastError().text();
+            return false;
+        }
+        if (query.value(0).toBool()) {
+            *populated = true;
+            break;
+        }
+    }
+    return true;
+}
+}
+
 bool rewriteLegacyToCanonicalWorkspaceIfNeeded(QSqlDatabase database, QString* errorText)
 {
     if (!database.isValid()) {
@@ -94,6 +125,11 @@ bool rewriteLegacyToCanonicalWorkspaceIfNeeded(QSqlDatabase database, QString* e
         return false;
     }
     if (!prepared && done == QStringLiteral("1") && doneFingerprint == fingerprint) return true;
+    if (!prepared) {
+        bool populated = false;
+        if (!inspectRewriteTarget(database, &populated, errorText)) return false;
+        if (populated || done == QStringLiteral("1")) return true;
+    }
 
     const QString correspondenceSource = prepared ? AppRuntime::legacyDbFilePath() : sourcePath;
     if (prepared && legacySourceFingerprint(correspondenceSource).section('|',-2)!=originalIdentity.section('|',-2)) {
@@ -155,6 +191,9 @@ bool rewriteLegacyToCanonicalWorkspaceIfNeeded(QSqlDatabase database, QString* e
         return true;
     }
     QString cleanupError;
+    bool populated = false;
+    if (!inspectRewriteTarget(database, &populated, txError)) return false;
+    if (populated) return fail(QStringLiteral("Workspace changed during archive bootstrap"));
     if (!clearCanonicalRewriteWorkspaceTargets(database, &cleanupError)) {
         return fail(cleanupError);
     }
