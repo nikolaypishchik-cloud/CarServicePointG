@@ -204,6 +204,15 @@ class PurchasePaymentTests final : public QObject {
     QString previousWorkingDirectory;
     QStringList isolatedRuntimeProfiles;
     QUrl openedPdf;
+    void prepareWorkLogFixture() {
+        QString error;
+        QVERIFY2(ActivityAuditService::ensureSchema(db,&error),qPrintable(error));
+        QSqlQuery q(db);
+        QVERIFY2(q.exec("CREATE TABLE IF NOT EXISTS masters(id TEXT PRIMARY KEY,name TEXT,role TEXT,active INTEGER)"),qPrintable(q.lastError().text()));
+        for (const auto& column : QStringList{"client", "master_id", "master_name_closed"})
+            QVERIFY2(q.exec("ALTER TABLE work_orders ADD COLUMN "+column+" TEXT DEFAULT ''"),qPrintable(q.lastError().text()));
+        QVERIFY2(q.exec("CREATE TABLE IF NOT EXISTS work_order_part_attachments(part_id INTEGER PRIMARY KEY,display_name TEXT,invoice_number TEXT,invoice_date TEXT,file_path TEXT)"),qPrintable(q.lastError().text()));
+    }
     void preparePartsReportFixture() {
         QString error;
         QVERIFY2(WorkshopSpareStockService::ensureSchema(db, &error), qPrintable(error));
@@ -4995,6 +5004,7 @@ private slots:
         }
     }
     void statisticsAsyncCancellationAndReopen() {
+        prepareWorkLogFixture();
         StatsPage page(nullptr,StatsPage::View::WorkLog);
         page.show();page.markDirty();page.refresh();
         QVERIFY(page.property("statisticsLoading").toBool());
@@ -5003,6 +5013,16 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(!page.property("statisticsLoading").toBool(),10000);
         QCOMPARE(page.property("events"),before);
         page.show();page.markDirty();page.refresh();
+        QTRY_VERIFY_WITH_TIMEOUT(!page.property("statisticsLoading").toBool(),10000);
+        QVERIFY2(page.property("statisticsError").toString().isEmpty(),qPrintable(page.property("statisticsError").toString()));
+        QSqlQuery audit(db);
+        QVERIFY(audit.exec("ALTER TABLE activity_audit_events RENAME TO unavailable_audit_events"));
+        page.markDirty();page.refresh();
+        QTRY_VERIFY_WITH_TIMEOUT(!page.property("statisticsLoading").toBool(),10000);
+        QVERIFY(page.property("statisticsError").toString().contains("activity_audit_events"));
+        QVERIFY(!db.tables().contains("activity_audit_events"));
+        QVERIFY(audit.exec("ALTER TABLE unavailable_audit_events RENAME TO activity_audit_events"));
+        page.markDirty();page.refresh();
         QTRY_VERIFY_WITH_TIMEOUT(!page.property("statisticsLoading").toBool(),10000);
         QVERIFY2(page.property("statisticsError").toString().isEmpty(),qPrintable(page.property("statisticsError").toString()));
         auto* transient=new StatsPage(nullptr,StatsPage::View::WorkLog);
@@ -8049,8 +8069,7 @@ private slots:
     }
     void paymentHistoryInStatistics() {
         QString error;
-        QSqlQuery setup(db);
-        QVERIFY(setup.exec("CREATE TABLE masters(id TEXT PRIMARY KEY,name TEXT,role TEXT,active INTEGER)"));
+        prepareWorkLogFixture();
         QVERIFY2(StaffAccountService::ensureSchema(db,&error),qPrintable(error));
         ActivityAuditService::setCurrentActor({"test-owner", "Test Owner", "owner", "test-session"});
         auto debt=PurchasePaymentService::detail(db,"part",1,"order-a");
@@ -8063,6 +8082,7 @@ private slots:
         for(auto* combo:page.findChildren<QComboBox*>()) if(combo->findData("payments")>=0) category=combo;
         QVERIFY(category);
         QTRY_VERIFY_WITH_TIMEOUT(!page.property("statisticsLoading").toBool(),10000);
+        QVERIFY2(page.property("statisticsError").toString().isEmpty(),qPrintable(page.property("statisticsError").toString()));
         category->setCurrentIndex(category->findData("payments"));
         QTRY_COMPARE_WITH_TIMEOUT(page.property("filteredEvents").toList().size(),1,10000);
         QTableView* activity=nullptr;

@@ -82,5 +82,6 @@ bool recordExternal(QSqlDatabase database,
 bool recordMutation(QSqlDatabase database, const MutationResult& result);
 bool recordMutation(QSqlDatabase database, const MutationResult& result, QString* errorText);
 QVector<ActivityAuditEvent> load(QSqlDatabase database, const ActivityAuditFilter& filter, QString* errorText = nullptr);
+QVector<ActivityAuditEvent> readEvents(QSqlDatabase database, const ActivityAuditFilter& filter, QString* errorText = nullptr);
 
 } // namespace ActivityAuditService

@@ -194,7 +194,7 @@ Snapshot load(QSqlDatabase db, const QDate& fromDate, const QDate& toDate,
         ActivityAuditFilter filter;
         filter.from=fromDate;filter.to=toDate;filter.limit=5000;
         filter.includeSystem=false;filter.includeLegacy=false;
-        const auto events=ActivityAuditService::load(db,filter,&result.error);
+        const auto events=ActivityAuditService::readEvents(db,filter,&result.error);
     QVariantList serialised;
     serialised.reserve(events.size());
     for (const ActivityAuditEvent& event : events) {

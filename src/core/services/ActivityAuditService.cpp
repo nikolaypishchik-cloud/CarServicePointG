@@ -315,8 +315,14 @@ bool recordMutation(QSqlDatabase database, const MutationResult& result, QString
 
 QVector<ActivityAuditEvent> load(QSqlDatabase database, const ActivityAuditFilter& filter, QString* errorText)
 {
+    if (!ensureSchema(database, errorText)) return {};
+    return readEvents(database, filter, errorText);
+}
+
+QVector<ActivityAuditEvent> readEvents(QSqlDatabase database, const ActivityAuditFilter& filter, QString* errorText)
+{
+    if (errorText) errorText->clear();
     QVector<ActivityAuditEvent> rows;
-    if (!ensureSchema(database, errorText)) return rows;
 
     const QDate from = filter.from.isValid() ? filter.from : QDate::currentDate().addDays(-29);
     const QDate to = filter.to.isValid() ? filter.to : QDate::currentDate();
@@ -352,11 +358,14 @@ QVector<ActivityAuditEvent> load(QSqlDatabase database, const ActivityAuditFilte
     }
 
     QSqlQuery query(database);
-    query.prepare(QStringLiteral(
+    if (!query.prepare(QStringLiteral(
         "SELECT id, occurred_at, actor_id, actor_name, actor_role, session_id, category, action, title, "
         "order_number, entity_type, entity_id, subject, payload_json "
         "FROM activity_audit_events WHERE %1 ORDER BY datetime(occurred_at) DESC, id DESC LIMIT ?")
-        .arg(where.join(QStringLiteral(" AND "))));
+        .arg(where.join(QStringLiteral(" AND "))))) {
+        setError(errorText,query.lastError().text());
+        return {};
+    }
     for (const QVariant& value : values) query.addBindValue(value);
     query.addBindValue(qBound(1, filter.limit, 5000));
     if (!query.exec()) {
@@ -379,6 +388,10 @@ QVector<ActivityAuditEvent> load(QSqlDatabase database, const ActivityAuditFilte
         rows.append(event);
     }
 
+    if (query.lastError().isValid()) {
+        setError(errorText,query.lastError().text());
+        return {};
+    }
     if (!filter.includeSystem || !filter.includeLegacy || !tableExists(database, QStringLiteral("legacy_mutation_log"))) return rows;
     if (!filter.actorId.trimmed().isEmpty() || (!filter.category.trimmed().isEmpty() && filter.category != QStringLiteral("history"))) {
         return rows;
