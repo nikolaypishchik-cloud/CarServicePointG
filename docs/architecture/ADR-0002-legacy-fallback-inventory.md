@@ -553,4 +553,5 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `docs/reliability/DBY_T180_HISTORICAL_CHILDREN.md` | active | Records refusal tests for ambiguous historical child references during migration. |
 | `docs/reliability/DBY_T181_HISTORICAL_VERSIONS.md` | active | Records migration and read-only history checks for separate source versions. |
 | `docs/reliability/DBY_T184_PERIOD_PDF.md` | active | Records source compatibility and failure tests for UID-scoped period PDF reads. |
+| `docs/reliability/DBY_T185_STATISTICS_READ_ERRORS.md` | active | Documents error propagation and repeat reads in the existing statistics and expenses reports. |
 | `tests/HistoricalRecordStoreTests.cpp` | test-only | Synthetic sources verify archive provenance, fields, rollback and repeated import. |

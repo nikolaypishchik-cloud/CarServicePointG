@@ -204,6 +204,23 @@ class PurchasePaymentTests final : public QObject {
     QString previousWorkingDirectory;
     QStringList isolatedRuntimeProfiles;
     QUrl openedPdf;
+    void preparePartsReportFixture() {
+        QString error;
+        QVERIFY2(WorkshopSpareStockService::ensureSchema(db, &error), qPrintable(error));
+        QSqlQuery q(db);
+        for (const auto& column : QStringList{"markup_percent REAL DEFAULT 0",
+                 "manual_markup_override INTEGER DEFAULT 0", "pricing_calc_version INTEGER DEFAULT 1",
+                 "note TEXT DEFAULT ''"}) {
+            if (!db.record("work_order_parts").contains(column.section(' ',0,0)))
+                QVERIFY2(q.exec("ALTER TABLE work_order_parts ADD COLUMN "+column), qPrintable(q.lastError().text()));
+        }
+        if (!db.record("work_orders").contains("order_year"))
+            QVERIFY2(q.exec("ALTER TABLE work_orders ADD COLUMN order_year INTEGER DEFAULT 2026"), qPrintable(q.lastError().text()));
+        if (!db.record("work_orders").contains("client"))
+            QVERIFY2(q.exec("ALTER TABLE work_orders ADD COLUMN client TEXT DEFAULT ''"), qPrintable(q.lastError().text()));
+        QVERIFY2(q.exec("CREATE VIEW IF NOT EXISTS router_work_order_parts AS SELECT * FROM work_order_parts"), qPrintable(q.lastError().text()));
+        QVERIFY2(q.exec("CREATE TABLE IF NOT EXISTS work_order_part_attachments(part_id INTEGER,invoice_number TEXT,file_path TEXT,invoice_date TEXT)"), qPrintable(q.lastError().text()));
+    }
     bool prepareFixtureOrderState(int number) {
         if(!DbThreadConnectionSupport::isRuntimeConnection(db.connectionName()))return true;
         if(!ensureWorkspaceOrderStateSchema(db))return false;
@@ -847,6 +864,9 @@ private slots:
         error.clear();QCOMPARE(PurchasePaymentService::balances(db,&error),before);QVERIFY(error.isEmpty());
     }
     void reportPartsMeasuredSpacing() {
+        preparePartsReportFixture();
+        const auto initial = ReportsDataLoader::buildPartsSnapshot(db.databaseName(), "2026-10-29", "2026-11-07", 0, 0, {}, {});
+        QVERIFY2(initial.error.isEmpty(), qPrintable(initial.error));
         ReportsPage page;page.resize(1500,800);page.show();
         auto* tabs=page.findChild<QTabWidget*>();QVERIFY(tabs);
         tabs->setCurrentIndex(3);
@@ -4046,8 +4066,10 @@ private slots:
         purchase.materialName=QString::fromUtf8("Масло 5W40");
         purchase.quantity=10;
         QVERIFY2(WorkshopInventoryService::addPurchase(db,purchase,&id,&error),qPrintable(error));
+        preparePartsReportFixture();
         const auto report = ReportsDataLoader::buildPartsSnapshot(db.databaseName(), purchase.purchasedOn.toString(Qt::ISODate),
             QDate::currentDate().toString(Qt::ISODate), 0, 0, {}, {});
+        QVERIFY2(report.error.isEmpty(), qPrintable(report.error));
         QCOMPARE(report.tileTitles.value(1), canonical);
         QVERIFY2(report.tileBodies.value(1).contains(QString::fromUtf8("<b>20</b> л")), qPrintable(report.tileBodies.value(1)));
         QVERIFY(report.tileBodies.value(1).contains(QString::fromUtf8("<b>5</b> л")));
@@ -4121,8 +4143,10 @@ private slots:
         QCOMPARE(snapshot.balanceRows.first().stockValue, 51840.0);
         QVERIFY(q.exec("CREATE VIEW router_work_order_parts AS SELECT * FROM work_order_parts"));
         QVERIFY(q.exec("CREATE TABLE work_order_part_attachments(part_id INTEGER,invoice_number TEXT,file_path TEXT,invoice_date TEXT)"));
+        preparePartsReportFixture();
         const auto report = ReportsDataLoader::buildPartsSnapshot(db.databaseName(), purchase.purchasedOn.toString(Qt::ISODate),
             QDate::currentDate().toString(Qt::ISODate), 0, 0, {}, {});
+        QVERIFY2(report.error.isEmpty(), qPrintable(report.error));
         bool foundStock = false;
         for (const auto& row : report.rows) if (!row.isStoreHeader && row.store == QString::fromUtf8("Склад СТО")) {
             foundStock = true;
