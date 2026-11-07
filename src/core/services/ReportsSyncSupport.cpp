@@ -6,6 +6,8 @@
 #include "core/util/DateFormats.h"
 #include "core/util/PlateUtils.h"
 #include "infrastructure/db/sqlite/Db.h"
+#include "infrastructure/db/sqlite/DbFacadeSupport.h"
+#include "core/services/ReportsDataLoaderLocalSupport.h"
 
 #include <QDate>
 #include <QSqlQuery>
@@ -77,18 +79,20 @@ QString money0(double value)
     return FormatUtils::money(value, 0);
 }
 
-QString payrollWorksTextForMasterImpl(const QString& orderNumber, const QString& masterId, double payrollPercent)
+QString payrollWorksTextForMasterImpl(QSqlDatabase db,const QString& orderNumber, const QString& masterId, double payrollPercent, QString* error)
 {
-    QSqlQuery dq(Database::db());
+    QSqlQuery dq(db);
     dq.prepare(QStringLiteral("SELECT COALESCE(discount,0), COALESCE(works_sum,0), COALESCE(discount_mode,'legacy') FROM router_work_orders WHERE number=?"));
     dq.addBindValue(orderNumber);
+    if(error)error->clear();
     double discountPct = 0.0;
-    if (dq.exec() && dq.next()) {
+    if(!dq.exec() || !dq.next()){if(error)*error=dq.lastError().isValid()?dq.lastError().text():QStringLiteral("Payroll order is unavailable");return {};}
+    {
         discountPct = FormatUtils::discountPercent(dq.value(0).toDouble(), dq.value(2).toString(), dq.value(1).toDouble());
     }
 
     QStringList works;
-    QSqlQuery svcQ(Database::db());
+    QSqlQuery svcQ(db);
     svcQ.prepare(
         QStringLiteral("SELECT COALESCE(s.title,''), COALESCE(s.amount,0), COALESCE(sm.share_percent,0) "
                        "FROM router_work_order_services s "
@@ -98,7 +102,8 @@ QString payrollWorksTextForMasterImpl(const QString& orderNumber, const QString&
                        "ORDER BY s.id ASC"));
     svcQ.addBindValue(orderNumber);
     svcQ.addBindValue(masterId);
-    if (svcQ.exec()) {
+    if(!svcQ.exec()){if(error)*error=svcQ.lastError().text();return {};}
+    {
         while (svcQ.next()) {
             const QString title = svcQ.value(0).toString();
             const double sharedAmount = svcQ.value(1).toDouble() * svcQ.value(2).toDouble() / 100.0;
@@ -107,6 +112,7 @@ QString payrollWorksTextForMasterImpl(const QString& orderNumber, const QString&
             works << QString::fromUtf8("%1 — %2 грн").arg(title, money0(payrollAmount));
         }
     }
+    if(svcQ.lastError().isValid()){if(error)*error=svcQ.lastError().text();return {};}
     return works.join(QStringLiteral("\n"));
 }
 
@@ -160,19 +166,28 @@ bool upsertPayrollOrderAdjustment(const QString& masterId,
 
 namespace ReportsSyncSupport {
 
-QString payrollWorksTextForMaster(const QString& orderNumber, const QString& masterId, double payrollPercent)
+QString payrollWorksTextForMaster(const QString& orderNumber, const QString& masterId, double payrollPercent, QString* error)
 {
-    return payrollWorksTextForMasterImpl(orderNumber, masterId, payrollPercent);
+    auto db=QSqlDatabase::database(currentConnectionName(),false);
+    if(!db.isOpen()){if(error)*error=QStringLiteral("Payroll database is not open");return {};}
+    return payrollWorksTextForMasterImpl(db,orderNumber, masterId, payrollPercent,error);
 }
 
-QList<PayrollOrderRow> collectPayrollOrdersForMaster(const QString& masterId, const QString& df, const QString& dt)
+QList<PayrollOrderRow> collectPayrollOrdersForMaster(const QString& masterId,const QString& df,const QString& dt,QString* error)
 {
-    QList<PayrollOrderRow> out;
-    if (masterId.trimmed().isEmpty()) return out;
-    ensurePayrollOrderAdjustmentsTable();
+    return collectPayrollOrdersForMaster(QSqlDatabase::database(currentConnectionName(),false),masterId,df,dt,error);
+}
 
-    const auto masters = Database::mastersForPeriod(df, dt);
-    const PayrollPercentResolver payrollResolver = makePayrollPercentResolver();
+QList<PayrollOrderRow> collectPayrollOrdersForMaster(QSqlDatabase db,const QString& masterId, const QString& df, const QString& dt, QString* error)
+{
+    QList<PayrollOrderRow> out;QString failure;
+    if(error)error->clear();
+    auto fail=[&](){if(error)*error=failure;return QList<PayrollOrderRow>{};};
+    if(!db.isOpen()){failure=QStringLiteral("Payroll database is not open");return fail();}
+    if(masterId.trimmed().isEmpty()){failure=QStringLiteral("Payroll employee is required");return fail();}
+    const auto masters=ReportsDataLoader::LocalSupport::loadMastersForPeriodForReports(db,df,dt,&failure);if(!failure.isEmpty())return fail();
+    const auto checked=ReportsDataLoader::LocalSupport::makePayrollPercentResolverForReports(db,&failure);if(!failure.isEmpty())return fail();
+    const PayrollPercentResolver payrollResolver{checked.byId,checked.activeByName};
     QString role;
     double percent = 0.0;
     for (const auto& m : masters) {
@@ -184,7 +199,7 @@ QList<PayrollOrderRow> collectPayrollOrdersForMaster(const QString& masterId, co
     }
 
     if (role == QStringLiteral("admin")) {
-        QSqlQuery q(Database::db());
+        QSqlQuery q(db);
         q.prepare(
             QStringLiteral("SELECT wo.number, COALESCE(wo.order_number,wo.number), substr(COALESCE(NULLIF(wo.opened_at,''),''),1,10), substr(NULLIF(TRIM(wo.closed_at),''),1,10), "
                            "COALESCE(wo.plate,''), COALESCE(wo.car,''), "
@@ -197,7 +212,8 @@ QList<PayrollOrderRow> collectPayrollOrdersForMaster(const QString& masterId, co
                            "ORDER BY date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) DESC, wo.number DESC"));
         q.addBindValue(df);
         q.addBindValue(dt);
-        if (q.exec()) {
+        if(!q.exec()){failure=q.lastError().text();return fail();}
+        {
             while (q.next()) {
                 PayrollOrderRow row;
                 row.internalOrderNumber = q.value(0).toInt();
@@ -212,10 +228,11 @@ QList<PayrollOrderRow> collectPayrollOrdersForMaster(const QString& masterId, co
                 out.append(row);
             }
         }
+        if(q.lastError().isValid()){failure=q.lastError().text();return fail();}
         return out;
     }
 
-    QSqlQuery q(Database::db());
+    QSqlQuery q(db);
     q.prepare(
         QStringLiteral("SELECT wo.number, COALESCE(wo.order_number,wo.number), substr(COALESCE(NULLIF(wo.opened_at,''),''),1,10), substr(NULLIF(TRIM(wo.closed_at),''),1,10), "
                        "COALESCE(wo.plate,''), COALESCE(wo.car,''), "
@@ -236,7 +253,8 @@ QList<PayrollOrderRow> collectPayrollOrdersForMaster(const QString& masterId, co
     q.addBindValue(df);
     q.addBindValue(dt);
 
-    if (q.exec()) {
+    if(!q.exec()){failure=q.lastError().text();return fail();}
+    {
         while (q.next()) {
             PayrollOrderRow row;
             row.internalOrderNumber = q.value(0).toInt();
@@ -251,10 +269,12 @@ QList<PayrollOrderRow> collectPayrollOrdersForMaster(const QString& masterId, co
             row.absent = q.value(9).toInt() != 0;
             row.amount = qMax(0.0, FormatUtils::roundMoneyValue(shareRaw * (1.0 - discountPct / 100.0)));
             row.masterAmount = row.absent ? 0.0 : FormatUtils::roundMoneyValue(row.amount * percent / 100.0);
-            row.works = payrollWorksTextForMaster(QString::number(row.internalOrderNumber), masterId, percent);
+            row.works = payrollWorksTextForMasterImpl(db,QString::number(row.internalOrderNumber), masterId, percent,&failure);
+            if(!failure.isEmpty())return fail();
             out.append(row);
         }
     }
+    if(q.lastError().isValid()){failure=q.lastError().text();return fail();}
     return out;
 }
 
@@ -359,12 +379,17 @@ bool saveExpensesRecord(const QString& df, const QString& dt, const ExpensesSave
     return true;
 }
 
-QList<ElectricityPeriodRow> loadElectricityPeriods()
+QList<ElectricityPeriodRow> loadElectricityPeriods(QString* error) {
+    return loadElectricityPeriods(QSqlDatabase::database(currentConnectionName(),false),error);
+}
+QList<ElectricityPeriodRow> loadElectricityPeriods(QSqlDatabase db,QString* error)
 {
     QList<ElectricityPeriodRow> out;
-    QSqlQuery q(Database::db());
+    if(error)error->clear();
+    if(!db.isOpen()){if(error)*error=QStringLiteral("Electricity database is not open");return {};}
+    QSqlQuery q(db);
     q.prepare(QStringLiteral("SELECT period_from, period_to, meter_before, meter_after, consumed_kwh, tariff, amount FROM electricity_periods ORDER BY date((CASE WHEN substr(trim(period_from),3,1)='.' AND substr(trim(period_from),6,1)='.' THEN CASE WHEN substr(trim(period_from),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_from),7,4) ELSE '20'||substr(trim(period_from),7,2) END||'-'||substr(trim(period_from),4,2)||'-'||substr(trim(period_from),1,2) ELSE period_from END)) ASC"));
-    if (!q.exec()) return out;
+    if (!q.exec()){if(error)*error=q.lastError().text();return {};}
     while (q.next()) {
         ElectricityPeriodRow row;
         row.periodFrom = q.value(0).toString();
@@ -376,6 +401,7 @@ QList<ElectricityPeriodRow> loadElectricityPeriods()
         row.amount = q.value(6).toDouble();
         out.append(row);
     }
+    if(q.lastError().isValid()){if(error)*error=q.lastError().text();return {};}
     return out;
 }
 

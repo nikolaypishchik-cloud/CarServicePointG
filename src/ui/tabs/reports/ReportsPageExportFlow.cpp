@@ -7,6 +7,7 @@
 #include "ui/common/dialogs/OrderDialog.h"
 #include "ui/common/dialogs/PurchasePaymentDialog.h"
 #include "core/services/InvoiceReportService.h"
+#include "core/services/ReportReadConnection.h"
 #include <QTemporaryDir>
 #include <QSharedPointer>
 #include <QScrollArea>
@@ -292,7 +293,8 @@ void ReportsPage::openPayrollOrdersDialog(int row)
 
     const QString df = m_from->date().toString("yyyy-MM-dd");
     const QString dt = m_to->date().toString("yyyy-MM-dd");
-    const auto orders = ReportsSyncSupport::collectPayrollOrdersForMaster(masterId, df, dt);
+    QString error;const auto orders = ReportsSyncSupport::collectPayrollOrdersForMaster(masterId, df, dt,&error);
+    if(!error.isEmpty()){QMessageBox::warning(this,QString::fromUtf8("Не вдалося прочитати зарплату"),error);return;}
 
     ReportsDialogSupport::openPayrollOrdersDialog(this, masterId, m_payrollModel->cellText(row, 0), orders);
 }
@@ -321,14 +323,16 @@ void ReportsPage::runPdfExportTask(const QString& progressText, std::function<Re
     m_asyncCancelToken = runtimeTicket.cancelToken;
     const auto cancelToken = m_asyncCancelToken;
     const AsyncTaskHandle asyncHandle(this, 0, cancelToken);
+    const QString reportSource=AppRuntimeService::activeDatabasePath();
     auto result = std::make_shared<ReportsPdfRenderer::ExportResult>();
     auto* worker = AsyncThreadScope::startWorker(this,
                                                QStringLiteral("reports_pdf_export"),
                                                cancelToken,
-                                               [task = std::move(task), result, runtimeTicket]() mutable {
+                                               [task = std::move(task), result, runtimeTicket, reportSource]() mutable {
         RuntimeJob::RuntimeJobDispatcher::instance().markRunning(runtimeTicket);
+        QString error;ReportReadConnection connection(reportSource,&error);
+        if(!connection.isOpen()){result->success=false;result->errorText=error;return;}
         *result = task();
-        AppRuntimeService::closeThreadConnection();
     });
     QPointer<ReportsPage> ownerGuard(this);
     connect(worker, &QThread::finished, this, [this, ownerGuard, result, hadOverrideCursor, asyncHandle, runtimeTicket]() {

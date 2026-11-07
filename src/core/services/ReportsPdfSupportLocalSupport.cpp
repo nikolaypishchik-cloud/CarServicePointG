@@ -6,6 +6,8 @@
 #include "core/services/orders/PartMarkupPolicyService.h"
 
 #include "core/util/StoreNameNormalizer.h"
+#include "core/services/ReportsDataLoaderLocalSupport.h"
+#include <QSqlError>
 namespace ReportsPdfSupport::LocalSupport {
 
 struct MasterRowLite {
@@ -114,10 +116,11 @@ QMap<QString, QString> loadAdminSalarySources()
     return out;
 }
 
-AdminSalaryTotals collectAdminSalaryTotals(const QString& df, const QString& dt)
+AdminSalaryTotals collectAdminSalaryTotals(const QString& df, const QString& dt, QString* error)
 {
     AdminSalaryTotals t;
-    const ReportsPdfSupport::PartPeriodTotals partTotals = ReportsPdfSupport::collectClosedPartFinancialTotalsForReports(df, dt);
+    const ReportsPdfSupport::PartPeriodTotals partTotals = ReportsPdfSupport::collectClosedPartFinancialTotalsForReports(df, dt,error);
+    if(error && !error->isEmpty())return {};
     t.purchaseTotal += partTotals.purchaseTotal;
     t.clientTotal += partTotals.clientTotal;
     t.margin += partTotals.marginTotal;
@@ -126,16 +129,19 @@ AdminSalaryTotals collectAdminSalaryTotals(const QString& df, const QString& dt)
     QSqlQuery ordersQ(Database::db());
     ordersQ.prepare(QStringLiteral("SELECT COUNT(DISTINCT wo.number) FROM router_work_orders wo WHERE date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) >= date(?) AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) <= date(?) AND wo.status='closed'"));
     ordersQ.addBindValue(df); ordersQ.addBindValue(dt);
-    if (ordersQ.exec() && ordersQ.next()) t.ordersCount = ordersQ.value(0).toInt();
+    if(!ordersQ.exec() || !ordersQ.next()){if(error)*error=ordersQ.lastError().text();return {};}
+    t.ordersCount=ordersQ.value(0).toInt();ordersQ.next();if(ordersQ.lastError().isValid()){if(error)*error=ordersQ.lastError().text();return {};}
 
     QSqlQuery outs(Database::db());
     outs.prepare(QStringLiteral("SELECT COALESCE(SUM(company_price),0), COALESCE(SUM(client_price),0), COALESCE(SUM(client_price - company_price),0) FROM outsource_jobs WHERE date((CASE WHEN substr(trim(sent_date),3,1)='.' AND substr(trim(sent_date),6,1)='.' THEN CASE WHEN substr(trim(sent_date),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(sent_date),7,4) ELSE '20'||substr(trim(sent_date),7,2) END||'-'||substr(trim(sent_date),4,2)||'-'||substr(trim(sent_date),1,2) ELSE sent_date END)) >= date(?) AND date((CASE WHEN substr(trim(sent_date),3,1)='.' AND substr(trim(sent_date),6,1)='.' THEN CASE WHEN substr(trim(sent_date),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(sent_date),7,4) ELSE '20'||substr(trim(sent_date),7,2) END||'-'||substr(trim(sent_date),4,2)||'-'||substr(trim(sent_date),1,2) ELSE sent_date END)) <= date(?)"));
     outs.addBindValue(df); outs.addBindValue(dt);
-    if (outs.exec() && outs.next()) {
+    if(!outs.exec() || !outs.next()){if(error)*error=outs.lastError().text();return {};}
+    {
         t.purchaseTotal += outs.value(0).toDouble();
         t.clientTotal += outs.value(1).toDouble();
         t.margin += outs.value(2).toDouble();
     }
+    outs.next();if(outs.lastError().isValid()){if(error)*error=outs.lastError().text();return {};}
     return t;
 }
 
@@ -147,13 +153,9 @@ double adminSalaryBaseForSource(const AdminSalaryTotals& totals, const QString& 
     return totals.margin;
 }
 
-double periodExpensesTotal(const QString& df, const QString& dt)
+double periodExpensesTotal(const QString& df, const QString& dt, QString* error)
 {
-    QSqlQuery ex(Database::db());
-    ex.prepare(QStringLiteral("SELECT COALESCE(SUM(COALESCE(elec_cost, ((COALESCE(elec_curr,0)-COALESCE(elec_prev,0))*COALESCE(elec_tariff,0))) + COALESCE(cleaning,0) + COALESCE(heating,0) + COALESCE(rent,0) + COALESCE(amortization,0) + COALESCE(sw_opendatabot,0) + COALESCE(sw_tecalliance,0) + COALESCE(other_amount,0)),0) FROM expenses WHERE date((CASE WHEN substr(trim(period_to),3,1)='.' AND substr(trim(period_to),6,1)='.' THEN CASE WHEN substr(trim(period_to),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_to),7,4) ELSE '20'||substr(trim(period_to),7,2) END||'-'||substr(trim(period_to),4,2)||'-'||substr(trim(period_to),1,2) ELSE period_to END)) >= date(?) AND date((CASE WHEN substr(trim(period_from),3,1)='.' AND substr(trim(period_from),6,1)='.' THEN CASE WHEN substr(trim(period_from),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_from),7,4) ELSE '20'||substr(trim(period_from),7,2) END||'-'||substr(trim(period_from),4,2)||'-'||substr(trim(period_from),1,2) ELSE period_from END)) <= date(?)"));
-    ex.addBindValue(df); ex.addBindValue(dt);
-    if (ex.exec() && ex.next()) return ex.value(0).toDouble();
-    return 0.0;
+    auto db=Database::db();return ReportsDataLoader::LocalSupport::periodExpensesTotalForReports(db,df,dt,error);
 }
 
 int overlapScore(const QString& a, const QString& b, const QStringList& roots)
@@ -330,13 +332,16 @@ int payrollHistoryColumnIndex(const QSqlRecord& rec, const QStringList& names)
     return -1;
 }
 
-PayrollHistoryIssuedTotals collectIssuedPayrollTotals(const QString& df, const QString& dt)
+PayrollHistoryIssuedTotals collectIssuedPayrollTotals(const QString& df, const QString& dt, QString* error)
 {
     PayrollHistoryIssuedTotals totals;
 
-    QSqlQuery schemaQ(Database::db());
+    auto db=Database::db();QSqlQuery present(db);
+    if(!present.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name='payroll_history'")){if(error)*error=present.lastError().text();return {};}
+    if(!present.next()){if(present.lastError().isValid() && error)*error=present.lastError().text();return {};}present.finish();
+    QSqlQuery schemaQ(db);
     if (!schemaQ.exec(QStringLiteral("SELECT * FROM payroll_history LIMIT 0"))) {
-        return totals;
+        if(error)*error=schemaQ.lastError().text();return {};
     }
 
     const QSqlRecord rec = schemaQ.record();
@@ -347,7 +352,7 @@ PayrollHistoryIssuedTotals collectIssuedPayrollTotals(const QString& df, const Q
     const int masterNameIdx = payrollHistoryColumnIndex(rec, {QStringLiteral("master_name"), QStringLiteral("employee_name"), QStringLiteral("person_name"), QStringLiteral("name")});
 
     if (periodFromIdx < 0 || periodToIdx < 0 || amountIdx < 0) {
-        return totals;
+        if(error)*error=QStringLiteral("Invalid payroll history schema");return {};
     }
 
     const QDate targetFrom = ReportsDateUtils::parseFlexibleDate(df);
@@ -358,7 +363,7 @@ PayrollHistoryIssuedTotals collectIssuedPayrollTotals(const QString& df, const Q
 
     QSqlQuery dataQ(Database::db());
     if (!dataQ.exec(QStringLiteral("SELECT * FROM payroll_history"))) {
-        return totals;
+        if(error)*error=dataQ.lastError().text();return {};
     }
 
     while (dataQ.next()) {
@@ -383,6 +388,7 @@ PayrollHistoryIssuedTotals collectIssuedPayrollTotals(const QString& df, const Q
         }
     }
 
+    if(dataQ.lastError().isValid()){if(error)*error=dataQ.lastError().text();return {};}
     return totals;
 }
 

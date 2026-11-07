@@ -6,6 +6,13 @@
 #include "core/services/ReportsPdfSupportLocalSupport.h"
 #include "core/services/orders/PartPricingEngine.h"
 #include "core/services/WorkshopInventoryService.h"
+#include "core/services/PeriodReportGraph.h"
+#include "core/services/PeriodReportRows.h"
+#include "core/services/AccessControlService.h"
+#include "core/services/ReportsDataLoaderLocalSupport.h"
+#include "infrastructure/db/sqlite/DbFacadeSupport.h"
+#include <QScopeGuard>
+#include <QSqlError>
 
 namespace ReportsPdfSupport {
 using namespace LocalSupport;
@@ -92,10 +99,11 @@ PartFinancials resolvePartFinancialsForReports(const ReportMarkupSnapshot& snaps
     return out;
 }
 
-PartPeriodTotals collectClosedPartFinancialTotalsForReports(const QString& df, const QString& dt)
+PartPeriodTotals collectClosedPartFinancialTotalsForReports(const QString& df, const QString& dt, QString* error)
 {
     PartPeriodTotals totals;
-    const ReportMarkupSnapshot snapshot = loadReportMarkupSnapshot();
+    ReportMarkupSnapshot snapshot;snapshot.policy=PartMarkupPolicyService::loadPolicySnapshot(Database::db(),error);
+    if(error && !error->isEmpty())return {};
 
     QSqlQuery q(Database::db());
     q.prepare(QStringLiteral(
@@ -109,7 +117,8 @@ PartPeriodTotals collectClosedPartFinancialTotalsForReports(const QString& df, c
         "AND wo.status='closed'"));
     q.addBindValue(df);
     q.addBindValue(dt);
-    if (q.exec()) {
+    if(!q.exec()){if(error)*error=q.lastError().text();return {};}
+    {
         while (q.next()) {
             const PartFinancials row = resolvePartFinancialsForReports(snapshot,
                                                                        q.value(0).toString(),
@@ -126,6 +135,7 @@ PartPeriodTotals collectClosedPartFinancialTotalsForReports(const QString& df, c
             totals.marginTotal += row.added;
         }
     }
+    if(q.lastError().isValid()){if(error)*error=q.lastError().text();return {};}
     return totals;
 }
 
@@ -141,93 +151,41 @@ bool isMotorOilName(QString name)
 
 QList<PeriodPdfRow> collectPeriodPdfRows(const QString& df, const QString& dt,
                                          double& partsTotal, double& worksTotal, double& partsMargin,
-                                         double& outsourceMargin, double& salaryTotal, double& expensesTotal)
+                                         double& outsourceMargin, double& salaryTotal, double& expensesTotal, QString* error)
 {
     QList<PeriodPdfRow> out;
     partsTotal = worksTotal = partsMargin = outsourceMargin = salaryTotal = expensesTotal = 0.0;
-    struct ServiceRow { int id = 0; QString title; double amount = 0.0; };
-    struct PartRow {
-        int id = 0;
-        int serviceId = 0;
-        QString name;
-        QString qty;
-        double clientAmount = 0.0;
-        double added = 0.0;
-        bool assigned = false;
-    };
-    const ReportMarkupSnapshot markupSnapshot = loadReportMarkupSnapshot();
-    QSqlQuery ord(Database::db());
-    ord.prepare(QStringLiteral("SELECT number, COALESCE(order_number,number), car, plate, substr(NULLIF(TRIM(closed_at),''),1,10), COALESCE(works_sum,0) FROM router_work_orders WHERE date(CASE WHEN substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),3,1)='.' AND substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),7,2) END||'-'||substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),4,2)||'-'||substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),1,2) ELSE COALESCE(NULLIF(closed_at,''), opened_at) END) >= date(?) AND date(CASE WHEN substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),3,1)='.' AND substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),7,2) END||'-'||substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),4,2)||'-'||substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),1,2) ELSE COALESCE(NULLIF(closed_at,''), opened_at) END) <= date(?) ORDER BY date(CASE WHEN substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),3,1)='.' AND substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),7,2) END||'-'||substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),4,2)||'-'||substr(trim(COALESCE(NULLIF(closed_at,''), opened_at)),1,2) ELSE COALESCE(NULLIF(closed_at,''), opened_at) END) ASC, number ASC"));
-    ord.addBindValue(df); ord.addBindValue(dt);
-    if (ord.exec()) while (ord.next()) {
-        const QString orderKey = ord.value(0).toString();
-        const QString orderNumber = ord.value(1).toString();
-        const QString car = ord.value(2).toString();
-        const QString plate = formatPlateForUi(ord.value(3).toString());
-        const QString orderDate = ord.value(4).toString();
-        QList<ServiceRow> services;
-        QSqlQuery qs(Database::db());
-        qs.prepare(QStringLiteral("SELECT id, COALESCE(title,''), COALESCE(amount,0) FROM router_work_order_services WHERE order_number=? ORDER BY id ASC"));
-        qs.addBindValue(orderKey);
-        if (qs.exec()) while (qs.next()) { ServiceRow s; s.id=qs.value(0).toInt(); s.title=qs.value(1).toString(); s.amount=qs.value(2).toDouble(); services.append(s); }
-        QList<PartRow> parts;
-        QSqlQuery qp(Database::db());
-        qp.prepare(QStringLiteral(
-            "SELECT id, COALESCE(name,''), COALESCE(store,''), COALESCE(qty,0), COALESCE(amount,0), "
-            "COALESCE(purchase_amount, CASE WHEN COALESCE(purchase_price,0)>0 THEN COALESCE(purchase_price,0)*COALESCE(qty,1) ELSE COALESCE(amount,0) END), "
-            "COALESCE(purchase_price,0), COALESCE(markup_percent,0), COALESCE(manual_markup_override,0), COALESCE(service_id,0), COALESCE(pricing_calc_version,1) "
-            "FROM router_work_order_parts WHERE order_number=? ORDER BY id ASC"));
-        qp.addBindValue(orderKey);
-        if (qp.exec()) while (qp.next()) {
-            const double qty = qp.value(3).toDouble();
-            const PartFinancials financials = resolvePartFinancialsForReports(markupSnapshot,
-                                                                              qp.value(1).toString(),
-                                                                              qp.value(2).toString(),
-                                                                              qty,
-                                                                              qp.value(4).toDouble(),
-                                                                              qp.value(5).toDouble(),
-                                                                              qp.value(6).toDouble(),
-                                                                              qp.value(7).toDouble(),
-                                                                              qp.value(8).toInt() != 0, qp.value(10).toInt());
-            PartRow pr;
-            pr.id = qp.value(0).toInt();
-            pr.name = qp.value(1).toString();
-            pr.qty = qty > 0.0 ? FormatUtils::smartQty(qty) : QString();
-            pr.clientAmount = financials.clientAmount;
-            pr.added = financials.added;
-            pr.serviceId = qp.value(9).toInt();
-            parts.append(pr);
-        }
-        if (services.isEmpty() && parts.isEmpty()) { PeriodPdfRow r; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; out.append(r); continue; }
-        for (const ServiceRow& service : services) {
-            QList<int> matched;
-            for (int i=0;i<parts.size();++i) if (!parts[i].assigned && parts[i].serviceId>0 && parts[i].serviceId==service.id) matched.append(i);
-            if (matched.isEmpty()) {
-                QList<QPair<int,int>> scored;
-                for (int i=0;i<parts.size();++i) { if (parts[i].assigned) continue; const int score=partServiceMatchScore(service.title, parts[i].name); if (score>0) scored.append({score,i}); }
-                std::sort(scored.begin(), scored.end(), [](const auto& a,const auto& b){ return a.first>b.first; });
-                for (const auto& pair : scored) matched.append(pair.second);
-            }
-            if (matched.isEmpty()) { PeriodPdfRow r; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; r.workTitle=service.title; r.worksPrice=service.amount; r.total=service.amount; out.append(r); worksTotal += service.amount; continue; }
-            bool first=true; double partsSum=0.0; double addedSum=0.0;
-            for (int idx : matched) { auto &pr=parts[idx]; pr.assigned=true; PeriodPdfRow r; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; if(first){ r.workTitle=service.title; r.worksPrice=service.amount; first=false; } r.partName=pr.name; r.qty=pr.qty; r.partsPrice=pr.clientAmount; r.added=pr.added; partsSum+=pr.clientAmount; addedSum+=pr.added; r.total=r.worksPrice + r.partsPrice; out.append(r); }
-            worksTotal += service.amount; partsTotal += partsSum; partsMargin += addedSum;
-        }
-        for (auto &pr : parts) if (!pr.assigned) { PeriodPdfRow r; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; r.partName=pr.name; r.qty=pr.qty; r.partsPrice=pr.clientAmount; r.added=pr.added; r.total=pr.clientAmount; out.append(r); partsTotal += pr.clientAmount; partsMargin += pr.added; }
-    }
+    if(error)error->clear();
+    auto reject=[&](const QString& reason){partsTotal=worksTotal=partsMargin=outsourceMargin=salaryTotal=expensesTotal=0;if(error)*error=reason;return QList<PeriodPdfRow>{};};
+    auto db=QSqlDatabase::database(currentConnectionName(),false);
+    if(!db.isOpen())return reject(QStringLiteral("Period report database is not open"));
+    if(!AccessControlService::currentUserHasPermission(db,"nav.reports") || AccessControlService::currentOrderScope(db).restricted)return reject(QString::fromUtf8("Недостатньо прав для фінансового звіту за період"));
+    if(!db.transaction())return reject(db.lastError().text());
+    auto rollback=qScopeGuard([&]{db.rollback();});QString failure;
+    ReportMarkupSnapshot markupSnapshot;markupSnapshot.policy=PartMarkupPolicyService::loadPolicySnapshot(db,&failure);
+    if(!failure.isEmpty())return reject(failure);
+    PeriodReportGraph::Graph graph;
+    if(!PeriodReportGraph::read(db,df,dt,&graph,&failure))return reject(failure);
+    const auto assembled=PeriodReportRows::build(graph,markupSnapshot);
+    out=assembled.rows;partsTotal=assembled.parts;worksTotal=assembled.works;partsMargin=assembled.margin;
     QSqlQuery oq(Database::db());
     oq.prepare(QStringLiteral("SELECT COALESCE(SUM(client_price - company_price),0), COALESCE(SUM(company_price),0) FROM outsource_jobs WHERE date((CASE WHEN substr(trim(sent_date),3,1)='.' AND substr(trim(sent_date),6,1)='.' THEN CASE WHEN substr(trim(sent_date),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(sent_date),7,4) ELSE '20'||substr(trim(sent_date),7,2) END||'-'||substr(trim(sent_date),4,2)||'-'||substr(trim(sent_date),1,2) ELSE sent_date END)) >= date(?) AND date((CASE WHEN substr(trim(sent_date),3,1)='.' AND substr(trim(sent_date),6,1)='.' THEN CASE WHEN substr(trim(sent_date),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(sent_date),7,4) ELSE '20'||substr(trim(sent_date),7,2) END||'-'||substr(trim(sent_date),4,2)||'-'||substr(trim(sent_date),1,2) ELSE sent_date END)) <= date(?)"));
     oq.addBindValue(df); oq.addBindValue(dt);
-    if (oq.exec() && oq.next()) {
+    if (!oq.exec() || !oq.next())return reject(oq.lastError().text());
+    {
         outsourceMargin = oq.value(0).toDouble();
     }
 
-    const auto payrollDetails = collectPayrollDetails(df, dt);
+    oq.next();if(oq.lastError().isValid())return reject(oq.lastError().text());oq.finish();
+    const auto payrollDetails = collectPayrollDetails(df, dt,&failure,false);
+    if(!failure.isEmpty())return reject(failure);
     salaryTotal = 0.0;
     for (const auto& master : payrollDetails) {
         salaryTotal += master.accrued;
     }
-    expensesTotal = periodExpensesTotal(df, dt);
+    expensesTotal = periodExpensesTotal(df, dt,&failure);
+    if(!failure.isEmpty())return reject(failure);
+    if(!db.commit())return reject(db.lastError().text());rollback.dismiss();
     return out;
 }
 
@@ -306,16 +264,22 @@ QMap<QString, QList<OutsourcePdfRow>> collectOutsourceGroups(const QString& df, 
     return groups;
 }
 
-QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& dt)
+QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& dt, QString* error, bool includeWorkText)
 {
     QList<PayrollMasterPdf> mastersOut;
-    const auto masters = orderedPersonnelForReports(Database::mastersForPeriod(df, dt));
-    const PayrollPercentResolver payrollResolver = makePayrollPercentResolver();
-    const auto adminSources = loadAdminSalarySources();
-    const AdminSalaryTotals adminTotals = collectAdminSalaryTotals(df, dt);
-    const PayrollHistoryIssuedTotals issuedTotals = collectIssuedPayrollTotals(df, dt);
-    int activeMasterCount = 0; for (const auto& m : masters) if (m.role == QStringLiteral("master")) ++activeMasterCount;
-    const double sharedExpensesPerMaster = activeMasterCount > 0 ? periodExpensesTotal(df, dt) / activeMasterCount : 0.0;
+    QString failure;auto db=QSqlDatabase::database(currentConnectionName(),false);
+    const auto fail=[&](){if(error)*error=failure;return QList<PayrollMasterPdf>{};};
+    if(error)error->clear();
+    if(!db.isOpen()){failure=QStringLiteral("Payroll PDF database is not open");return fail();}
+    const auto masters=ReportsDataLoader::LocalSupport::orderedPersonnelForReports(ReportsDataLoader::LocalSupport::loadMastersForPeriodForReports(db,df,dt,&failure));if(!failure.isEmpty())return fail();
+    const auto checkedResolver=ReportsDataLoader::LocalSupport::makePayrollPercentResolverForReports(db,&failure);if(!failure.isEmpty())return fail();
+    const PayrollPercentResolver payrollResolver{checkedResolver.byId,checkedResolver.activeByName};
+    const auto adminSources=ReportsDataLoader::LocalSupport::loadAdminSalarySourcesForReports(db,&failure);if(!failure.isEmpty())return fail();
+    const auto adminTotals=collectAdminSalaryTotals(df,dt,&failure);if(!failure.isEmpty())return fail();
+    const auto issuedTotals=includeWorkText?collectIssuedPayrollTotals(df,dt,&failure):PayrollHistoryIssuedTotals{};if(!failure.isEmpty())return fail();
+    int activeMasterCount=0;for(const auto& m:masters)if(m.role=="master")++activeMasterCount;
+    const double sharedExpensesPerMaster=activeMasterCount>0?periodExpensesTotal(df,dt,&failure)/activeMasterCount:0;
+    if(!failure.isEmpty())return fail();
     for (const auto& m : masters) {
         PayrollMasterPdf pm; pm.masterId = m.id; pm.masterName = m.role == QStringLiteral("admin") ? QString::fromUtf8("Адмін: %1").arg(m.name) : m.name; pm.percent = resolvePayrollPercent(m, payrollResolver);
         if (m.role == QStringLiteral("admin")) {
@@ -328,7 +292,8 @@ QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& 
         QSqlQuery ordersQ(Database::db());
         ordersQ.prepare(QStringLiteral("SELECT wo.number, COALESCE(wo.order_number,wo.number), substr(wo.opened_at,1,10), substr(NULLIF(TRIM(wo.closed_at),''),1,10), wo.plate, wo.car, wo.engine_type, wo.engine_volume, COALESCE(SUM(COALESCE(s.amount,0) * COALESCE(sm.share_percent,0) / 100.0), 0), COALESCE(wo.discount,0), COALESCE(wo.works_sum,0), COALESCE(wo.discount_mode,'legacy') FROM router_work_orders wo JOIN router_work_order_services s ON s.order_number = wo.number JOIN router_service_masters sm ON sm.service_id = s.id LEFT JOIN payroll_order_adjustments adj ON adj.master_id = sm.master_id AND adj.order_number = wo.number WHERE wo.status='closed' AND sm.master_id=? AND COALESCE(adj.absent,0)=0 AND COALESCE(adj.deleted,0)=0 AND NOT EXISTS (SELECT 1 FROM outsource_jobs oj WHERE oj.service_id = s.id) AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) >= date(?) AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) <= date(?) GROUP BY wo.number, wo.order_number, wo.opened_at, wo.closed_at, wo.plate, wo.car, wo.engine_type, wo.engine_volume, wo.discount, wo.works_sum ORDER BY wo.number ASC"));
         ordersQ.addBindValue(m.id); ordersQ.addBindValue(df); ordersQ.addBindValue(dt);
-        if (ordersQ.exec()) while (ordersQ.next()) {
+        if(!ordersQ.exec()){failure=ordersQ.lastError().text();return fail();}
+        while (ordersQ.next()) {
             PayrollOrderRow row;
             row.internalOrderNumber = ordersQ.value(0).toInt();
             const QString orderNumber = ordersQ.value(1).toString();
@@ -339,11 +304,13 @@ QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& 
             row.engine = QStringLiteral("%1\n%2").arg(ordersQ.value(6).toString(), ordersQ.value(7).toString());
             row.amount = FormatUtils::roundMoneyValue(ordersQ.value(8).toDouble() * (1.0 - FormatUtils::discountPercent(ordersQ.value(9).toDouble(), ordersQ.value(11).toString(), ordersQ.value(10).toDouble()) / 100.0));
             row.masterAmount = FormatUtils::roundMoneyValue(row.amount * pm.percent / 100.0);
-            row.works = ReportsSyncSupport::payrollWorksTextForMaster(QString::number(row.internalOrderNumber), m.id, pm.percent);
+            if(includeWorkText)row.works = ReportsSyncSupport::payrollWorksTextForMaster(QString::number(row.internalOrderNumber), m.id, pm.percent,&failure);
+            if(!failure.isEmpty())return fail();
             pm.orders.append(row);
             pm.ordersCount += 1;
             pm.worksTotal += row.amount;
         }
+        if(ordersQ.lastError().isValid()){failure=ordersQ.lastError().text();return fail();}
         pm.accrued=FormatUtils::roundMoneyValue(pm.worksTotal * pm.percent / 100.0); pm.sharedExpenses=sharedExpensesPerMaster; pm.accrued=qMax(0.0, pm.accrued - sharedExpensesPerMaster);
         pm.issued = issuedPayrollForMaster(issuedTotals, m);
         pm.toIssue = qMax(0.0, pm.accrued - pm.issued);

@@ -75,6 +75,8 @@ bool renderElectricityPdf(ExportResult* result)
     QElapsedTimer timer;
     timer.start();
     if (RuntimeLoggingControl::deepDebugEnabled()) qInfo() << "Report PDF export started:" << QStringLiteral("electricity") << path;
+    QString readError;const auto rows=ReportsSyncSupport::loadElectricityPeriods(&readError);
+    if(!readError.isEmpty()){if(result){result->success=false;result->path=path;result->reportKind="electricity";result->recordCount=0;result->errorText=readError;}return false;}
     QPdfWriter pdf(path);
     pdf.setPageSize(QPageSize(QPageSize::A4));
     pdf.setResolution(144);
@@ -87,7 +89,7 @@ bool renderElectricityPdf(ExportResult* result)
     const QFont headerFont = bodyFont(9, true);
     const QFont cellFont = bodyFont(9, false);
 
-    const auto rows = ReportsSyncSupport::loadElectricityPeriods();
+
     if (result) {
         result->reportKind = QStringLiteral("electricity");
         result->recordCount = rows.size();
@@ -131,7 +133,9 @@ bool renderPeriodPdf(const QDate& fromDate, const QDate& toDate, ExportResult* r
     QElapsedTimer timer;
     timer.start();
     double partsTotal = 0.0, worksTotal = 0.0, partsMargin = 0.0, outsourceMargin = 0.0, salaryTotal = 0.0, expensesTotal = 0.0;
-    const auto rows = ReportsPdfSupport::collectPeriodPdfRows(df, dt, partsTotal, worksTotal, partsMargin, outsourceMargin, salaryTotal, expensesTotal);
+    QString readError;
+    const auto rows = ReportsPdfSupport::collectPeriodPdfRows(df, dt, partsTotal, worksTotal, partsMargin, outsourceMargin, salaryTotal, expensesTotal,&readError);
+    if(!readError.isEmpty()){if(result){result->success=false;result->path=path;result->errorText=readError;result->reportKind="period";result->recordCount=0;}return false;}
     if (result) {
         result->reportKind = QStringLiteral("period");
         result->recordCount = rows.size();
@@ -411,7 +415,8 @@ bool renderPayrollPdf(const QDate& fromDate, const QDate& toDate, ExportResult* 
     QElapsedTimer timer;
     timer.start();
 
-    const auto masters = ReportsPdfSupport::collectPayrollDetails(df, dt);
+    QString readError;const auto masters = ReportsPdfSupport::collectPayrollDetails(df, dt,&readError);
+    if(!readError.isEmpty()){if(result){result->success=false;result->path=path;result->reportKind="payroll";result->recordCount=0;result->errorText=readError;}return false;}
     const auto expenseBreakdown = ReportsPdfExpenseSupport::periodExpenseBreakdown(df, dt);
     if (result) {
         result->reportKind = QStringLiteral("payroll");

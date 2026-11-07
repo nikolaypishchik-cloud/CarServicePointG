@@ -4,6 +4,10 @@
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
 #include "core/services/WorkshopSpareStockService.h"
 #include "core/services/PartsQueryService.h"
+#include "core/services/ReportsPdfSupport.h"
+#include "core/services/ReportsPdfRenderer.h"
+#include "core/services/StaffAccountService.h"
+#include "core/services/AccessControlService.h"
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -128,6 +132,37 @@ private slots:
         QCOMPARE(QSqlDatabase::connectionNames(), before);
     }
 
+    void periodPdfFailuresAndUidRows() {
+        QString error;QVERIFY(ensureWorkspaceSchema(db));QVERIFY(ensureRouterCacheSchema(db));QVERIFY(rebuildRouterViews(db));QVERIFY(WorkshopSpareStockService::ensureSchema(db,&error));
+        QVERIFY(StaffAccountService::ensureSchema(db,&error));QVERIFY(AccessControlService::ensureSchema(db,&error));QSqlQuery q(db);
+        QVERIFY(q.exec("INSERT INTO staff_accounts(id,display_name,role,active) VALUES('pdf-owner','Synthetic owner','owner',1)"));
+        ActivityAuditService::setCurrentActor({"pdf-owner","Synthetic owner","owner","test"});
+        double parts=0,works=0,margin=0,outsource=0,salary=0,expenses=0;
+        const auto read=[&]{return ReportsPdfSupport::collectPeriodPdfRows("2026-01-01","2026-01-31",parts,works,margin,outsource,salary,expenses,&error);};
+        QVERIFY(read().isEmpty());QVERIFY2(error.isEmpty(),qPrintable(error));
+        QVERIFY(q.exec("INSERT INTO work_orders(number,order_uid,order_number,order_year,opened_at,closed_at,status,plate,plate_norm,car,client,master_id) VALUES(11,'pdf-order',7,2026,'2026-01-01','2026-01-02','closed','','','Synthetic','','m1')"));
+        QVERIFY(q.exec("INSERT INTO work_order_services(id,order_number,order_uid,service_uid,title,qty,price,amount) VALUES(31,11,'pdf-order','pdf-service','Synthetic service',1,100,100)"));
+        QVERIFY(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,name,store,ordered_at,qty,purchase_price,purchase_amount,price,amount,service_id,pricing_calc_version) VALUES(21,11,'pdf-order','pdf-part','Synthetic part','Shop','2026-01-01',1,30.10,30.10,45.25,45.25,31,3)"));
+        auto rows=read();QVERIFY2(error.isEmpty(),qPrintable(error));QCOMPARE(rows.size(),1);QCOMPARE(rows[0].orderNumber,QString("7"));QCOMPARE(rows[0].workTitle,QString("Synthetic service"));QCOMPARE(qRound64(parts*100),4525);QCOMPARE(qRound64(works*100),10000);QCOMPARE(qRound64(margin*100),1515);
+        ActivityAuditService::clearCurrentActor();QVERIFY(read().isEmpty());QVERIFY(!error.isEmpty());QCOMPARE(parts,0.0);QCOMPARE(works,0.0);
+        ActivityAuditService::setCurrentActor({"pdf-owner","Synthetic owner","owner","test"});
+        QVERIFY(q.exec("ALTER TABLE work_order_parts RENAME COLUMN amount TO broken_amount"));QVERIFY(read().isEmpty());QVERIFY(!error.isEmpty());QCOMPARE(parts,0.0);
+        ReportsPdfRenderer::ExportResult failed;QVERIFY(!ReportsPdfRenderer::renderPeriodPdf(QDate(2026,1,1),QDate(2026,1,31),&failed));QVERIFY(!failed.errorText.isEmpty());QVERIFY(!QFile::exists(failed.path));
+        QVERIFY(q.exec("ALTER TABLE work_order_parts RENAME COLUMN broken_amount TO amount"));rows=read();QVERIFY2(error.isEmpty(),qPrintable(error));QCOMPARE(rows.size(),1);QCOMPARE(qRound64(parts*100),4525);
+    }
+    void reportDetailAndElectricityReadFailures() {
+        QString error;QVERIFY2(PayrollReadFixture::schema(db,&error),qPrintable(error));QVERIFY2(PayrollReadFixture::populate(db,&error),qPrintable(error));QSqlQuery q(db);
+        for(const auto& column:QStringList{"order_number INTEGER","opened_at TEXT","plate TEXT","car TEXT"})QVERIFY(q.exec("ALTER TABLE router_work_orders ADD COLUMN "+column));QVERIFY(q.exec("ALTER TABLE router_work_order_services ADD COLUMN title TEXT"));QVERIFY(q.exec("UPDATE router_work_order_services SET title='Synthetic work'"));
+        auto empty=ReportsSyncSupport::collectPayrollOrdersForMaster(db,"m","2027-01-01","2027-01-31",&error);QVERIFY(error.isEmpty());QVERIFY(empty.isEmpty());
+        const auto read=[&]{return ReportsSyncSupport::collectPayrollOrdersForMaster(db,"m","2026-01-01","2026-01-31",&error);};auto rows=read();QVERIFY2(error.isEmpty(),qPrintable(error));QCOMPARE(rows.size(),1);QCOMPARE(rows[0].masterAmount,50.0);
+        QVERIFY(q.exec("ALTER TABLE router_work_order_services RENAME TO broken_services"));QVERIFY(read().isEmpty());QVERIFY(!error.isEmpty());QVERIFY(q.exec("ALTER TABLE broken_services RENAME TO router_work_order_services"));QCOMPARE(read().size(),1);QVERIFY(error.isEmpty());
+        QVERIFY(ReportsSyncSupport::loadElectricityPeriods(db,&error).isEmpty());QVERIFY(!error.isEmpty());
+        QVERIFY(q.exec("CREATE TABLE electricity_periods(period_from TEXT,period_to TEXT,meter_before REAL,meter_after REAL,consumed_kwh REAL,tariff REAL,amount REAL)"));QVERIFY(ReportsSyncSupport::loadElectricityPeriods(db,&error).isEmpty());QVERIFY(error.isEmpty());
+        QVERIFY(q.exec("INSERT INTO electricity_periods VALUES('2026-01-01','2026-01-31',100,120,20,4.25,85)"));QCOMPARE(ReportsSyncSupport::loadElectricityPeriods(db,&error).first().amount,85.0);QVERIFY(error.isEmpty());
+        QVERIFY(q.exec("ALTER TABLE electricity_periods RENAME COLUMN amount TO broken_amount"));QVERIFY(ReportsSyncSupport::loadElectricityPeriods(db,&error).isEmpty());QVERIFY(!error.isEmpty());
+        ReportsPdfRenderer::ExportResult failed;QVERIFY(!ReportsPdfRenderer::renderElectricityPdf(&failed));QVERIFY(!failed.errorText.isEmpty());QVERIFY(!QFile::exists(failed.path));
+        QVERIFY(q.exec("ALTER TABLE electricity_periods RENAME COLUMN broken_amount TO amount"));QCOMPARE(ReportsSyncSupport::loadElectricityPeriods(db,&error).size(),1);QVERIFY(error.isEmpty());
+    }
     void partsReadFailuresAndRecovery() {
         QString error;QVERIFY(ensureWorkspaceSchema(db));QVERIFY(ensureRouterCacheSchema(db));QVERIFY(rebuildRouterViews(db));
         QVERIFY2(WorkshopSpareStockService::ensureSchema(db,&error),qPrintable(error));
