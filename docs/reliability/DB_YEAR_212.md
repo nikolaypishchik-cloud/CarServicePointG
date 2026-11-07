@@ -18,7 +18,7 @@
 ## Етапи та критерії
 | ID | Етап | Статус | Критерій / доказ |
 |---|---|---|---|
-| DBY-01 | Карта БД та джерел ідентичності | IN_PROGRESS | DATABASE_AUDIT_2026_11_05.md; перевірити усі create/save/archive/import шляхи |
+| DBY-01 | Карта БД та джерел ідентичності | PASS | Шляхи create/save/archive/import звірено на 544d214. Перелік нижче та у приватному DATABASE_AUDIT_2026_11_05.md. |
 | DBY-02 | Явні помилки читання звітів | IN_PROGRESS | Відсутня БД не створюється; помилка SQL не маскується нульовим звітом; немає витоків з'єднань |
 | DBY-03 | Оптимізація вибірок/пошуку | IN_PROGRESS | Порожня вибірка без глобального завантаження; індекси та EXPLAIN; збережена фінансова семантика |
 | DBY-04 | Річний лічильник та ідемпотентність створення | PASS | 12 сценаріїв Windows у `annual-acceptance-audit`: конкурентність, межа року Europe/Kyiv, повтор і аварія, зовнішній реєстр та збереження видаленого номера після відновлення профілю. |
@@ -45,3 +45,15 @@ DBY-T189 (DBY-04/06/07): invoice import selects by visible number and stable UID
 DBY-T190 (DBY-02/06): master payroll detail/text/PDF/snapshot now share checked UID ownership and per-work half-up amounts. Numeric-only ambiguous assignments/adjustments reject unconfirmed earnings. Linux public-read evidence and exact Windows slots: DBY_T190_PAYROLL_IDENTITY.md; native/full-suite acceptance remains pending.
 
 DBY-T191 (DBY-03/08): payroll graph loads only consumed fields and reuses per-graph UID/numeric indexes. Read-only synthetic Linux profile and full-field equality checks are recorded in DBY_T191_PAYROLL_GRAPH_PROFILE.md. Windows comparison remains pending; PDF presentation is owned by desktop.
+
+DBY-T220 (DBY-01). Пошук прямих вставок заголовка work_orders і трасування викликів на 544d214 підтвердили такі маршрути.
+
+| Шлях | Джерело ідентичності | Поведінкова перевірка Windows |
+|---|---|---|
+| Створення та збереження форми через OrderWorkspaceService | UID запиту для створення, внутрішній ключ і UID для повторного відкриття | annualWorkspaceCreationIsPersistent, annualAllocationProcessCrash |
+| Конвертація через OnlineBookingService | appointment_uid та спільний річний лічильник | annualBookingConversionIsIdempotent, annualBookingRoutingAtomic |
+| Відкриття кешу та архіву через DbArchiveHydrationSupport і DbArchiveRoutingWorkspaceState | UID власника, перевірка внутрішнього номера та пари рік/номер | deletionWithHistoricalArchive, migrationServiceRoundTrip |
+| Міграція заголовків через DbCanonicalRewritePrimaryImportSupport | Ключ джерела і збереження оригінальних UID та дочірніх записів | migrationReservesArchivedOrderKeys, migrationServiceRoundTrip |
+| Імпорт накладних через CurrentOrdersInvoiceImportService | Вибір наряду за UID і перевірка власника перед записом | invoiceImportArchiveOwnerRoute, invoiceReviewCsvPdfOwnerSelection |
+
+Архіватор звіряє фізичну копію через OrderArchiveShardSqlSupport. Два прямі виклики виділення нового номера належать OrderWorkspaceService та OnlineBookingService.
