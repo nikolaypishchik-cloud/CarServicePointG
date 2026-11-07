@@ -7,6 +7,7 @@
 
 #include "core/services/legacyimport/MigrationRunJournal.h"
 #include "infrastructure/security/EncryptedStorage.h"
+#include "infrastructure/security/EncryptedStorageLocalSupport.h"
 
 #include "core/io/NativeSnapshotMetadata.h"
 #include "infrastructure/db/sqlite/DbBootstrapEnsureSchema.h"
@@ -85,21 +86,24 @@ bool prepareWorkspace(const QString& path, const QString& source, const QString&
     db.setDatabaseName(path);
     if (!db.open()) return NativeSnapshotMetadata::fail(error, db.lastError().text());
     if (!ensureWorkspaceSchema(db)) return NativeSnapshotMetadata::fail(error, "Cannot initialize migration workspace");
-    QString previousArchive,previousLegacy;
     const auto temporary=QFileInfo(path).absolutePath();
-    if(!retainPreviousArchive(temporary,"archive",AppRuntime::archiveDbFilePath(),AppRuntime::sealedArchiveDbFilePath(),&previousArchive,error)
-        || !retainPreviousArchive(temporary,"legacy",AppRuntime::legacyDbFilePath(),AppRuntime::sealedLegacyDbFilePath(),&previousLegacy,error))return false;
+    QMap<QString,QString> previousSources;
     QSet<QString> previousPaths;
-    if(!previousArchive.isEmpty())previousPaths.insert(previousArchive);
-    if(!previousLegacy.isEmpty())previousPaths.insert(previousLegacy);
+    int storeIndex=0;
+    for(const auto& mapping:EncryptedStorage::dbMappings()) {
+        if(EncryptedStorage::runtimeRoleForMapping(mapping)!=RuntimeDbPreflightValidator::DbRole::Archive)continue;
+        QString staged;
+        if(!retainPreviousArchive(temporary,QString("store_%1").arg(++storeIndex),mapping.runtimePath,mapping.sealedPath,&staged,error))return false;
+        previousSources.insert(mapping.runtimePath,staged);
+        if(!staged.isEmpty())previousPaths.insert(staged);
+    }
     QDir shardDirectory(QDir(AppRuntime::dataDir()).filePath("archive_shards"));
     for(const auto& file:shardDirectory.entryList({"orders_*.db"},QDir::Files,QDir::Name))previousPaths.insert(shardDirectory.filePath(file));
     QSqlQuery routes(db);
     if(!routes.exec("SELECT DISTINCT storage_path FROM order_registry WHERE storage_kind='archive'"))return NativeSnapshotMetadata::fail(error,routes.lastError().text());
     while(routes.next()) {
         const auto oldPath=routes.value(0).toString();
-        previousPaths.insert(oldPath==AppRuntime::archiveDbFilePath() ? previousArchive :
-            oldPath==AppRuntime::legacyDbFilePath() ? previousLegacy : oldPath);
+        previousPaths.insert(previousSources.value(oldPath,oldPath));
     }
     if(routes.lastError().isValid())return NativeSnapshotMetadata::fail(error,routes.lastError().text());routes.finish();
     auto sortedPaths=previousPaths.values();sortedPaths.sort();
