@@ -541,3 +541,5 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `tests/MigrationChildKeyProjectionTests.cpp` | test-only | Attaches a synthetic SQLite source as legacy_rewrite to exercise the actual canonical import query and child-key mapping. |
 | `docs/reliability/DBY_T163_CLOUD.md` | active | Evidence names LegacyOrderChildMapper exercised by the synthetic child-key test. |
 | `SOURCE_SHA256.json` | active | The public source checksum inventory lists migration filenames containing legacy markers. It contains paths and digests only. |
+| `tests/MigrationRepeatJournalTests.cpp` | test-only | Exercises LegacyImportJournal on an isolated duplicate import. |
+| `docs/reliability/DBY_T166_REPEAT.md` | active | Records commands and expected behavior for repeated legacy import. |
