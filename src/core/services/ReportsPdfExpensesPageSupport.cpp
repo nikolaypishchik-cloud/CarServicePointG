@@ -12,9 +12,9 @@
 
 namespace {
 
-QString money0(double value)
+QString money2(double value)
 {
-    return FormatUtils::money(value, 0);
+    return FormatUtils::money(value, 2);
 }
 
 } // namespace
@@ -69,21 +69,21 @@ void renderExpensesPage(
     };
 
     drawRow(QString::fromUtf8("Період"), ReportsDateUtils::displayDate(fromIso) + QString::fromUtf8(" — ") + ReportsDateUtils::displayDate(toIso), true);
-    drawRow(QString::fromUtf8("Лічильник минулий"), money0(data.elecPrev));
-    drawRow(QString::fromUtf8("Лічильник поточний"), money0(data.elecCurr));
-    drawRow(QString::fromUtf8("Споживання кВт"), money0(data.elecKwh));
-    drawRow(QString::fromUtf8("Тариф"), money0(data.elecTariff));
-    drawRow(QString::fromUtf8("Всього"), money0(data.elecCost) + QString::fromUtf8(" грн"), true);
+    drawRow(QString::fromUtf8("Лічильник минулий"), money2(data.elecPrev));
+    drawRow(QString::fromUtf8("Лічильник поточний"), money2(data.elecCurr));
+    drawRow(QString::fromUtf8("Споживання кВт"), money2(data.elecKwh));
+    drawRow(QString::fromUtf8("Тариф"), money2(data.elecTariff));
+    drawRow(QString::fromUtf8("Всього"), money2(data.elecCost) + QString::fromUtf8(" грн"), true);
 
     y += sectionGap;
 
-    drawRow(ReportsPdfExpenseSupport::expenseNoteJoined(QString::fromUtf8("Витрати на миючі засоби"), data.cleaningNote), money0(data.cleaning) + QString::fromUtf8(" грн"));
-    drawRow(ReportsPdfExpenseSupport::expenseNoteJoined(QString::fromUtf8("Витрати на ПЗ OpenDataBot"), data.softwareNote), money0(data.software) + QString::fromUtf8(" грн"));
-    drawRow(ReportsPdfExpenseSupport::expenseNoteJoined(QString::fromUtf8("Опалення"), data.heatingNote), money0(data.heating) + QString::fromUtf8(" грн"));
-    drawRow(ReportsPdfExpenseSupport::expenseNoteJoined(QString::fromUtf8("Амортизація"), data.amortizationNote), money0(data.amortization) + QString::fromUtf8(" грн"));
-    drawRow(ReportsPdfExpenseSupport::expenseNoteJoined(QString::fromUtf8("Оренда"), data.rentNote), money0(data.rent) + QString::fromUtf8(" грн"));
-    drawRow(ReportsPdfExpenseSupport::expenseNoteJoined(QString::fromUtf8("Інші витрати"), data.otherNote), money0(data.other) + QString::fromUtf8(" грн"));
-    drawRow(QString::fromUtf8("Всього витрат"), money0(data.total) + QString::fromUtf8(" грн"), true);
+    drawRow(ReportsPdfExpenseSupport::expenseNoteJoined(QString::fromUtf8("Витрати на миючі засоби"), data.cleaningNote), money2(data.cleaning) + QString::fromUtf8(" грн"));
+    drawRow(ReportsPdfExpenseSupport::expenseNoteJoined(QString::fromUtf8("Витрати на ПЗ OpenDataBot"), data.softwareNote), money2(data.software) + QString::fromUtf8(" грн"));
+    drawRow(ReportsPdfExpenseSupport::expenseNoteJoined(QString::fromUtf8("Опалення"), data.heatingNote), money2(data.heating) + QString::fromUtf8(" грн"));
+    drawRow(ReportsPdfExpenseSupport::expenseNoteJoined(QString::fromUtf8("Амортизація"), data.amortizationNote), money2(data.amortization) + QString::fromUtf8(" грн"));
+    drawRow(ReportsPdfExpenseSupport::expenseNoteJoined(QString::fromUtf8("Оренда"), data.rentNote), money2(data.rent) + QString::fromUtf8(" грн"));
+    drawRow(ReportsPdfExpenseSupport::expenseNoteJoined(QString::fromUtf8("Інші витрати"), data.otherNote), money2(data.other) + QString::fromUtf8(" грн"));
+    drawRow(QString::fromUtf8("Всього витрат"), money2(data.total) + QString::fromUtf8(" грн"), true);
 }
 
 } // namespace ReportsPdfExpensesPageSupport

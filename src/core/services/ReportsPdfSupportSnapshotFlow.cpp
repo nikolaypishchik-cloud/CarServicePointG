@@ -10,6 +10,7 @@
 #include "core/services/PeriodReportRows.h"
 #include "core/services/AccessControlService.h"
 #include "core/services/ReportsDataLoaderLocalSupport.h"
+#include "core/services/ReportsDataLoader.h"
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
 #include <QScopeGuard>
 #include <QSqlError>
@@ -247,20 +248,47 @@ QMap<QString, QList<PartPdfRow>> collectPartsPdfGroups(const QString& df, const 
     return groups;
 }
 
-QMap<QString, QList<OutsourcePdfRow>> collectOutsourceGroups(const QString& df, const QString& dt, int& count, double& repairTotal, double& clientTotal)
+bool validateFinancialPdfSource(const QDate& from, const QDate& to, QString* error)
+{
+    if(error)error->clear();
+    auto fail=[&](const QString& message){if(error)*error=message;return false;};
+    if(!from.isValid() || !to.isValid() || from>to)return fail(QString::fromUtf8("Некоректний період звіту"));
+    const auto db=QSqlDatabase::database(currentConnectionName(),false);
+    if(!db.isOpen())return fail(QString::fromUtf8("Базу звіту не відкрито"));
+    if(!AccessControlService::currentUserHasPermission(db,"nav.reports") || AccessControlService::currentOrderScope(db).restricted)
+        return fail(QString::fromUtf8("Недостатньо прав для фінансового звіту"));
+    return true;
+}
+
+bool validateExpensesPdfSource(const QDate& from, const QDate& to, QString* error)
+{
+    if(!validateFinancialPdfSource(from,to,error))return false;
+    // Export the captured form (including unsaved edits), but never publish it
+    // after its source becomes unreadable. Do not replace form values with SQL.
+    const auto snapshot=ReportsDataLoader::buildExpensesSnapshot(QSqlDatabase::database(currentConnectionName(),false).databaseName(),from.toString(Qt::ISODate),to.toString(Qt::ISODate));
+    if(error)*error=snapshot.error;
+    return snapshot.error.isEmpty();
+}
+
+QMap<QString, QList<OutsourcePdfRow>> collectOutsourceGroups(const QString& df, const QString& dt, int& count, double& repairTotal, double& clientTotal, QString* error)
 {
     QMap<QString, QList<OutsourcePdfRow>> groups; count=0; repairTotal=0.0; clientTotal=0.0;
+    if(error)error->clear();
     const QDate from = DateFormats::parseDate(df);
     const QDate to = DateFormats::parseDate(dt);
-    QSqlQuery q(Database::db());
+    QString failure;
+    if(!validateFinancialPdfSource(from,to,&failure)){if(error)*error=failure;return {};}
+    QSqlQuery q(QSqlDatabase::database(currentConnectionName(),false));
     q.prepare(QStringLiteral("SELECT COALESCE(NULLIF(oj.company_name,''), '(без компанії)'), oj.sent_date, COALESCE(oj.return_date,''), COALESCE(wo.order_number,wo.number,oj.order_number), oj.part_name, oj.company_price, oj.client_price FROM outsource_jobs oj LEFT JOIN router_work_orders wo ON wo.number = oj.order_number ORDER BY oj.company_name ASC, (CASE WHEN substr(trim(oj.sent_date),3,1)='.' AND substr(trim(oj.sent_date),6,1)='.' THEN CASE WHEN substr(trim(oj.sent_date),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(oj.sent_date),7,4) ELSE '20'||substr(trim(oj.sent_date),7,2) END||'-'||substr(trim(oj.sent_date),4,2)||'-'||substr(trim(oj.sent_date),1,2) ELSE oj.sent_date END) ASC, oj.id ASC"));
-    if (q.exec()) while (q.next()) {
+    if(!q.exec()){if(error)*error=q.lastError().text();return {};}
+    while (q.next()) {
         const QDate eff = ReportsDateUtils::effectiveDate(q.value(1).toString());
         if (!eff.isValid() || eff < from || eff > to) continue;
         const QDate ret = ReportsDateUtils::effectiveDate(q.value(2).toString());
         OutsourcePdfRow r; r.company=q.value(0).toString(); r.date=eff.toString(QStringLiteral("dd.MM.yy")); r.returnDate=ret.isValid()?ret.toString(QStringLiteral("dd.MM.yy")):QString(); r.orderNumber=q.value(3).toString(); r.partName=q.value(4).toString(); r.repairCost=q.value(5).toDouble(); r.clientPrice=q.value(6).toDouble();
         groups[r.company].append(r); ++count; repairTotal += r.repairCost; clientTotal += r.clientPrice;
     }
+    if(q.lastError().isValid()){if(error)*error=q.lastError().text();count=0;repairTotal=clientTotal=0;return {};}
     return groups;
 }
 

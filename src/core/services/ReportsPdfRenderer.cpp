@@ -282,6 +282,9 @@ bool renderOutsourcePdf(const QDate& fromDate, const QDate& toDate, ExportResult
 {
     const QString df = fromDate.toString(QStringLiteral("yyyy-MM-dd"));
     const QString dt = toDate.toString(QStringLiteral("yyyy-MM-dd"));
+    QString readError;int count=0;double repairTotal=0,clientTotal=0;
+    const auto groups=ReportsPdfSupport::collectOutsourceGroups(df,dt,count,repairTotal,clientTotal,&readError);
+    if(!readError.isEmpty()){if(result){*result={};result->reportKind="outsource";result->recordCount=0;result->errorText=readError;}return false;}
     const QString path = makeReportPdfPath(QString::fromUtf8("Аутсорс"), reportDateRangeStem(fromDate, toDate));
     QString pathError;
     if (!ensurePdfOutputPath(path, &pathError)) {
@@ -296,9 +299,6 @@ bool renderOutsourcePdf(const QDate& fromDate, const QDate& toDate, ExportResult
     }
     QElapsedTimer timer;
     timer.start();
-    int count = 0;
-    double repairTotal = 0.0, clientTotal = 0.0;
-    const auto groups = ReportsPdfSupport::collectOutsourceGroups(df, dt, count, repairTotal, clientTotal);
     if (result) {
         result->reportKind = QStringLiteral("outsource");
         result->recordCount = count;
@@ -344,6 +344,8 @@ bool renderExpensesPdf(const QDate& fromDate, const QDate& toDate, const Expense
 {
     const QString df = fromDate.toString(QStringLiteral("yyyy-MM-dd"));
     const QString dt = toDate.toString(QStringLiteral("yyyy-MM-dd"));
+    QString readError;
+    if(!ReportsPdfSupport::validateExpensesPdfSource(fromDate,toDate,&readError)){if(result){*result={};result->reportKind="expenses";result->recordCount=0;result->errorText=readError;}return false;}
     const QString path = makeReportPdfPath(QString::fromUtf8("Витрати"), reportDateRangeStem(fromDate, toDate));
     QString pathError;
     if (!ensurePdfOutputPath(path, &pathError)) {
