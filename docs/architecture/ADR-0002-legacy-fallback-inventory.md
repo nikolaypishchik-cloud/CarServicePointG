@@ -551,3 +551,5 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `tests/MigrationArchiveWorkspaceTests.cpp` | test-only | Uses synthetic stored order graphs and prior database roles to verify archive merge and refusal on identity conflict. |
 | `docs/reliability/DBY_T176_LEGACY_COVERAGE.md` | active | Evidence for reconciliation of a distinct historical archive and explicit rejection of conflicting data. |
 | `docs/reliability/DBY_T180_HISTORICAL_CHILDREN.md` | active | Records refusal tests for ambiguous historical child references during migration. |
+| `docs/reliability/DBY_T181_HISTORICAL_VERSIONS.md` | active | Records migration and read-only history checks for separate source versions. |
+| `tests/HistoricalRecordStoreTests.cpp` | test-only | Synthetic sources verify archive provenance, fields, rollback and repeated import. |

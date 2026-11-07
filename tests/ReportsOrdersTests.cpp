@@ -239,6 +239,8 @@ private slots:
     void deferredEditorKeepsProfile();
     void migrationIsolatedSchema();
     void migrationOperationExclusion();
+    void archiveBootstrapOwnership_data();
+    void archiveBootstrapOwnership();
     void migrationPublicationCrashRecovery_data();
     void migrationPublicationCrashRecovery();
     void migrationReservesArchivedOrderKeys();
@@ -1160,6 +1162,66 @@ void ReportsOrdersTests::migrationIsolatedSchema()
     QVERIFY(db.tables().contains("work_order_parts"));
     QVERIFY(db.tables().contains("masters"));
     QVERIFY(!QFileInfo::exists(live));
+}
+
+void ReportsOrdersTests::archiveBootstrapOwnership_data()
+{
+    QTest::addColumn<bool>("hasExpense");
+    QTest::newRow("empty-workspace") << false;
+    QTest::newRow("expense-only-workspace") << true;
+}
+
+void ReportsOrdersTests::archiveBootstrapOwnership()
+{
+    QFETCH(bool, hasExpense);
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const auto oldRoot = qEnvironmentVariable("CS_TEST_DATA_ROOT");
+    const auto oldName = QCoreApplication::applicationName();
+    const bool oldTest = QStandardPaths::isTestModeEnabled();
+    const auto restore = qScopeGuard([&] {
+        Database::close();
+        setIsolatedTestRoot(oldRoot);
+        QCoreApplication::setApplicationName(oldName);
+        QStandardPaths::setTestModeEnabled(oldTest);
+    });
+    QCoreApplication::setApplicationName(isolatedSafetyName("Safety-Bootstrap-", root.path()));
+    QVERIFY(setIsolatedTestRoot(root.path()));
+    QStandardPaths::setTestModeEnabled(true);
+    const auto archive = AppRuntime::archiveDbFilePath();
+    QVERIFY(archive.startsWith(root.path() + '/'));
+    QVERIFY(QDir().mkpath(QFileInfo(archive).absolutePath()));
+    {
+        const QString connection = "bootstrap-archive";
+        auto source = QSqlDatabase::addDatabase("QSQLITE", connection);
+        const auto close = qScopeGuard([&] { source.close(); source = {}; QSqlDatabase::removeDatabase(connection); });
+        source.setDatabaseName(archive);
+        QVERIFY(source.open());
+        QSqlQuery query(source);
+        QVERIFY(query.exec("CREATE TABLE work_orders(number INTEGER PRIMARY KEY,order_uid TEXT,opened_at TEXT,order_year INTEGER,order_number INTEGER)"));
+        QVERIFY(query.exec("INSERT INTO work_orders VALUES(7,'archive-bootstrap-order','2024-06-15',2024,7)"));
+    }
+    const QString connection = "bootstrap-target";
+    auto target = QSqlDatabase::addDatabase("QSQLITE", connection);
+    const auto close = qScopeGuard([&] { target.close(); target = {}; QSqlDatabase::removeDatabase(connection); });
+    target.setDatabaseName(root.filePath("target.db"));
+    QVERIFY(target.open());
+    QVERIFY(ensureWorkspaceSchema(target));
+    QSqlQuery query(target);
+    if (hasExpense)
+        QVERIFY(query.exec("INSERT INTO expenses(id,period_from,period_to,rent) VALUES(9,'2025-01-01','2025-01-31',23.75)"));
+    QString error;
+    for (int run = 0; run < 2; ++run) {
+        QVERIFY2(rewriteLegacyToCanonicalWorkspaceIfNeeded(target, &error), qPrintable(error));
+        QVERIFY(query.exec("SELECT COUNT(*) FROM work_orders WHERE order_uid='archive-bootstrap-order'"));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), hasExpense ? 0 : 1);
+        query.finish();
+        QVERIFY(query.exec("SELECT COUNT(*) FROM expenses WHERE id=9 AND round(100*rent)=2375"));
+        QVERIFY(query.next());
+        QCOMPARE(query.value(0).toInt(), hasExpense ? 1 : 0);
+        query.finish();
+    }
 }
 
 void ReportsOrdersTests::migrationOperationExclusion()

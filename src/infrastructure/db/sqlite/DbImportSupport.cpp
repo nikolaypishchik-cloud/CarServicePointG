@@ -110,6 +110,18 @@ bool rewriteLegacyToCanonicalWorkspaceIfNeeded(QSqlDatabase database, QString* e
         return !prepared;
     }
 
+    if (!prepared) {
+        bool populated = false;
+        if (!inspectRewriteTarget(database, &populated, errorText)) return false;
+        if (populated) {
+            if (SqliteSchemaInspection::tableAbsent(database, "main", "workspace_order_state")) {
+                if (errorText) *errorText = QStringLiteral("Populated database requires explicit profile migration");
+                return false;
+            }
+            return true;
+        }
+    }
+
     QString supportSchemaError;
     if (!ensureCanonicalRewriteSupportSchema(database, &supportSchemaError)) {
         if (errorText) *errorText = supportSchemaError.trimmed().isEmpty() ? QStringLiteral("Canonical rewrite support schema bootstrap failed") : supportSchemaError;
@@ -119,17 +131,11 @@ bool rewriteLegacyToCanonicalWorkspaceIfNeeded(QSqlDatabase database, QString* e
     const QString fingerprint = legacySourceFingerprint(sourcePath);
     if (RuntimeLoggingControl::deepDebugEnabled()) qInfo() << "Canonical rewrite source fingerprint:" << sourcePath << fingerprint.left(96);
     const QString done = dbGetSettingValue(database, QStringLiteral("db_canonical_rewrite_done"));
-    const QString doneFingerprint = dbGetSettingValue(database, QStringLiteral("db_canonical_rewrite_fingerprint"));
     if (prepared && fingerprint.section('|',-2) != projectedSignature) {
         if (errorText) *errorText = QStringLiteral("Prepared import source fingerprint mismatch");
         return false;
     }
-    if (!prepared && done == QStringLiteral("1") && doneFingerprint == fingerprint) return true;
-    if (!prepared) {
-        bool populated = false;
-        if (!inspectRewriteTarget(database, &populated, errorText)) return false;
-        if (populated || done == QStringLiteral("1")) return true;
-    }
+    if (!prepared && done == QStringLiteral("1")) return true;
 
     const QString correspondenceSource = prepared ? AppRuntime::legacyDbFilePath() : sourcePath;
     if (prepared && legacySourceFingerprint(correspondenceSource).section('|',-2)!=originalIdentity.section('|',-2)) {
