@@ -139,7 +139,7 @@ OrderDialogPdfService::PreviewResult OrderDialog::renderPdfPreview(bool partsRep
         denied.error = tr("Недостатньо прав для друку наряду.");
         return denied;
     }
-    const int previewOrderNumber = m_orderNumber > 0 ? m_orderNumber : (m_num ? m_num->value() : 0);
+    const int previewOrderNumber = m_num ? m_num->value() : 0;
     return OrderDialogPdfService::exportPreviewAndOpen(
         previewOrderNumber,
         this,
@@ -459,7 +459,7 @@ void OrderDialog::exportPdf(const QString& outFile, bool partsReport)
         const int rowY = infoRect.top() + 8;
         drawTextInRect(QRect(labelX, rowY + rowH * 0, 110, rowH), QString::fromUtf8("№ наряду"), 10, true,
                        Qt::AlignLeft | Qt::AlignVCenter, QColor(70, 70, 70), false, QStringLiteral("Times New Roman"));
-        drawTextInRect(QRect(valueX, rowY + rowH * 0, infoRect.right() - valueX - 10, rowH), QString::number(m_orderNumber), 13, true,
+        drawTextInRect(QRect(valueX, rowY + rowH * 0, infoRect.right() - valueX - 10, rowH), QString::number(m_num ? m_num->value() : 0), 13, true,
                        Qt::AlignRight | Qt::AlignVCenter, QColor(18, 18, 18), false, QStringLiteral("Times New Roman"));
         drawTextInRect(QRect(labelX, rowY + rowH * 1, 110, rowH), QString::fromUtf8("Дата"), 10, true,
                        Qt::AlignLeft | Qt::AlignTop, QColor(70, 70, 70), false, QStringLiteral("Times New Roman"));
