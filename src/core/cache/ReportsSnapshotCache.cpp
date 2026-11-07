@@ -178,6 +178,7 @@ bool tryGetPayroll(const QString& key, PayrollSnapshot* out)
 void storePayroll(const QString& key, const PayrollSnapshot& snapshot)
 {
     QMutexLocker lock(&cacheMutex());
+    if(!snapshot.error.isEmpty()){cacheState().payroll.remove(key);cacheState().payrollOrder.removeAll(key);return;}
     storeImpl(cacheState().payroll, cacheState().payrollOrder, key, snapshot);
 }
 

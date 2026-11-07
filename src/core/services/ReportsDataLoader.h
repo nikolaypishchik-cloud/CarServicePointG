@@ -96,6 +96,7 @@ struct PayrollSnapshotRow {
 };
 
 struct PayrollSnapshot {
+    QString error;
     QList<PayrollSnapshotRow> rows;
     QStringList stats;
 };

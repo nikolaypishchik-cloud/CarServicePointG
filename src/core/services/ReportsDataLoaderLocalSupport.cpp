@@ -200,7 +200,7 @@ QString normalizedMasterDateForReports(QString value)
     return QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"));
 }
 
-QList<MasterRow> loadMastersForPeriodForReports(QSqlDatabase& db, const QString& fromDateIso, const QString& toDateIso)
+QList<MasterRow> loadMastersForPeriodForReports(QSqlDatabase& db, const QString& fromDateIso, const QString& toDateIso, QString* error)
 {
     QList<MasterRow> out;
     QSqlQuery q(db);
@@ -212,7 +212,7 @@ QList<MasterRow> loadMastersForPeriodForReports(QSqlDatabase& db, const QString&
                        "ORDER BY name COLLATE NOCASE"));
     q.addBindValue(normalizedMasterDateForReports(toDateIso));
     q.addBindValue(normalizedMasterDateForReports(fromDateIso));
-    if (!q.exec()) return out;
+    if (!q.exec()) {if(error)*error=q.lastError().text();return {}; }
     while (q.next()) {
         MasterRow m;
         m.id = q.value(0).toString();
@@ -222,16 +222,18 @@ QList<MasterRow> loadMastersForPeriodForReports(QSqlDatabase& db, const QString&
         m.active = q.value(4).toInt() != 0;
         m.activeFrom = q.value(5).toString();
         m.activeTo = q.value(6).toString();
-        if(PersonnelEmploymentHistory::overlaps(db,m.id,QDate::fromString(normalizedMasterDateForReports(fromDateIso),Qt::ISODate),QDate::fromString(normalizedMasterDateForReports(toDateIso),Qt::ISODate)))out.push_back(m);
+        if(PersonnelEmploymentHistory::overlaps(db,m.id,QDate::fromString(normalizedMasterDateForReports(fromDateIso),Qt::ISODate),QDate::fromString(normalizedMasterDateForReports(toDateIso),Qt::ISODate),error))out.push_back(m);
+        if(error && !error->isEmpty())return {};
     }
+    if(q.lastError().isValid()){if(error)*error=q.lastError().text();return {}; }
     return out;
 }
 
-QList<MasterRow> loadAllMastersForReports(QSqlDatabase& db)
+QList<MasterRow> loadAllMastersForReports(QSqlDatabase& db, QString* error)
 {
     QList<MasterRow> out;
     QSqlQuery q(db);
-    if (!q.exec(QStringLiteral("SELECT id, name, role, admin_percent, active, COALESCE(active_from,''), COALESCE(active_to,'') FROM masters ORDER BY name COLLATE NOCASE"))) return out;
+    if (!q.exec(QStringLiteral("SELECT id, name, role, admin_percent, active, COALESCE(active_from,''), COALESCE(active_to,'') FROM masters ORDER BY name COLLATE NOCASE"))) {if(error)*error=q.lastError().text();return {}; }
     while (q.next()) {
         MasterRow m;
         m.id = q.value(0).toString();
@@ -243,17 +245,19 @@ QList<MasterRow> loadAllMastersForReports(QSqlDatabase& db)
         m.activeTo = q.value(6).toString();
         out.push_back(m);
     }
+    if(q.lastError().isValid()){if(error)*error=q.lastError().text();return {}; }
     return out;
 }
 
-QMap<QString, double> loadPayrollPercentsForReports(QSqlDatabase& db)
+QMap<QString, double> loadPayrollPercentsForReports(QSqlDatabase& db, QString* error)
 {
     QMap<QString, double> out;
-    const QString s = reportsWorkerSetting(db, QStringLiteral("payroll_percents"), QStringLiteral("{}")).toString().trimmed();
+    const QString s = reportsWorkerSetting(db, QStringLiteral("payroll_percents"), QStringLiteral("{}"),error).toString().trimmed();
+    if (error && !error->isEmpty())return {};
     if (s.isEmpty()) return out;
     QJsonParseError pe;
     const QJsonDocument doc = QJsonDocument::fromJson(s.toUtf8(), &pe);
-    if (pe.error != QJsonParseError::NoError || !doc.isObject()) return out;
+    if (pe.error != QJsonParseError::NoError || !doc.isObject()) {if(error)*error=QStringLiteral("Invalid payroll percentages");return {}; }
     const QJsonObject obj = doc.object();
     for (auto it = obj.begin(); it != obj.end(); ++it) out[it.key()] = it.value().toDouble(0.0);
     return out;
@@ -324,11 +328,13 @@ double adminSalaryBaseForSource(const AdminSalaryTotals& totals, const QString& 
     return totals.margin;
 }
 
-PayrollPercentResolver makePayrollPercentResolverForReports(QSqlDatabase& db)
+PayrollPercentResolver makePayrollPercentResolverForReports(QSqlDatabase& db, QString* error)
 {
     PayrollPercentResolver out;
-    out.byId = loadPayrollPercentsForReports(db);
-    const auto allMasters = loadAllMastersForReports(db);
+    out.byId = loadPayrollPercentsForReports(db,error);
+    if(error && !error->isEmpty())return {};
+    const auto allMasters = loadAllMastersForReports(db,error);
+    if(error && !error->isEmpty())return {};
     for (const auto& master : allMasters) {
         if (master.role != QStringLiteral("master") || !master.active) continue;
         if (!out.byId.contains(master.id)) continue;
@@ -342,17 +348,18 @@ PayrollPercentResolver makePayrollPercentResolverForReports(QSqlDatabase& db)
     return out;
 }
 
-QMap<QString, QString> loadAdminSalarySourcesForReports(QSqlDatabase& db)
+QMap<QString, QString> loadAdminSalarySourcesForReports(QSqlDatabase& db, QString* error)
 {
     QMap<QString, QString> out;
-    const auto doc = QJsonDocument::fromJson(reportsWorkerSetting(db, QStringLiteral("settings.staff.admin_salary_sources"), QStringLiteral("{}")).toString().toUtf8());
-    if (!doc.isObject()) return out;
+    const auto doc = QJsonDocument::fromJson(reportsWorkerSetting(db, QStringLiteral("settings.staff.admin_salary_sources"), QStringLiteral("{}"),error).toString().toUtf8());
+    if(error && !error->isEmpty())return {};
+    if (!doc.isObject()) {if(error)*error=QStringLiteral("Invalid admin salary sources");return {}; }
     const auto obj = doc.object();
     for (auto it = obj.begin(); it != obj.end(); ++it) out.insert(it.key(), normalizeAdminSalarySourceKeyForReports(it.value().toString(QStringLiteral("margin"))));
     return out;
 }
 
-double periodExpensesTotalForReports(QSqlDatabase& db, const QString& df, const QString& dt)
+double periodExpensesTotalForReports(QSqlDatabase& db, const QString& df, const QString& dt, QString* error)
 {
     QSqlQuery ex(db);
     ex.prepare(
@@ -362,11 +369,13 @@ double periodExpensesTotalForReports(QSqlDatabase& db, const QString& df, const 
                        "FROM expenses WHERE date((CASE WHEN substr(trim(period_to),3,1)='.' AND substr(trim(period_to),6,1)='.' THEN CASE WHEN substr(trim(period_to),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_to),7,4) ELSE '20'||substr(trim(period_to),7,2) END||'-'||substr(trim(period_to),4,2)||'-'||substr(trim(period_to),1,2) ELSE period_to END)) >= date(?) AND date((CASE WHEN substr(trim(period_from),3,1)='.' AND substr(trim(period_from),6,1)='.' THEN CASE WHEN substr(trim(period_from),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_from),7,4) ELSE '20'||substr(trim(period_from),7,2) END||'-'||substr(trim(period_from),4,2)||'-'||substr(trim(period_from),1,2) ELSE period_from END)) <= date(?)"));
     ex.addBindValue(df);
     ex.addBindValue(dt);
-    if (ex.exec() && ex.next()) return ex.value(0).toDouble();
-    return 0.0;
+    if (!ex.exec() || !ex.next()) {if(error)*error=ex.lastError().text();return 0.0;}
+    const auto value=ex.value(0).toDouble();ex.next();
+    if(ex.lastError().isValid()){if(error)*error=ex.lastError().text();return 0.0;}
+    return value;
 }
 
-AdminSalaryTotals collectAdminSalaryTotalsForReports(QSqlDatabase& db, const QString& df, const QString& dt)
+AdminSalaryTotals collectAdminSalaryTotalsForReports(QSqlDatabase& db, const QString& df, const QString& dt, QString* error)
 {
     AdminSalaryTotals t;
 
@@ -383,12 +392,14 @@ AdminSalaryTotals collectAdminSalaryTotalsForReports(QSqlDatabase& db, const QSt
                        "AND wo.status='closed'"));
     parts.addBindValue(df);
     parts.addBindValue(dt);
-    if (parts.exec() && parts.next()) {
+    if (!parts.exec() || !parts.next()) {if(error)*error=parts.lastError().text();return {};}
+    {
         t.purchaseTotal += parts.value(0).toDouble();
         t.clientTotal += parts.value(1).toDouble();
         t.margin += parts.value(2).toDouble();
     }
 
+    parts.next();if(parts.lastError().isValid()){if(error)*error=parts.lastError().text();return {};}
     QSqlQuery partsQtyQ(db);
     partsQtyQ.prepare(QStringLiteral("SELECT COALESCE(SUM(COALESCE(p.qty,1)),0) "
                                       "FROM router_work_order_parts p "
@@ -398,8 +409,10 @@ AdminSalaryTotals collectAdminSalaryTotalsForReports(QSqlDatabase& db, const QSt
                                       "AND wo.status='closed'"));
     partsQtyQ.addBindValue(df);
     partsQtyQ.addBindValue(dt);
-    if (partsQtyQ.exec() && partsQtyQ.next()) t.partsQty = partsQtyQ.value(0).toDouble();
+    if (!partsQtyQ.exec() || !partsQtyQ.next()) {if(error)*error=partsQtyQ.lastError().text();return {};}
+    t.partsQty = partsQtyQ.value(0).toDouble();
 
+    partsQtyQ.next();if(partsQtyQ.lastError().isValid()){if(error)*error=partsQtyQ.lastError().text();return {};}
     QSqlQuery ordersQ(db);
     ordersQ.prepare(QStringLiteral("SELECT COUNT(DISTINCT wo.number) FROM router_work_orders wo "
                                    "WHERE date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) >= date(?) "
@@ -407,19 +420,23 @@ AdminSalaryTotals collectAdminSalaryTotalsForReports(QSqlDatabase& db, const QSt
                                    "AND wo.status='closed'"));
     ordersQ.addBindValue(df);
     ordersQ.addBindValue(dt);
-    if (ordersQ.exec() && ordersQ.next()) t.ordersCount = ordersQ.value(0).toInt();
+    if (!ordersQ.exec() || !ordersQ.next()) {if(error)*error=ordersQ.lastError().text();return {};}
+    t.ordersCount = ordersQ.value(0).toInt();
 
+    ordersQ.next();if(ordersQ.lastError().isValid()){if(error)*error=ordersQ.lastError().text();return {};}
     QSqlQuery outs(db);
     outs.prepare(QStringLiteral("SELECT COALESCE(SUM(company_price),0), COALESCE(SUM(client_price),0), COALESCE(SUM(client_price - company_price),0) "
                                 "FROM outsource_jobs "
                                 "WHERE date((CASE WHEN substr(trim(sent_date),3,1)='.' AND substr(trim(sent_date),6,1)='.' THEN CASE WHEN substr(trim(sent_date),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(sent_date),7,4) ELSE '20'||substr(trim(sent_date),7,2) END||'-'||substr(trim(sent_date),4,2)||'-'||substr(trim(sent_date),1,2) ELSE sent_date END)) >= date(?) AND date((CASE WHEN substr(trim(sent_date),3,1)='.' AND substr(trim(sent_date),6,1)='.' THEN CASE WHEN substr(trim(sent_date),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(sent_date),7,4) ELSE '20'||substr(trim(sent_date),7,2) END||'-'||substr(trim(sent_date),4,2)||'-'||substr(trim(sent_date),1,2) ELSE sent_date END)) <= date(?)"));
     outs.addBindValue(df);
     outs.addBindValue(dt);
-    if (outs.exec() && outs.next()) {
+    if (!outs.exec() || !outs.next()) {if(error)*error=outs.lastError().text();return {};}
+    {
         t.purchaseTotal += outs.value(0).toDouble();
         t.clientTotal += outs.value(1).toDouble();
         t.margin += outs.value(2).toDouble();
     }
+    outs.next();if(outs.lastError().isValid()){if(error)*error=outs.lastError().text();return {};}
     return t;
 }
 

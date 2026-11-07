@@ -295,6 +295,7 @@ void ReportsPage::applyCachedTabUi(ReportTab tab)
     if(m_pdfButton) {
         const bool visible = tab!=ReportTab::TotalExpenses && !debtTab;
         m_pdfButton->setVisible(visible);
+        m_pdfButton->setEnabled(!m_pdfExportInFlight && (tab!=ReportTab::Payroll || m_tabKeys.contains(static_cast<int>(ReportTab::Payroll))));
         if(auto* corner=m_tabs->cornerWidget(Qt::TopRightCorner)) corner->setVisible(visible);
     }
     if(auto* banners=findChild<QWidget*>("reportsBannersHost"))
