@@ -5,6 +5,7 @@
 #include "infrastructure/db/sqlite/ScopedConnectionManager.h"
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
 #include "infrastructure/db/sqlite/DbArchiveInternals.h"
+#include "infrastructure/db/sqlite/OrderDeletionPublication.h"
 #include "infrastructure/db/sqlite/DbArchiveHydrationSupport.h"
 #include "infrastructure/db/sqlite/DbArchiveSourceSchemaSupport.h"
 #include "infrastructure/db/sqlite/DbArchiveRouterCacheImportSupport.h"
@@ -594,6 +595,8 @@ bool refreshArchiveIntoRouterCache(QSqlDatabase database)
         if (!mergeActiveWorkspaceIntoRouterCache(database, &backfillError)) {
             return fail(backfillError);
         }
+        OrderDeletionPublication::Retirements retirements;
+        if(!retirements.load(database,txError) || !retirements.removeFromRebuiltCache(database,txError))return false;
 
         return true;
     });

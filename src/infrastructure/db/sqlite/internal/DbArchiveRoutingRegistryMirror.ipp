@@ -70,6 +70,8 @@ bool importArchivedRegistryFromDbPath(const QString& dbPath, QString* errorText,
     const QString connName = QStringLiteral("carservice_registry_rebuild_%1")
         .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
     QSet<QString> verifiedUids;
+    OrderDeletionPublication::Retirements retirements;
+    if(!retirements.load(Database::db(errorText),errorText))return false;
     bool ok = true;
     QString localError;
     bool reading=false,publishing=false;
@@ -155,6 +157,11 @@ bool importArchivedRegistryFromDbPath(const QString& dbPath, QString* errorText,
                     const QString orderUid = nonNullVariantText(read.value(1));
                     const int visibleOrderNumber = read.value(2).toInt();
                     const int orderYear = read.value(3).toInt();
+                    bool retired=false;
+                    if(!retirements.classify(orderNumber,orderUid,orderYear,visibleOrderNumber,&retired,&localError)){
+                        ok=false;break;
+                    }
+                    if(retired)continue;
                     const QString status = nonNullVariantText(read.value(4));
                     const QString openedAt = nonNullVariantText(read.value(5));
                     const QString closedAt = nonNullVariantText(read.value(6));

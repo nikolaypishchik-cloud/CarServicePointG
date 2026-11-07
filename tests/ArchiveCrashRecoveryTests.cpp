@@ -21,12 +21,14 @@
 class ArchiveCrashRecoveryTests : public QObject {
     Q_OBJECT
     QString root;
-    void runBoundary(const QString& phase) {
+    void runBoundary(const QString& phase, bool retainArchive = false) {
         const QString identity="Safety-archive-"+QUuid::createUuid().toString(QUuid::Id128).left(8);
         for(const auto& mode:{QString("seed"),QString("crash"),QString("resume")}) {
             QProcess process;auto env=QProcessEnvironment::systemEnvironment();
             env.insert("CS_ARCHIVE_ID",identity);env.insert("CS_ARCHIVE_MODE",mode);
             env.insert("CS_ARCHIVE_BOUNDARY",phase);
+            if(retainArchive)env.insert("CS_TEST_DELETE_HAS_ARCHIVE","1");
+            else env.remove("CS_TEST_DELETE_HAS_ARCHIVE");
             env.insert("CS_ARCHIVE_CRASH",mode=="crash"?phase:QString());
             process.setProcessEnvironment(env);
             const QString report=QDir(root).filePath(identity+"-"+mode+".txt");
@@ -60,6 +62,7 @@ private slots:
     void afterPurgeCommit(){runBoundary("after_purge_commit");}
     void deletionSourceCommitted(){runBoundary("deletion_source_committed");}
     void deletionRegistryCommitted(){runBoundary("deletion_registry_committed");}
+    void deletionWithHistoricalArchive(){runBoundary("deletion_registry_committed",true);}
     void restoredProfileWithProtectedSettings() {
         const QString identity="Safety-archive-"+QUuid::createUuid().toString(QUuid::Id128).left(8);
         const QString source=QDir(root).filePath("source-"+identity);
@@ -119,6 +122,11 @@ private slots:
             QFile file(attachment);QVERIFY(file.open(QIODevice::WriteOnly));QCOMPARE(file.write("synthetic attachment"),qint64(20));file.close();
             settings.setValue("test/absolute_attachment",attachment);settings.sync();QCOMPARE(settings.status(),QSettings::NoError);
             if(deletion){
+                if(qEnvironmentVariableIsSet("CS_TEST_DELETE_HAS_ARCHIVE")){
+                    QSqlQuery archive(db);
+                    archive.prepare("VACUUM INTO ?");archive.addBindValue(App::archiveDbFilePath());
+                    QVERIFY2(archive.exec(),qPrintable(archive.lastError().text()));
+                }
                 QVERIFY(ensurePartRegistrySchemaFile());
                 QSqlQuery registry(QSqlDatabase::database(dbRegistryConnectionName()));
                 QVERIFY(registry.exec("INSERT INTO order_registry(order_number,order_uid,order_year,visible_order_number) VALUES(1,'crash-order',2026,1)"));
@@ -161,6 +169,22 @@ private slots:
             }
             QVERIFY2(Database::runStartupSchemaCheck(&error),qPrintable(error));
             QVERIFY2(Database::runStartupRegistryRefresh(&error),qPrintable(error));
+            if(qEnvironmentVariableIsSet("CS_TEST_DELETE_HAS_ARCHIVE")){
+                QVERIFY2(rebuildRegistryDerivedState(db,&error),qPrintable(error));
+                QVERIFY(forceRebuildRouterCacheFromActiveWorkspace(db));
+                QVERIFY(q.exec("SELECT COUNT(*) FROM router_work_orders WHERE order_uid='crash-order'"));
+                QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),0);q.finish();
+                q.prepare("ATTACH DATABASE ? AS original_archive");q.addBindValue(App::archiveDbFilePath());QVERIFY(q.exec());
+                QVERIFY(q.exec("SELECT COUNT(*),SUM(amount) FROM original_archive.work_order_parts WHERE order_uid='crash-order'"));
+                QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),1);QCOMPARE(q.value(1).toInt(),60);q.finish();
+                const auto changed=QDir(App::dataDir()).filePath("conflicting-archive.db");
+                q.prepare("VACUUM original_archive INTO ?");q.addBindValue(changed);QVERIFY(q.exec());q.finish();
+                q.prepare("ATTACH DATABASE ? AS conflict_archive");q.addBindValue(changed);QVERIFY(q.exec());q.finish();
+                QVERIFY(q.exec("UPDATE conflict_archive.work_orders SET order_number=2 WHERE order_uid='crash-order'"));
+                QVERIFY(q.exec("DETACH DATABASE conflict_archive"));
+                QVERIFY(!importArchivedRegistryFromDbPath(changed,&error));
+                QVERIFY2(error.contains("retired order"),qPrintable(error));
+            }
             QVERIFY2(Database::hardDeleteOrder(1,&error),qPrintable(error));
             QVERIFY(q.exec("SELECT pending FROM order_deletion_publications WHERE internal_number=1"));
             QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),0);q.finish();

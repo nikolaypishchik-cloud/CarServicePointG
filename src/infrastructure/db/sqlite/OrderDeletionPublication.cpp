@@ -48,6 +48,102 @@ bool journalPresent(QSqlDatabase source, bool *present, QString *error)
 }
 } // namespace
 
+bool OrderDeletionPublication::Retirements::load(QSqlDatabase workspace, QString *error)
+{
+    byInternal.clear();
+    byUid.clear();
+    byAnnual.clear();
+    bool present = false;
+    if (!journalPresent(workspace, &present, error))
+        return false;
+    if (!present)
+        return true;
+    QSqlQuery q(workspace);
+    if (!q.exec("SELECT d.internal_number,d.order_uid,r.order_year,r.order_number FROM order_deletion_publications d "
+                "LEFT JOIN order_creation_reservations r ON r.internal_number=d.internal_number AND "
+                "r.order_uid=d.order_uid"))
+        return fail(error, q.lastError().text());
+    while (q.next())
+    {
+        const int internal = q.value(0).toInt();
+        const Identity id{q.value(1).toString(), q.value(2).toInt(), q.value(3).toInt()};
+        const auto annual = qMakePair(id.year, id.visible);
+        if (internal <= 0 || id.uid.trimmed().isEmpty() || id.year <= 0 || id.year > 9999 || id.visible <= 0 ||
+            byInternal.contains(internal) || byUid.contains(id.uid) || byAnnual.contains(annual))
+            return fail(error, "Invalid retired identity in the deletion journal");
+        byInternal.insert(internal, id);
+        byUid.insert(id.uid, internal);
+        byAnnual.insert(annual, internal);
+    }
+    if(q.lastError().isValid())return fail(error,q.lastError().text());
+    q.finish();
+    if(byInternal.isEmpty())return true;
+    return requireEmpty(q,"SELECT 1 FROM order_deletion_publications d JOIN order_creation_reservations r "
+        "ON r.internal_number=d.internal_number AND r.order_uid=d.order_uid JOIN work_orders w "
+        "ON w.number=d.internal_number OR w.order_uid=d.order_uid OR (w.order_year=r.order_year AND w.order_number=r.order_number) LIMIT 1",{},error);
+}
+
+bool OrderDeletionPublication::Retirements::classify(int internal, const QString &uid, int year, int visible,
+                                                     bool *retired, QString *error) const
+{
+    *retired = false;
+    const auto it = byInternal.constFind(internal);
+    if (it == byInternal.cend())
+    {
+        if (byUid.contains(uid) || byAnnual.contains(qMakePair(year, visible)))
+            return fail(error, "Archive conflicts with a retired order");
+        return true;
+    }
+    if (it->uid != uid || it->year != year || it->visible != visible)
+        return fail(error, "Archive conflicts with a retired order");
+    *retired = true;
+    return true;
+}
+
+bool OrderDeletionPublication::Retirements::removeFromRebuiltCache(QSqlDatabase workspace, QString *error) const
+{
+    if (byInternal.isEmpty())
+        return true;
+    QSqlQuery q(workspace);
+    if (!q.exec("SELECT number,order_uid,order_year,order_number FROM router_cache_work_orders"))
+        return fail(error, q.lastError().text());
+    QList<int> retiredNumbers;
+    while (q.next())
+    {
+        bool retired = false;
+        if (!classify(q.value(0).toInt(), q.value(1).toString(), q.value(2).toInt(), q.value(3).toInt(), &retired,
+                      error))
+            return false;
+        if (retired)
+            retiredNumbers.append(q.value(0).toInt());
+    }
+    if (q.lastError().isValid())
+        return fail(error, q.lastError().text());
+    q.finish();
+    for (int number : retiredNumbers)
+    {
+        const auto uid = byInternal.value(number).uid;
+        const auto masters = "FROM router_cache_service_masters WHERE service_id IN "
+                             "(SELECT id FROM router_cache_work_order_services WHERE order_number=? AND order_uid=?)";
+        if (!execute(q, "DELETE " + QString(masters), {number, uid}, error) ||
+            !requireEmpty(q, "SELECT 1 " + QString(masters), {number, uid}, error))
+            return false;
+        for (const auto &table : QStringList{"router_cache_work_order_parts", "router_cache_work_order_services",
+                                             "router_cache_outsource_repairs"})
+        {
+            if (!execute(q, "DELETE FROM " + table + " WHERE order_number=? AND order_uid=?", {number, uid}, error) ||
+                !requireEmpty(q, "SELECT 1 FROM " + table + " WHERE order_number=? OR order_uid=?", {number, uid},
+                              error))
+                return false;
+        }
+        if (!execute(q, "DELETE FROM router_cache_work_orders WHERE number=? AND order_uid=?", {number, uid}, error))
+            return false;
+        if (q.numRowsAffected() != 1)
+            return fail(error, "Retired archive cache header was not removed");
+    }
+    return true;
+}
+
 bool OrderDeletionPublication::validatePartLocators(int number, const QString &uid, QString *error)
 {
     if (!ensurePartRegistrySchemaFile())

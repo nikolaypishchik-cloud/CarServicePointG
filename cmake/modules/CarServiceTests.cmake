@@ -60,7 +60,7 @@ if (CS_INTERNAL_QT_TESTS_AVAILABLE)
     add_test(NAME ArchiveCrashRecoveryTests COMMAND ${CS_PYTHON_NO_BYTECODE_CMD}
         "${CMAKE_SOURCE_DIR}/scripts/run_qt_test.py" $<TARGET_FILE:ArchiveCrashRecoveryTests>
         prepared copyCommitted verified routeCommitted routed beforePurgeCommit afterPurgeCommit
-        restoredProfileWithProtectedSettings deletionSourceCommitted deletionRegistryCommitted)
+        restoredProfileWithProtectedSettings deletionSourceCommitted deletionRegistryCommitted deletionWithHistoricalArchive)
     set_tests_properties(ArchiveCrashRecoveryTests PROPERTIES TIMEOUT 300
         ENVIRONMENT "QT_QPA_PLATFORM=windows;CS_TEST_DATA_ROOT=${CMAKE_BINARY_DIR}/change-gate-test-data/archive-crash;CS_TEST_PYTHON=${Python3_EXECUTABLE};PYTHONUTF8=1")
 

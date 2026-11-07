@@ -3,6 +3,7 @@
 
 #include "infrastructure/db/sqlite/DbArchiveRoutingSupportModulePrelude.h"
 #include "infrastructure/db/sqlite/ArchiveTransferJournal.h"
+#include "infrastructure/db/sqlite/OrderDeletionPublication.h"
 #include "infrastructure/db/sqlite/DbContext.h"
 #include <QMap>
 
