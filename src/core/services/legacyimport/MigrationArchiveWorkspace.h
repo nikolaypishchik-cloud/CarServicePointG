@@ -1,6 +1,7 @@
 #pragma once
 
 #include "infrastructure/db/sqlite/OrderArchiveShardSqlSupport.h"
+#include "infrastructure/db/sqlite/HistoricalRecordStore.h"
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
 #include "infrastructure/db/sqlite/SqliteSchemaInspection.h"
 #include <QScopeGuard>
@@ -11,7 +12,7 @@
 
 namespace MigrationArchiveCoverage {
 inline QString ident(QString value) { return '"'+value.replace('"',"\"\"")+'"'; }
-inline bool reconcile(QSqlDatabase db,QString* error)
+inline bool reconcile(QSqlDatabase db,QString* error,bool versioned=false)
 {
     auto fail=[&](const QString& text){if(error)*error="Archive coverage: "+text;return false;};
     QSqlQuery q(db);
@@ -54,7 +55,7 @@ inline bool reconcile(QSqlDatabase db,QString* error)
         if(!q.exec("PRAGMA archive_rollover.table_info("+ident(table)+")"))return fail(q.lastError().text());
         while(q.next())targetColumns.insert(q.value(1).toString());
         if(q.lastError().isValid())return fail(q.lastError().text());q.finish();
-        for(const auto& column:sourceColumns)if(!targetColumns.contains(column))return fail("Unrepresented historical field: "+table+"."+column);
+        for(const auto& column:sourceColumns)if(!versioned && !targetColumns.contains(column))return fail("Unrepresented historical field: "+table+"."+column);
     }
     for(const auto& table:tables) {
         if(graph.contains(table.name) || derived.contains(table.name) || table.name.startsWith("router_"))continue;
@@ -70,18 +71,21 @@ inline bool reconcile(QSqlDatabase db,QString* error)
         if(!q.exec("SELECT 1 FROM main."+ident(table.name)+" LIMIT 1"))return fail(q.lastError().text());
         const bool populated=q.next();if(q.lastError().isValid())return fail(q.lastError().text());q.finish();
         if(!populated)continue;
+        if(versioned && table.name.startsWith("parts_catalog"))continue; // Catalogue links are source-scoped evidence, not current owners.
         if(names.contains("order_uid")) {
             if(!q.exec("SELECT 1 FROM main."+ident(table.name)+" c WHERE COALESCE(c.order_uid,'')<>'' AND (NOT EXISTS(SELECT 1 FROM main.work_orders s WHERE s.order_uid=c.order_uid) OR NOT EXISTS(SELECT 1 FROM archive_rollover.work_orders t WHERE t.order_uid=c.order_uid)) LIMIT 1"))return fail(q.lastError().text());
             if(q.next())return fail("Supplemental history has an unresolved owner: "+table.name);
             if(q.lastError().isValid())return fail(q.lastError().text());q.finish();
         }
+        if(versioned)continue; // Supplemental records are read from their immutable version, never replayed into current accounting.
         q.prepare("SELECT 1 FROM archive_rollover.sqlite_master WHERE type='table' AND name=?");q.addBindValue(table.name);
         if(!q.exec())return fail(q.lastError().text());const bool exists=q.next();q.finish();
         if(!exists) {
             // Unknown executable schema needs a deliberate adapter, not a partial clone.
             q.prepare("SELECT 1 FROM main.sqlite_master WHERE tbl_name=? AND (type='trigger' OR (type='index' AND sql IS NOT NULL)) LIMIT 1");q.addBindValue(table.name);
             if(!q.exec())return fail(q.lastError().text());
-            if(q.next())return fail("Supplemental table has executable/index schema requiring review: "+table.name);q.finish();
+            const bool executable=q.next();if(q.lastError().isValid())return fail(q.lastError().text());q.finish();
+            if(executable)return fail("Supplemental table has executable/index schema requiring review: "+table.name);
             const int body=table.ddl.indexOf('(');
             if(body<0 || !table.ddl.startsWith("CREATE TABLE",Qt::CaseInsensitive))return fail("Unsupported supplemental table: "+table.name);
             if(!q.exec("CREATE TABLE archive_rollover."+ident(table.name)+table.ddl.mid(body)))return fail(q.lastError().text());
@@ -110,7 +114,7 @@ inline bool reconcile(QSqlDatabase db,QString* error)
 namespace MigrationArchiveWorkspace {
 // A current parent is not proof that all historical children are represented.
 // Only stable child UIDs establish identity; neither physical keys nor values do.
-inline bool verifyWorkingChildren(QSqlDatabase db,int number,const QString& owner,QString* error)
+inline bool verifyWorkingChildren(QSqlDatabase db,int number,const QString& owner,QString* error,bool versioned=false)
 {
     auto fail=[&](const QString& table,const QString& uid,const QString& reason){
         if(error)*error=QString("Historical child ambiguity: owner=%1 table=%2 uid=%3: %4; explicit decision required before publication").arg(owner,table,uid,reason);
@@ -137,9 +141,14 @@ inline bool verifyWorkingChildren(QSqlDatabase db,int number,const QString& owne
             if(!q.exec() || !q.next() || q.value(0).toLongLong()!=1)return fail(table,uid,"Source child UID is not unique");q.finish();
             q.prepare("SELECT order_uid,order_number FROM archive_rollover."+table+" WHERE "+uidColumn+"=?");q.addBindValue(uid);
             if(!q.exec())return fail(table,uid,q.lastError().text());
-            if(!q.next())return fail(table,uid,"Historical child UID is absent from current workspace");
+            if(!q.next()) {
+                if(q.lastError().isValid())return fail(table,uid,q.lastError().text());
+                if(versioned){q.finish();continue;}
+                return fail(table,uid,"Historical child UID is absent from current workspace");
+            }
             if(q.value(0).toString()!=owner || q.value(1).toInt()!=number)return fail(table,uid,"Current child belongs to another owner");
             if(q.next() || q.lastError().isValid())return fail(table,uid,"Current child UID is not unique");q.finish();
+            if(versioned)continue; // Historical payment/link fields remain in their own source-scoped record.
             if(sourceColumns.contains("paid")) {
                 if(!targetColumns.contains("paid"))return fail(table,uid,"Historical payment field is unrepresented");
                 q.prepare("SELECT 1 FROM main."+table+" s JOIN archive_rollover."+table+" t ON t."+uidColumn+"=s."+uidColumn+" WHERE s."+uidColumn+"=? AND (typeof(s.paid)<>typeof(t.paid) OR NOT(s.paid IS t.paid COLLATE BINARY))");q.addBindValue(uid);
@@ -163,7 +172,7 @@ inline bool verifyWorkingChildren(QSqlDatabase db,int number,const QString& owne
     }
     return true;
 }
-inline bool merge(const QString& archive, const QString& workspace, QString* error, QSet<QString>* materialized = nullptr)
+inline bool merge(const QString& archive, const QString& workspace, QString* error, QSet<QString>* materialized = nullptr, const QString& sourceOrigin = {})
 {
     auto fail=[&](const QString& detail){if(error)*error="Previous archive reconciliation: "+detail;return false;};
     const QString name=QUuid::createUuid().toString();
@@ -189,6 +198,9 @@ inline bool merge(const QString& archive, const QString& workspace, QString* err
     if(!db.transaction())return fail(db.lastError().text());
     auto rollback=qScopeGuard([&]{db.rollback();});
     QSet<QString> inserted;
+    QString versionId;
+    if(!sourceOrigin.isEmpty() && !HistoricalRecordStore::capture(db,sourceOrigin,HistoricalRecordStore::digestFile(archive),&versionId,error))return false;
+    const bool versioned=!versionId.isEmpty();
     for(const auto& order:orders) {
         q.prepare("SELECT number,order_uid,order_number,order_year FROM archive_rollover.work_orders WHERE number=? OR order_uid=?");
         q.addBindValue(order.key);q.addBindValue(order.uid);
@@ -198,7 +210,7 @@ inline bool merge(const QString& archive, const QString& workspace, QString* err
             return fail("Historical identity conflicts with workspace; explicit reconciliation required");
         if(exists && q.next())return fail("Ambiguous historical UID");
         if(q.lastError().isValid())return fail(q.lastError().text());q.finish();
-        if(exists && !verifyWorkingChildren(db,order.key,order.uid,error))return false;
+        if(exists && !verifyWorkingChildren(db,order.key,order.uid,error,versioned))return false;
         if(exists && materialized && materialized->contains(order.uid)
             && !OrderArchiveShardSqlSupport::verifyCopiedOrderGraph(db,order.key,error))return false;
         if(!exists) {
@@ -217,7 +229,7 @@ inline bool merge(const QString& archive, const QString& workspace, QString* err
         q.addBindValue(order.key);q.addBindValue(order.uid);
         if(!q.exec() || q.numRowsAffected()!=1)return fail("Workspace state identity conflict: "+q.lastError().text());q.finish();
     }
-    if(!MigrationArchiveCoverage::reconcile(db,error))return false;
+    if(!MigrationArchiveCoverage::reconcile(db,error,versioned))return false;
     if(!db.commit())return fail(db.lastError().text());
     rollback.dismiss();
     if(materialized)materialized->unite(inserted);

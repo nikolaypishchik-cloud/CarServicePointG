@@ -110,8 +110,12 @@ bool prepareWorkspace(const QString& path, const QString& source, const QString&
     QSet<QString> materialized;
     for(const auto& previous:sortedPaths) {
         if(previous.isEmpty() || !QFileInfo::exists(previous))return NativeSnapshotMetadata::fail(error,"Previous archive route is missing");
-        if(!MigrationArchiveWorkspace::merge(previous,path,error,&materialized)) {
-            if(error)*error=QString("Historical source %1: %2").arg(previousSources.key(previous,previous),*error);
+        const auto origin=previousSources.key(previous,previous);
+        QString staged=previous;
+        if(!previousSources.values().contains(previous)
+            && !retainPreviousArchive(temporary,QString("shard_%1").arg(++storeIndex),previous,QString(),&staged,error))return false;
+        if(!MigrationArchiveWorkspace::merge(staged,path,error,&materialized,origin)) {
+            if(error)*error=QString("Historical source %1: %2").arg(origin,*error);
             return false;
         }
     }
@@ -176,6 +180,7 @@ bool MigrationStagingCoordinator::importSourceIntoIsolatedTarget(const LegacyImp
     if (!copyAuditedDatabase(bundle.primaryDbPath,source,runContext.sourceFingerprint,errorText)) return false;
     const auto archive=generation.filePath("archive.db");
     if (!prepareWorkspace(workspace,source,archive,runContext.sourceFingerprint,errorText)
+        || !HistoricalRecordStore::captureFile(source,workspace,runContext.sourceFingerprint,errorText)
         || !RuntimeDbPreflightValidator::validateFile(workspace,RuntimeDbPreflightValidator::DbRole::Workspace,errorText)
         || !EncryptedStorage::publishPreparedWorkspace(source,archive,workspace,errorText)) {
         MigrationRunJournal::stageFailed(runContext, QStringLiteral("staging_import"), errorText ? *errorText : QStringLiteral("publishPreparedWorkspace failed"));

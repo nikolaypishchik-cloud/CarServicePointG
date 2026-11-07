@@ -2,6 +2,7 @@
 // Compiled as a separate P2 implementation module; include-order dependencies are isolated in the module prelude.
 
 #include "ui/tabs/catalog/CatalogPageModulePrelude.h"
+#include "ui/common/dialogs/HistoricalVersionsDialog.h"
 
 void CatalogPage::buildUi()
 {
@@ -50,6 +51,11 @@ void CatalogPage::buildUi()
     titleRow->addWidget(m_saveBtn);
     titleRow->addWidget(m_deleteBtn);
     titleRow->addWidget(m_importBtn);
+    auto* versions=new GlossyButton(QString::fromUtf8("Історичні версії"),this);versions->setObjectName("catalogHistoricalVersions");
+    applyCatalogMetalButtonStyle(versions);applyTopButtonSize(versions);
+    versions->setVisible(!AccessControlService::currentActorIsMaster() && AccessControlService::currentUserHasPermission("nav.catalog"));
+    connect(versions,&QPushButton::clicked,this,[this](){HistoricalVersionsDialog::open(this,QString());});titleRow->addWidget(versions);
+
     root->addLayout(titleRow);
 
     m_filtersPanel = new QWidget(this);

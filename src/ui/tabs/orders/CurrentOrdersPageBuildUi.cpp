@@ -7,6 +7,7 @@
 #include "core/services/orders/OrderMutationFacade.h"
 #include "ui/tabs/orders/BayOccupancyPage.h"
 #include <QInputDialog>
+#include "ui/common/dialogs/HistoricalVersionsDialog.h"
 #include "ui/theme/ThemeManager.h"
 
 namespace {
@@ -214,6 +215,8 @@ void CurrentOrdersPage::buildUi()
 
         QMenu menu(this);
         QAction* actOpen = menu.addAction(QString::fromUtf8("Відкрити наряд"));
+        QAction* actVersions=menu.addAction(QString::fromUtf8("Історичні версії"));
+        actVersions->setEnabled(selectedCount==1 && !AccessControlService::currentActorIsMaster() && AccessControlService::currentUserHasPermission("nav.history"));
         QAction* actOpenNew = menu.addAction(QString::fromUtf8("Відкрити новий наряд"));
         QAction* actPdf = menu.addAction(QString::fromUtf8("PDF"));
         actPdf->setVisible(!AccessControlService::currentActorIsMaster());
@@ -232,6 +235,12 @@ void CurrentOrdersPage::buildUi()
         if (!chosen) return;
         if (chosen == actOpen) {
             openSelectedOrder();
+            return;
+        }
+        if(chosen==actVersions) {
+            const auto uid=selectedOrderUid();
+            if(uid.isEmpty())QMessageBox::warning(this,QString::fromUtf8("Історичні версії"),QString::fromUtf8("Немає стабільного UID наряду"));
+            else HistoricalVersionsDialog::open(this,uid);
             return;
         }
         if (chosen == actOpenNew) {
