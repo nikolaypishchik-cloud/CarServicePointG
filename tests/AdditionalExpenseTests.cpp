@@ -266,6 +266,31 @@ private slots:
         QVERIFY2(historical.error.isEmpty(), qPrintable(historical.error));
         QCOMPARE(historical.parts.size(), 1);
         QCOMPARE(historical.parts.first().client, QStringLiteral("Historical client"));
+        QVERIFY2(q.exec("INSERT INTO work_orders(number,order_uid,order_number,order_year,opened_at,closed_at,status,plate,plate_norm,car,client,master_id) "
+                        "VALUES(11,'invoice-owner',7,2026,'2026-01-01','2026-01-02','closed','','','Car','Invoice client','m1')"), qPrintable(q.lastError().text()));
+        QVERIFY2(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,name,ordered_at) VALUES(21,11,'invoice-owner','invoice-part','Local','2026-01-02')"), qPrintable(q.lastError().text()));
+        QVERIFY2(q.exec("INSERT INTO work_order_part_attachments(part_id,invoice_number) VALUES(21,'INV-21')"), qPrintable(q.lastError().text()));
+        QVERIFY(q.exec("DROP VIEW router_work_order_parts"));
+        QVERIFY(q.exec("CREATE VIEW router_work_order_parts AS SELECT id,order_number,order_uid,name,part_number,ordered_at,delivery_date,installed_at,store,part_uid FROM work_order_parts "
+                       "UNION ALL SELECT 21,475,'stats-history','Historical','','2026-01-02','','','','invoice-part' "
+                       "UNION ALL SELECT 21,11,'invoice-owner','Different part','','2026-01-02','','','','other-part'"));
+        const auto checkInvoices = [&] {
+            auto snapshot = read();
+            QVERIFY2(snapshot.error.isEmpty(), qPrintable(snapshot.error));
+            QCOMPARE(snapshot.parts.size(), 3);
+            for (const auto& row : snapshot.parts)
+                QCOMPARE(row.invoiceNumber, row.name == "Local" ? QStringLiteral("INV-21") : QString());
+        };
+        checkInvoices();
+        // Keep dependent views pointing at the deliberately missing original table during this fault.
+        QVERIFY(q.exec("PRAGMA legacy_alter_table=ON"));
+        QVERIFY2(q.exec("ALTER TABLE work_order_part_attachments RENAME TO broken_invoices"), qPrintable(q.lastError().text()));
+        auto broken = read();
+        QVERIFY(!broken.error.isEmpty());
+        QVERIFY(broken.parts.isEmpty());
+        QVERIFY2(q.exec("ALTER TABLE broken_invoices RENAME TO work_order_part_attachments"), qPrintable(q.lastError().text()));
+        QVERIFY(q.exec("PRAGMA legacy_alter_table=OFF"));
+        checkInvoices();
         // A request captured before revocation must not authorize the later worker.
         QVERIFY(q.exec("UPDATE staff_accounts SET active=0 WHERE id='stats-owner'"));QVERIFY(!read().error.isEmpty());
         QVERIFY(q.exec("UPDATE staff_accounts SET active=1 WHERE id='stats-owner'"));QVERIFY(read().error.isEmpty());

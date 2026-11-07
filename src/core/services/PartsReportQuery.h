@@ -2,6 +2,7 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlError>
+#include <QSqlRecord>
 namespace PartsReportQuery {
 inline bool openSnapshot(QSqlDatabase& db,const QString& path,QString* error) {
     db.setDatabaseName(path);db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
@@ -10,7 +11,10 @@ inline bool openSnapshot(QSqlDatabase& db,const QString& path,QString* error) {
 }
 inline bool execute(QSqlDatabase db,QSqlQuery* query,QString* error) {
     *query=QSqlQuery(db);
-    if(!query->prepare(
+    const auto uidColumn = [&](const QString& table, const QString& alias) {
+        return db.record(table).contains("part_uid") ? "COALESCE(" + alias + ".part_uid,'')" : QStringLiteral("''");
+    };
+    if(!query->prepare(QStringLiteral(
                 "WITH headers AS MATERIALIZED (SELECT number,order_uid,order_number,closed_at,opened_at,plate,car,vin FROM router_work_orders), "
                 "keys AS (SELECT 'u:'||order_uid AS lookup,number,order_uid FROM headers WHERE COALESCE(order_uid,'')<>'' "
                 "UNION ALL SELECT 'n:'||number,number,order_uid FROM headers), "
@@ -23,8 +27,9 @@ inline bool execute(QSqlDatabase db,QSqlQuery* query,QString* error) {
                 "FROM router_work_order_parts p "
                 "LEFT JOIN unique_owners owner ON owner.lookup=CASE WHEN COALESCE(p.order_uid,'')<>'' THEN 'u:'||p.order_uid ELSE 'n:'||p.order_number END "
                 "LEFT JOIN headers wo ON wo.number=owner.number AND wo.order_uid IS owner.order_uid "
-                "LEFT JOIN work_order_parts wp ON wp.id = p.id AND COALESCE(wp.order_number,'') = COALESCE(p.order_number,'') AND COALESCE(wp.order_uid,'') = COALESCE(p.order_uid,'') "
-                "LEFT JOIN work_order_part_attachments a ON a.part_id = wp.id")){if(error)*error=query->lastError().text();return false;}
+                "LEFT JOIN work_order_parts wp ON wp.id = p.id AND COALESCE(wp.order_number,'') = COALESCE(p.order_number,'') AND COALESCE(wp.order_uid,'') = COALESCE(p.order_uid,'') AND %1=%2 "
+                "LEFT JOIN work_order_part_attachments a ON a.part_id = wp.id")
+                .arg(uidColumn("work_order_parts","wp"), uidColumn("router_work_order_parts","p")))){if(error)*error=query->lastError().text();return false;}
     if(!query->exec()){if(error)*error=query->lastError().text();return false;}
     return true;
 }

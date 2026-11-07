@@ -183,8 +183,9 @@ QHash<int, AttachmentInfo> serviceAttachmentMap(QSqlDatabase db, const QList<int
     return result;
 }
 
-QHash<int, AttachmentInfo> partAttachmentMap(QSqlDatabase db, const QList<int>& partIds)
+QHash<int, AttachmentInfo> partAttachmentMap(QSqlDatabase db, const QList<int>& partIds, QString* error)
 {
+    if (error) error->clear();
     QHash<int, AttachmentInfo> result;
     if (partIds.isEmpty()) return result;
     const auto remote=SupplierInvoiceLedger::activeLinks(db);
@@ -203,7 +204,7 @@ QHash<int, AttachmentInfo> partAttachmentMap(QSqlDatabase db, const QList<int>& 
             "FROM work_order_part_attachments WHERE part_id IN (%1)")
             .arg(placeholders.join(QStringLiteral(","))));
         for (int i = 0; i < count; ++i) q.addBindValue(partIds.at(offset + i));
-        q.exec();
+        if (!q.exec() && error) { *error = q.lastError().text(); return {}; }
         while (q.next()) {
             AttachmentInfo info;
             info.filePath = q.value(1).toString();
@@ -212,6 +213,7 @@ QHash<int, AttachmentInfo> partAttachmentMap(QSqlDatabase db, const QList<int>& 
             info.invoiceDate = q.value(4).toString();
             result.insert(q.value(0).toInt(), info);
         }
+        if (error && q.lastError().isValid()) { *error = q.lastError().text(); return {}; }
         if(db.tables().contains("workshop_spare_movements")) {
             QSqlQuery stock(db);
             stock.prepare(QStringLiteral("SELECT m.part_id,s.document,s.ordered_on FROM workshop_spare_movements m "
@@ -224,6 +226,7 @@ QHash<int, AttachmentInfo> partAttachmentMap(QSqlDatabase db, const QList<int>& 
                 if(info.invoiceNumber.trimmed().isEmpty()) info.invoiceNumber=stock.value(1).toString();
                 if(info.invoiceDate.trimmed().isEmpty()) info.invoiceDate=stock.value(2).toString();
             }
+            if (error && stock.lastError().isValid()) { *error = stock.lastError().text(); return {}; }
         }
         if(!remote.isEmpty()) {
             QSqlQuery parts(db);
@@ -247,6 +250,7 @@ QHash<int, AttachmentInfo> partAttachmentMap(QSqlDatabase db, const QList<int>& 
                             if(candidate.apportioned)linked.filePath.clear();
                         }
                     }
+                    if (error && receipts.lastError().isValid()) { *error = receipts.lastError().text(); return {}; }
                     if(receiptCount!=1 || identities.size()!=1) linked={};
                 }
                 auto& info=result[partId];
@@ -256,6 +260,7 @@ QHash<int, AttachmentInfo> partAttachmentMap(QSqlDatabase db, const QList<int>& 
                     info.filePath=linked.filePath;
                 }
             }
+            if (error && parts.lastError().isValid()) { *error = parts.lastError().text(); return {}; }
         }
     }
     return result;

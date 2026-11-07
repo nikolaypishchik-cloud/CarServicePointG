@@ -6,6 +6,7 @@
 #include "core/util/DateFormats.h"
 #include <QSqlQuery>
 #include <QSqlError>
+#include <QSqlRecord>
 #include <algorithm>
 namespace StatisticsReadService {
 QDate parseBusinessDate(const QString& raw)
@@ -38,6 +39,7 @@ QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const 
     if (!databaseObjectExists(database, partsSource) || !databaseObjectExists(database, ordersSource)) {*error=QStringLiteral("Statistics order/part source is missing");return {};}
 
     QSqlQuery query(database);
+    QVector<int> localRows;
     const QString sql = QStringLiteral(
         "WITH headers AS MATERIALIZED (SELECT number,order_uid,car,client,master_name_closed,master_id FROM %2), "
         "owner_keys AS (SELECT 'u:'||order_uid AS lookup,number,order_uid FROM headers WHERE COALESCE(order_uid,'')<>'' "
@@ -46,13 +48,17 @@ QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const 
         "SELECT p.id, COALESCE(p.order_number,0), COALESCE(p.order_uid,''), COALESCE(p.name,''), COALESCE(p.part_number,''), "
         "COALESCE(p.ordered_at,''), COALESCE(p.delivery_date,''), COALESCE(p.installed_at,''), COALESCE(p.store,''), "
         "COALESCE(o.car,''), COALESCE(o.client,''), "
-        "COALESCE(NULLIF(TRIM(o.master_name_closed),''), NULLIF(TRIM(m.name),''), ''), o.number, o.order_uid "
+        "COALESCE(NULLIF(TRIM(o.master_name_closed),''), NULLIF(TRIM(m.name),''), ''), o.number, o.order_uid, local.id "
         "FROM %1 p LEFT JOIN owners owner ON owner.lookup=CASE WHEN COALESCE(p.order_uid,'')<>'' THEN 'u:'||p.order_uid ELSE 'n:'||p.order_number END "
         "LEFT JOIN headers o ON o.number=owner.number AND o.order_uid IS owner.order_uid "
+        "LEFT JOIN work_order_parts local ON local.id=p.id AND local.order_number=p.order_number "
+        "AND COALESCE(local.order_uid,'')=COALESCE(p.order_uid,'') AND %3=%4 "
         "LEFT JOIN masters m ON m.id=o.master_id "
         "WHERE TRIM(COALESCE(p.name,''))<>'' "
         "ORDER BY date(CASE WHEN substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),3,1)='.' AND substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),7,2) END||'-'||substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),4,2)||'-'||substr(trim(COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,''))),1,2) ELSE COALESCE(NULLIF(p.installed_at,''), NULLIF(p.delivery_date,''), NULLIF(p.ordered_at,'')) END) DESC, p.id DESC")
-        .arg(partsSource, ordersSource);
+        .arg(partsSource, ordersSource,
+             database.record("work_order_parts").contains("part_uid") ? "COALESCE(local.part_uid,'')" : "''",
+             database.record(partsSource).contains("part_uid") ? "COALESCE(p.part_uid,'')" : "''");
     if (!query.exec(sql)) {*error=query.lastError().text();return {};}
 
     const QDate today = QDate::currentDate();
@@ -94,15 +100,18 @@ QVector<PartTraceRow> loadParts(QSqlDatabase database, const QDate& from, const 
         } else {
             row.status = QString::fromUtf8("Очікується");
         }
+        if (!query.value(14).isNull()) localRows.append(rows.size());
         rows.append(row);
     }
     if(query.lastError().isValid()){*error=query.lastError().text();return {};}
     // Resolve invoice links once, after date/search filtering, not once per part.
     QList<int> partIds;
-    partIds.reserve(rows.size());
-    for(const auto& row:rows) partIds.append(int(row.id));
-    const auto attachments=OrderAttachmentService::partAttachmentMap(database,partIds);
-    for(auto& row:rows) {
+    partIds.reserve(localRows.size());
+    for (int index : localRows) partIds.append(int(rows.at(index).id));
+    const auto attachments=OrderAttachmentService::partAttachmentMap(database,partIds,error);
+    if (!error->isEmpty()) return {};
+    for (int index : localRows) {
+        auto& row = rows[index];
         const auto attachment=attachments.value(int(row.id));
         row.invoiceFileName=attachment.displayName;
         row.invoiceNumber=attachment.invoiceNumber;
