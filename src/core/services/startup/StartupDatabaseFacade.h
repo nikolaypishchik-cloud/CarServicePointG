@@ -11,5 +11,6 @@ public:
     static bool prepareRuntime(QString* errorText);
     static bool openPrepared(QString* errorText);
     static bool runStartupSchemaCheck(QString* errorText);
+    static qsizetype registeredSqlConnectionCount();
     static bool setSetting(QStringView key, const QString& value);
 };

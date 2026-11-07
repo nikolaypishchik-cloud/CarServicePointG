@@ -2,8 +2,13 @@
 #include "app/App.h"
 #include "app/SingleInstanceCoordinator.h"
 #include "core/services/startup/StartupDatabaseFacade.h"
+#include "runtime/RuntimeJobDispatcher.h"
 #include <QCoreApplication>
+#include <QDebug>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QTimer>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -13,6 +18,30 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <cstdlib>
+
+namespace {
+bool recordRuntimeSample(const QString& path, qint64 elapsedMs, const QString& phase)
+{
+    using namespace RuntimeJob;
+    QJsonObject jobs;
+    for (auto family : {Family::CurrentOrders,Family::History,Family::Parts,Family::WorkPartsDialog,
+                        Family::Reports,Family::Import,Family::Backup,Family::Update,Family::Other}) {
+        const auto job = RuntimeJobDispatcher::instance().familySnapshot(family);
+        if (job.jobId)
+            jobs.insert(RuntimeJobDispatcher::familyName(family), QJsonObject{
+                {"generation",qint64(job.generation)}, {"status",RuntimeJobDispatcher::statusName(job.status)}});
+    }
+    const QJsonObject sample{
+        {"utc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+        {"pid",QCoreApplication::applicationPid()}, {"elapsed_ms",elapsedMs}, {"phase",phase},
+        {"registered_sql_connections",qint64(StartupDatabaseFacade::registeredSqlConnectionCount())},
+        {"latest_jobs",jobs}
+    };
+    QFile file(path);
+    const auto bytes = QJsonDocument(sample).toJson(QJsonDocument::Compact) + '\n';
+    return file.open(QIODevice::WriteOnly | QIODevice::Append) && file.write(bytes)==bytes.size() && file.flush();
+}
+}
 
 QString AcceptanceProfile::create(QString* error)
 {
@@ -88,5 +117,21 @@ bool AcceptanceProfile::configureServices(const QString& root, QString* error)
         *error = proof.errorString();
         return false;
     }
+    const auto path=run.filePath("runtime-samples.jsonl");
+    QElapsedTimer elapsed;
+    elapsed.start();
+    if (!recordRuntimeSample(path,elapsed.elapsed(),"startup")) {
+        *error = "Cannot record isolated runtime observations";
+        return false;
+    }
+    auto* app=QCoreApplication::instance();
+    auto* timer=new QTimer(app);
+    const auto sample=[path,elapsed](const QString& phase) {
+        if (!recordRuntimeSample(path,elapsed.elapsed(),phase))
+            qWarning() << "Cannot append isolated runtime observation" << phase;
+    };
+    QObject::connect(timer,&QTimer::timeout,timer,[sample]{sample("running");});
+    QObject::connect(app,&QCoreApplication::aboutToQuit,timer,[sample]{sample("shutdown");});
+    timer->start(60000);
     return true;
 }

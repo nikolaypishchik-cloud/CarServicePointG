@@ -31,3 +31,8 @@ bool StartupDatabaseFacade::setSetting(QStringView key, const QString& value)
 {
     return Database::setSetting(key.toString(), value);
 }
+
+qsizetype StartupDatabaseFacade::registeredSqlConnectionCount()
+{
+    return QSqlDatabase::connectionNames().size();
+}
