@@ -558,3 +558,4 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `tests/HistoricalRecordStoreTests.cpp` | test-only | Synthetic sources verify archive provenance, fields, rollback and repeated import. |
 | `docs/reliability/DBY_T188_PARTS_PDF_IDENTITY.md` | active | Synthetic evidence for parts PDF owner and child identity; records supported older schemas and date precedence without a runtime exception. |
 | `tests/PartsPdfIdentityFixture.h` | test-only | Synthetic owner/child collisions and unchanged date precedence; no runtime compatibility allowance. |
+| `tests/AdminPayrollIdentityFixture.h` | test-only | Verifies how the payroll reader resolves older numeric-only service rows and rejects ambiguous owners. |
