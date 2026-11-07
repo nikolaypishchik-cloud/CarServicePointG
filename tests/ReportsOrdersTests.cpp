@@ -1199,13 +1199,15 @@ void ReportsOrdersTests::migrationOperationExclusion()
 void ReportsOrdersTests::migrationServiceRoundTrip_data()
 {
     QTest::addColumn<QString>("targetState");
-    for(const auto& state:QStringList{"fresh", "initialized-closed", "initialized-live", "active-transaction", "restore-after-failure", "populated", "populated-key-collision", "populated-child-key-collision", "populated-conflicting-parent"})
+    for(const auto& state:QStringList{"fresh", "initialized-closed", "initialized-live", "active-transaction", "restore-after-failure", "populated", "populated-key-collision", "populated-child-key-collision", "populated-repeat-open", "populated-conflicting-parent"})
         QTest::newRow(qPrintable(state))<<state;
 }
 
 void ReportsOrdersTests::migrationServiceRoundTrip()
 {
     QFETCH(QString,targetState);
+    const bool childCollision=targetState=="populated-child-key-collision" || targetState=="populated-repeat-open";
+    const bool keyedSource=targetState=="populated-key-collision" || childCollision;
     QTemporaryDir root; QVERIFY(root.isValid());
     const auto oldRoot=qEnvironmentVariable("CS_TEST_DATA_ROOT");
     const auto oldName=QCoreApplication::applicationName();
@@ -1238,7 +1240,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             "INSERT INTO work_orders VALUES(7,'migration-service-order',2024,3,'2024-06-15','closed',0,0,1)",
             "INSERT INTO masters VALUES(1,'Safety Master')"
         }) QVERIFY2(q.exec(sql),qPrintable(q.lastError().text()));
-        if ((targetState=="populated-key-collision" || targetState=="populated-child-key-collision") || targetState=="populated-conflicting-parent") {
+        if (keyedSource || targetState=="populated-conflicting-parent") {
             QVERIFY(q.exec("ALTER TABLE work_order_services ADD COLUMN service_uid TEXT"));
             QVERIFY(q.exec("ALTER TABLE work_order_parts ADD COLUMN service_id INTEGER"));
             QVERIFY(q.exec("INSERT INTO work_order_services VALUES(20,7,'migration-service-order',1,0,0,'Source work','source-service-uid')"));
@@ -1270,7 +1272,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
                 "VALUES(%1,'existing-target-order',2023,3,'2023-06-15','open','','','Target car','Target client','m1')").arg(existingKey)),qPrintable(setup.lastError().text()));
             QVERIFY2(setup.exec(QString("INSERT INTO work_order_parts(id,part_uid,order_number,order_uid,name,qty,price,amount) "
                 "VALUES(1001,'existing-target-part',%1,'existing-target-order','Target part',2,19.25,38.50)").arg(existingKey)),qPrintable(setup.lastError().text()));
-            if(targetState=="populated-child-key-collision") {
+            if(childCollision) {
                 QVERIFY(setup.exec("INSERT INTO work_order_services(id,service_uid,order_uid,order_number,title,qty,price,amount) VALUES(20,'target-service','existing-target-order',7,'Target work',1,12.50,12.50)"));
                 QVERIFY(setup.exec("UPDATE work_order_parts SET id=21,service_id=20 WHERE id=1001"));
             }
@@ -1339,7 +1341,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     QVERIFY(stages.contains("execute_snapshot")); QVERIFY(stages.contains("execute_import"));
     QVERIFY(stages.contains("execute_reopen_ready"));
     QCOMPARE(result.sourceOrderCount,1); QCOMPARE(result.importedOrderCount,1);
-    QCOMPARE(result.importedPartCount,(targetState=="populated-key-collision" || targetState=="populated-child-key-collision") ? 1 : 0); QCOMPARE(result.importedMasterCount,1);
+    QCOMPARE(result.importedPartCount,keyedSource ? 1 : 0); QCOMPARE(result.importedMasterCount,1);
     QVERIFY(QFileInfo::exists(result.snapshotDirPath));
     QVERIFY(source.open(QIODevice::ReadOnly)); QCOMPARE(source.readAll(),original); source.close();
     if (populated) {
@@ -1366,7 +1368,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
         QVERIFY(q.exec("SELECT value FROM settings WHERE key='migration.target.sentinel'"));
         QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("existing setting"));
     }
-    if ((targetState=="populated-key-collision" || targetState=="populated-child-key-collision")) {
+    if (keyedSource) {
         QVERIFY(q.exec("SELECT number,order_year,order_number FROM work_orders WHERE order_uid='migration-service-order'"));
         QVERIFY(q.next()); const auto mapped=q.value(0).toInt(); QVERIFY(mapped!=7);
         QCOMPARE(q.value(1).toInt(),2024); QCOMPARE(q.value(2).toInt(),3);
@@ -1382,7 +1384,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
         QCOMPARE(sourceStream.status(),QDataStream::Ok); QCOMPARE(targetStream.status(),QDataStream::Ok);
         QCOMPARE(originalRow.value("number").toInt(),7); QCOMPARE(targetKey.value("number").toInt(),mapped);
     }
-    if(targetState=="populated-child-key-collision") {
+    if(childCollision) {
         QVERIFY(q.exec("SELECT p.id,s.id,ROUND(s.amount*100),p.order_uid,s.service_uid FROM work_order_parts p JOIN work_order_services s ON s.id=p.service_id WHERE p.part_uid='existing-target-part'"));
         QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),21);QCOMPARE(q.value(1).toInt(),20);QCOMPARE(q.value(2).toInt(),1250);
         QCOMPARE(q.value(3).toString(),QString("existing-target-order"));QCOMPARE(q.value(4).toString(),QString("target-service"));QVERIFY(!q.next());
@@ -1393,6 +1395,67 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     QVERIFY2(q.exec(populated ? "SELECT order_uid,order_year,order_number FROM work_orders WHERE order_uid='migration-service-order'" : "SELECT order_uid,order_year,order_number FROM work_orders"),qPrintable(q.lastError().text()));
     QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("migration-service-order"));
     QCOMPARE(q.value(1).toInt(),2024); QCOMPARE(q.value(2).toInt(),3); QVERIFY(!q.next());
+    if(targetState=="populated-repeat-open") {
+        q.finish();db.close();
+        QVERIFY2(Database::prepareRuntime(&error),qPrintable(error));
+        QVERIFY2(Database::openPrepared(&error),qPrintable(error));
+        QVERIFY2(Database::runStartupMigrationCheck(&error),qPrintable(error));
+        auto owner=Database::db();QVERIFY(owner.isOpen());
+        const auto capture=[&](QByteArray* bytes)->bool {
+            bytes->clear();QDataStream stream(bytes,QIODevice::WriteOnly);
+            stream.setVersion(QDataStream::Qt_6_0);
+            for(const auto& table:QStringList{"work_orders","work_order_services","work_order_parts",
+                    "migration_record_map","migration_order_key_map","migration_child_key_map",
+                    "migration_prepared_source","migration_archive_pin"}) {
+                QSqlQuery rows(owner);
+                if(!rows.exec("SELECT * FROM "+table+" ORDER BY rowid")) {error=rows.lastError().text();return false;}
+                stream<<table;
+                while(rows.next()) {
+                    QVariantList values;
+                    for(int i=0;i<rows.record().count();++i) values<<rows.value(i);
+                    stream<<values;
+                }
+                if(rows.lastError().isValid()) {error=rows.lastError().text();return false;}
+            }
+            return stream.status()==QDataStream::Ok;
+        };
+        QByteArray before,after;QVERIFY2(capture(&before),qPrintable(error));
+        QFile history(QDir(AppRuntime::securityDir()).filePath("legacy_import_history.json"));
+        QVERIFY(history.open(QIODevice::ReadOnly));const auto historyBefore=history.readAll();history.close();
+        QJsonParseError parseError;const auto historyDoc=QJsonDocument::fromJson(historyBefore,&parseError);
+        QCOMPARE(parseError.error,QJsonParseError::NoError);QVERIFY(historyDoc.isArray());
+        QCOMPARE(historyDoc.array().size(),1);
+        QCOMPARE(historyDoc.array().first().toObject().value("status").toString(),QString("success"));
+        QVERIFY(!historyDoc.array().first().toObject().value("fingerprint").toString().isEmpty());
+        QSqlQuery identity(owner);QVERIFY(identity.exec("SELECT DISTINCT source_identity FROM migration_record_map"));
+        QVERIFY(identity.next());QCOMPARE(identity.value(0).toString(),historyDoc.array().first().toObject().value("fingerprint").toString());
+        QVERIFY(!identity.next());identity.finish();
+        QFile importLog(result.importLogPath);QVERIFY(importLog.open(QIODevice::ReadOnly));
+        const auto logBefore=importLog.readAll();importLog.close();
+        QString repeatError;QStringList repeatStages;LegacyMigrationResult repeated;
+        bool repeatedOk=true;QEventLoop repeatLoop;
+        std::thread repeatWorker([&]{
+            repeatedOk=LegacyMigrationService::executeLegacyImport(sourcePath,&repeated,&repeatError,
+                [&](const LegacyImportProgressState& state){repeatStages<<state.stageKey;});
+            Database::close();
+            QMetaObject::invokeMethod(&repeatLoop,&QEventLoop::quit,Qt::QueuedConnection);
+        });
+        repeatLoop.exec();repeatWorker.join();
+        QVERIFY(!repeatedOk);
+        QVERIFY2(repeatError.contains(QString::fromUtf8("вже було успішно імпортоване")),qPrintable(repeatError));
+        QVERIFY(!repeatStages.contains("execute_snapshot"));QVERIFY(!repeatStages.contains("execute_import"));
+        QVERIFY(!repeatStages.contains("execute_reopen"));QVERIFY(owner.isOpen());
+        QVERIFY2(capture(&after),qPrintable(error));QCOMPARE(after,before);
+        QVERIFY(history.open(QIODevice::ReadOnly));QCOMPARE(history.readAll(),historyBefore);history.close();
+        QVERIFY(importLog.open(QIODevice::ReadOnly));QCOMPARE(importLog.readAll(),logBefore);importLog.close();
+        QVERIFY(source.open(QIODevice::ReadOnly));QCOMPARE(source.readAll(),original);source.close();
+        QSqlQuery counts(owner);
+        QVERIFY(counts.exec("SELECT (SELECT COUNT(*) FROM work_orders),(SELECT COUNT(*) FROM work_order_services),(SELECT COUNT(*) FROM work_order_parts),"
+            "(SELECT ROUND(SUM(amount)*100) FROM work_order_parts),(SELECT ROUND(SUM(amount)*100) FROM work_order_services)"));
+        QVERIFY(counts.next());QCOMPARE(counts.value(0).toInt(),2);QCOMPARE(counts.value(1).toInt(),2);
+        QCOMPARE(counts.value(2).toInt(),2);QCOMPARE(counts.value(3).toInt(),3850);QCOMPARE(counts.value(4).toInt(),1250);
+    }
+
 }
 
 void ReportsOrdersTests::migrationJournalRejectsCorruption()
