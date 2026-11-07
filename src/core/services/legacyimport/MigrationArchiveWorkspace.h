@@ -1,6 +1,7 @@
 #pragma once
 
 #include "infrastructure/db/sqlite/OrderArchiveShardSqlSupport.h"
+#include "core/services/legacyimport/MigrationArchiveCoverage.h"
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
 #include "infrastructure/db/sqlite/SqliteSchemaInspection.h"
 #include <QScopeGuard>
@@ -66,6 +67,7 @@ inline bool merge(const QString& archive, const QString& workspace, QString* err
         q.addBindValue(order.key);q.addBindValue(order.uid);
         if(!q.exec() || q.numRowsAffected()!=1)return fail("Workspace state identity conflict: "+q.lastError().text());q.finish();
     }
+    if(!MigrationArchiveCoverage::reconcile(db,error))return false;
     if(!db.commit())return fail(db.lastError().text());
     rollback.dismiss();
     if(materialized)materialized->unite(inserted);

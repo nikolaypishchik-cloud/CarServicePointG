@@ -47,12 +47,10 @@ bool seedWorkspace(const QString& destination, bool* copied, QString* error)
     return RuntimeDbPreflightValidator::validateFile(destination, RuntimeDbPreflightValidator::DbRole::Workspace,error);
 }
 
-bool retainPreviousArchive(const QString& temporary, QString* mergeSource, QString* error)
+bool retainPreviousArchive(const QString& temporary, const QString& role, const QString& runtime, const QString& sealed, QString* mergeSource, QString* error)
 {
-    const auto runtime=AppRuntime::archiveDbFilePath();
-    const auto sealed=AppRuntime::sealedArchiveDbFilePath();
     if(!QFileInfo::exists(runtime) && !QFileInfo::exists(sealed))return true;
-    const auto copy=QDir(temporary).filePath("previous-archive.db");
+    const auto copy=QDir(temporary).filePath("previous-"+role+".db");
     if(QFileInfo::exists(runtime)) {
         const auto name=QUuid::createUuid().toString();
         auto db=QSqlDatabase::addDatabase("QSQLITE",name);
@@ -68,7 +66,7 @@ bool retainPreviousArchive(const QString& temporary, QString* mergeSource, QStri
     if(digest.isEmpty())return NativeSnapshotMetadata::fail(error,"Cannot hash previous archive");
     const auto directory=QDir(AppRuntime::securityDir()).filePath("migration_retained_archives");
     if(!QDir().mkpath(directory) || !NativeSnapshotMetadata::protectBackupDirectory(directory,error))return false;
-    const auto retained=QDir(directory).filePath("archive_"+QString::fromLatin1(digest.toHex())+".db");
+    const auto retained=QDir(directory).filePath(role+"_"+QString::fromLatin1(digest.toHex())+".db");
     if(!QFileInfo::exists(retained) && !QFile::copy(copy,retained))return NativeSnapshotMetadata::fail(error,"Cannot retain previous archive shard");
     if(hash(retained)!=digest)return NativeSnapshotMetadata::fail(error,"Previous archive shard differs from snapshot");
     // Reconcile from the verified staging snapshot. The immutable retained
@@ -87,17 +85,21 @@ bool prepareWorkspace(const QString& path, const QString& source, const QString&
     db.setDatabaseName(path);
     if (!db.open()) return NativeSnapshotMetadata::fail(error, db.lastError().text());
     if (!ensureWorkspaceSchema(db)) return NativeSnapshotMetadata::fail(error, "Cannot initialize migration workspace");
-    QString previousArchive;
-    if(!retainPreviousArchive(QFileInfo(path).absolutePath(),&previousArchive,error))return false;
+    QString previousArchive,previousLegacy;
+    const auto temporary=QFileInfo(path).absolutePath();
+    if(!retainPreviousArchive(temporary,"archive",AppRuntime::archiveDbFilePath(),AppRuntime::sealedArchiveDbFilePath(),&previousArchive,error)
+        || !retainPreviousArchive(temporary,"legacy",AppRuntime::legacyDbFilePath(),AppRuntime::sealedLegacyDbFilePath(),&previousLegacy,error))return false;
     QSet<QString> previousPaths;
     if(!previousArchive.isEmpty())previousPaths.insert(previousArchive);
+    if(!previousLegacy.isEmpty())previousPaths.insert(previousLegacy);
     QDir shardDirectory(QDir(AppRuntime::dataDir()).filePath("archive_shards"));
     for(const auto& file:shardDirectory.entryList({"orders_*.db"},QDir::Files,QDir::Name))previousPaths.insert(shardDirectory.filePath(file));
     QSqlQuery routes(db);
     if(!routes.exec("SELECT DISTINCT storage_path FROM order_registry WHERE storage_kind='archive'"))return NativeSnapshotMetadata::fail(error,routes.lastError().text());
     while(routes.next()) {
         const auto oldPath=routes.value(0).toString();
-        previousPaths.insert(oldPath==AppRuntime::archiveDbFilePath() ? previousArchive : oldPath);
+        previousPaths.insert(oldPath==AppRuntime::archiveDbFilePath() ? previousArchive :
+            oldPath==AppRuntime::legacyDbFilePath() ? previousLegacy : oldPath);
     }
     if(routes.lastError().isValid())return NativeSnapshotMetadata::fail(error,routes.lastError().text());routes.finish();
     auto sortedPaths=previousPaths.values();sortedPaths.sort();

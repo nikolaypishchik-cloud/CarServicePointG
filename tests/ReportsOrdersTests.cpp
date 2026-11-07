@@ -1312,14 +1312,16 @@ void ReportsOrdersTests::migrationReservesArchivedOrderKeys()
 void ReportsOrdersTests::migrationServiceRoundTrip_data()
 {
     QTest::addColumn<QString>("targetState");
-    for(const auto& state:QStringList{"fresh", "initialized-closed", "initialized-live", "active-transaction", "restore-after-failure", "populated", "populated-key-collision", "populated-child-key-collision", "populated-child-only-collision", "populated-archive-routing", "populated-retained-stores", "populated-retained-rollback", "populated-repeat-open", "populated-conflicting-parent"})
+    for(const auto& state:QStringList{"fresh", "initialized-closed", "initialized-live", "active-transaction", "restore-after-failure", "populated", "populated-key-collision", "populated-child-key-collision", "populated-child-only-collision", "populated-archive-routing", "populated-legacy-routing", "populated-legacy-conflict", "populated-retained-stores", "populated-retained-rollback", "populated-repeat-open", "populated-conflicting-parent"})
         QTest::newRow(qPrintable(state))<<state;
 }
 
 void ReportsOrdersTests::migrationServiceRoundTrip()
 {
     QFETCH(QString,targetState);
-    const bool archiveRouting=targetState=="populated-archive-routing";
+    const bool legacyRouting=targetState=="populated-legacy-routing" || targetState=="populated-legacy-conflict";
+    const bool archiveConflict=targetState=="populated-legacy-conflict";
+    const bool archiveRouting=targetState=="populated-archive-routing" || legacyRouting;
     const bool retainedStores=targetState=="populated-retained-stores" || targetState=="populated-retained-rollback";
     QMap<QString,QByteArray> priorSealed;
     const bool childOnlyCollision=targetState=="populated-child-only-collision";
@@ -1419,9 +1421,30 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
         // active duplicate. Exercise replacement of the primary archive too.
         const auto previous=archiveShardFilePathForOrder(existingKey);
         Database::close();
-        QVERIFY(QFile::remove(AppRuntime::archiveDbFilePath()) || !QFileInfo::exists(AppRuntime::archiveDbFilePath()));
-        QVERIFY(QFile::copy(previous,AppRuntime::archiveDbFilePath()));
-        QVERIFY2(EncryptedStorage::encryptPlainFileToSealed(AppRuntime::archiveDbFilePath(),AppRuntime::sealedArchiveDbFilePath(),&setupError),qPrintable(setupError));
+        const auto oldPath=legacyRouting ? AppRuntime::legacyDbFilePath() : AppRuntime::archiveDbFilePath();
+        const auto sealedPath=legacyRouting ? AppRuntime::sealedLegacyDbFilePath() : AppRuntime::sealedArchiveDbFilePath();
+        QVERIFY(QFile::remove(oldPath) || !QFileInfo::exists(oldPath));
+        QVERIFY(QFile::copy(previous,oldPath));
+        if(legacyRouting) {
+            const QString connection="independent-legacy-fixture";
+            {auto legacy=QSqlDatabase::addDatabase("QSQLITE",connection);legacy.setDatabaseName(oldPath);QVERIFY(legacy.open());QSqlQuery fixture(legacy);
+             if(archiveConflict) {
+                QVERIFY(fixture.exec("UPDATE work_order_parts SET amount=99.99"));
+             } else {
+                QVERIFY(fixture.exec("UPDATE work_orders SET number=40,order_uid='legacy-only-order',order_year=2022,opened_at='2022-06-15',closed_at='2022-06-16'"));
+                QVERIFY(fixture.exec("UPDATE work_order_services SET id=200,order_number=40,order_uid='legacy-only-order',service_uid='legacy-only-service'"));
+                QVERIFY(fixture.exec("UPDATE work_order_parts SET id=201,order_number=40,order_uid='legacy-only-order',part_uid='legacy-only-part',service_id=200"));
+                QVERIFY(fixture.exec("UPDATE service_masters SET service_id=200 WHERE service_id=20"));
+                QVERIFY(fixture.exec("ALTER TABLE work_order_parts ADD COLUMN historic_note BLOB"));
+                QVERIFY(fixture.exec("UPDATE work_order_parts SET historic_note=X'AB00CD'"));
+                QVERIFY(fixture.exec("CREATE TABLE historical_adjustments(id INTEGER PRIMARY KEY,order_uid TEXT,cents INTEGER,note BLOB)"));
+                QVERIFY(fixture.exec("INSERT INTO historical_adjustments VALUES(1,'legacy-only-order',7250,X'0002FF')"));
+             }
+             legacy.close();}
+            QSqlDatabase::removeDatabase(connection);
+        }
+        QVERIFY2(EncryptedStorage::encryptPlainFileToSealed(oldPath,sealedPath,&setupError),qPrintable(setupError));
+        if(archiveConflict){QFile sealed(sealedPath);QVERIFY(sealed.open(QIODevice::ReadOnly));priorSealed.insert("legacy",sealed.readAll());}
     }
     if(retainedStores) {
         Database::close();
@@ -1476,6 +1499,12 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     worker.join();
     if (targetState=="restore-after-failure" || targetState=="populated-retained-rollback") QVERIFY(QFile::rename(sourcePath+".held",sourcePath));
     QVERIFY(source.open(QIODevice::ReadOnly)); QCOMPARE(source.readAll(),original); source.close();
+    if(archiveConflict) {
+        QVERIFY(!ok);QVERIFY2(error.contains("source and archive differ"),qPrintable(error));
+        QVERIFY(!stages.contains("execute_reopen"));
+        QFile sealed(AppRuntime::sealedLegacyDbFilePath());QVERIFY(sealed.open(QIODevice::ReadOnly));QCOMPARE(sealed.readAll(),priorSealed.value("legacy"));
+        return;
+    }
     if(targetState=="populated-retained-rollback") {
         QVERIFY(!ok);QVERIFY(!error.isEmpty());QVERIFY(stages.contains("execute_reopen"));
         const QMap<QString,QString> paths={{"archive",AppRuntime::sealedArchiveDbFilePath()},
@@ -1516,6 +1545,12 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
         return;
     }
     QVERIFY2(ok,qPrintable(error+" | stages="+stages.join(',')));
+    if(legacyRouting) {
+        const QString connection="legacy-materialized-evidence";
+        {auto check=QSqlDatabase::addDatabase("QSQLITE",connection);check.setDatabaseName(AppRuntime::activeDbFilePath());check.setConnectOptions("QSQLITE_OPEN_READONLY");QVERIFY(check.open());QSqlQuery evidence(check);
+         QVERIFY(evidence.exec("SELECT hex(historic_note) FROM work_order_parts WHERE part_uid='legacy-only-part'"));QVERIFY(evidence.next());QCOMPARE(evidence.value(0).toString(),QString("AB00CD"));evidence.finish();check.close();}
+        QSqlDatabase::removeDatabase(connection);
+    }
     if (targetState=="initialized-live") {
         QVERIFY(QSqlDatabase::contains(mainConnectionName()));
         auto owner = QSqlDatabase::database(mainConnectionName(),false);
@@ -1558,6 +1593,14 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             QVERIFY2(Database::runStartupRegistryRefresh(&error),qPrintable(error));
             QVERIFY2(Database::ensureOrderAvailableInActiveByUid("existing-target-order",&error),qPrintable(error));
             QVERIFY2(Database::ensureOrderAvailableInActiveByUid("migration-service-order",&error),qPrintable(error));
+            if(legacyRouting) {
+                QVERIFY2(Database::ensureOrderAvailableInActiveByUid("legacy-only-order",&error),qPrintable(error));
+                QSqlQuery history(Database::db());
+                QVERIFY(history.exec("SELECT p.part_uid,s.service_uid,ROUND(p.amount*100) FROM work_order_parts p JOIN work_order_services s ON s.id=p.service_id AND s.order_uid=p.order_uid WHERE p.order_uid='legacy-only-order'"));
+                QVERIFY(history.next());QCOMPARE(history.value(0).toString(),QString("legacy-only-part"));QCOMPARE(history.value(1).toString(),QString("legacy-only-service"));QCOMPARE(history.value(2).toInt(),3850);history.finish();
+                QVERIFY(history.exec("SELECT cents,hex(note) FROM historical_adjustments WHERE order_uid='legacy-only-order'"));
+                QVERIFY(history.next());QCOMPARE(history.value(0).toInt(),7250);QCOMPARE(history.value(1).toString(),QString("0002FF"));
+            }
             Database::close();
         }
     }
@@ -1568,7 +1611,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     QVERIFY2(db.open(),qPrintable(db.lastError().text()));
     QSqlQuery q(db);
     if (populated) {
-        QVERIFY(q.exec("SELECT COUNT(*) FROM work_orders")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),2);
+        QVERIFY(q.exec("SELECT COUNT(*) FROM work_orders")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),legacyRouting ? 3 : 2);
         QVERIFY(q.exec("SELECT order_year,order_number,car FROM work_orders WHERE order_uid='existing-target-order'"));
         QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),2023); QCOMPARE(q.value(1).toInt(),3);
         QCOMPARE(q.value(2).toString(),QString("Target car")); QVERIFY(!q.next());
