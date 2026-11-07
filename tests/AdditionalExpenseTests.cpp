@@ -177,7 +177,16 @@ private slots:
     }
     void payrollPdfSupplementFailuresScopeAndRepeat() {
         preparePartsPayrollPdfFixture();QString error;
+        QSqlQuery staffing(db);
+        QVERIFY(staffing.exec("UPDATE masters SET active=0,active_to='2025-12-31' WHERE id<>'pdf-master'"));
         const auto masters=ReportsPdfSupport::collectPayrollDetails("2026-01-01","2026-01-31",&error);QVERIFY2(error.isEmpty(),qPrintable(error));QCOMPARE(masters.size(),1);QCOMPARE(qRound64(masters.first().accrued*100),3815);
+        QCOMPARE(qRound64(masters.first().sharedExpenses*100),1210);
+        QVERIFY(masters.first().orders.first().works.contains(QStringLiteral("50.25")));
+        QVERIFY(staffing.exec("INSERT INTO masters(id,name,role,active,active_from) VALUES('pdf-second','Second master','master',1,'2026-01-01')"));
+        const auto shared=ReportsPdfSupport::collectPayrollDetails("2026-01-01","2026-01-31",&error);
+        QVERIFY2(error.isEmpty(),qPrintable(error));QCOMPARE(shared.size(),1);
+        QCOMPARE(qRound64(shared.first().sharedExpenses*100),605);
+        QCOMPARE(qRound64(shared.first().accrued*100),4420);
         ReportsPdfRenderer::ExportResult result;const auto render=[&]{return ReportsPdfRenderer::renderPayrollPdf(QDate(2026,1,1),QDate(2026,1,31),&result);};QVERIFY2(render(),qPrintable(result.errorText));const auto path=result.path;QSqlQuery q(db);
         const auto good=PayrollReadFixture::bytes(path);QVERIFY(good.startsWith("%PDF"));QVERIFY(q.exec("ALTER TABLE expenses RENAME COLUMN cleaning_note TO broken_note"));
         QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());QCOMPARE(result.recordCount,0);QCOMPARE(PayrollReadFixture::bytes(path),good);

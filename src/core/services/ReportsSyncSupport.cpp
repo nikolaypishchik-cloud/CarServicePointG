@@ -74,11 +74,6 @@ double resolvePayrollPercent(const MasterRow& master, const PayrollPercentResolv
     return 0.0;
 }
 
-QString money0(double value)
-{
-    return FormatUtils::money(value, 0);
-}
-
 QString payrollWorksTextForMasterImpl(QSqlDatabase db,const QString& orderNumber, const QString& masterId, double payrollPercent, QString* error)
 {
     QSqlQuery dq(db);
@@ -109,7 +104,7 @@ QString payrollWorksTextForMasterImpl(QSqlDatabase db,const QString& orderNumber
             const double sharedAmount = svcQ.value(1).toDouble() * svcQ.value(2).toDouble() / 100.0;
             const double discountedAmount = qMax(0.0, FormatUtils::roundMoneyValue(sharedAmount * (1.0 - discountPct / 100.0)));
             const double payrollAmount = FormatUtils::roundMoneyValue(discountedAmount * payrollPercent / 100.0);
-            works << QString::fromUtf8("%1 — %2 грн").arg(title, money0(payrollAmount));
+            works << QString::fromUtf8("%1 — %2 грн").arg(title, FormatUtils::money(payrollAmount, 2));
         }
     }
     if(svcQ.lastError().isValid()){if(error)*error=svcQ.lastError().text();return {};}

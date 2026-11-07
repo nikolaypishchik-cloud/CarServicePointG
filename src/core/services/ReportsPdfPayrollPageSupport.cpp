@@ -182,7 +182,7 @@ void renderPayrollPages(
         int x = theme.left;
         if (isAdmin) {
             const QString sourceKey = adminSources.value(m.masterId, QStringLiteral("margin"));
-            const double accrued = qRound64(ReportsPdfExpenseSupport::adminSalaryBaseForSource(adminTotals, sourceKey) * m.percent / 100.0);
+            const double accrued = FormatUtils::roundMoneyValue(ReportsPdfExpenseSupport::adminSalaryBaseForSource(adminTotals, sourceKey) * m.percent / 100.0);
             QVector<int> aw = { mmToPx(&pdf, 24), mmToPx(&pdf, 30), mmToPx(&pdf, 30), mmToPx(&pdf, 24), 0 };
             const int afixed = aw[0] + aw[1] + aw[2] + aw[3];
             aw[4] = qMax(mmToPx(&pdf, 32), theme.contentWidth - afixed);
@@ -239,7 +239,7 @@ void renderPayrollPages(
 
         const int summaryRowH = mmToPx(&pdf, 7.0);
         x = theme.left;
-        const double grossAccrued = qRound64(m.worksTotal * m.percent / 100.0);
+        const double grossAccrued = FormatUtils::roundMoneyValue(m.worksTotal * m.percent / 100.0);
         drawCell(painter, QRect(x, y, w[0] + w[1] + w[2] + w[3], summaryRowH), QString::fromUtf8("ПІДСУМОК"), fonts.summary,
                  Qt::AlignCenter, Qt::white, kPdfTablePenWidth);
         drawCell(painter, QRect(x + w[0] + w[1] + w[2] + w[3], y, w[4], summaryRowH), money2(grossAccrued) + QString::fromUtf8(" грн"),
