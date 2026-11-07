@@ -59,6 +59,18 @@ int main(int argc,char** argv) {
  sql("INSERT INTO main.order_registry VALUES(40,'wrong-uid',3,2023)");
  check(!MigrationArchiveWorkspace::merge(dir.filePath("old.db"),dir.filePath("workspace.db"),&error));check(error.contains("registry identity conflicts"));
  sql("UPDATE main.order_registry SET order_uid='old-order'");error.clear();
+ // Bounded schema-review boundary: refuse a partial copy that would omit
+ // an explicit index, then prove the caller-owned source can be reconciled
+ // after the fixture's reviewed schema change. No production gate is relaxed.
+ sql("CREATE TABLE main.historical_indexed(order_uid TEXT,cents INTEGER)");
+ sql("INSERT INTO main.historical_indexed VALUES('old-order',1234)");
+ sql("CREATE INDEX main.historical_lookup ON historical_indexed(order_uid)");
+ check(!MigrationArchiveWorkspace::merge(dir.filePath("old.db"),dir.filePath("workspace.db"),&error));check(error.contains("schema requiring review"));
+ sql("SELECT COUNT(*) FROM archive_rollover.sqlite_master WHERE name='historical_indexed'");check(q.next() && q.value(0).toInt()==0);q.finish();
+ sql("SELECT cents FROM main.historical_indexed");check(q.next() && q.value(0).toInt()==1234);q.finish();
+ sql("DROP INDEX main.historical_lookup");error.clear();
+ check(MigrationArchiveWorkspace::merge(dir.filePath("old.db"),dir.filePath("workspace.db"),&error));
+ sql("SELECT cents FROM archive_rollover.historical_indexed WHERE order_uid='old-order'");check(q.next() && q.value(0).toInt()==1234);q.finish();
  // A normal subsequent staging/reopen must preserve newer hydrated edits.
  sql("UPDATE archive_rollover.work_order_parts SET amount=4000");
  check(MigrationArchiveWorkspace::merge(dir.filePath("old.db"),dir.filePath("workspace.db"),&error));
