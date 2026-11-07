@@ -3964,6 +3964,13 @@ void ReportsOrdersTests::annualAllocationRollbackAndSources()
     QVERIFY(!OrderIdentityService::allocateAnnualIdentity(db,"request-unresolved",time,0,&unchanged,&error,resolver));
     QVERIFY(error.contains("unresolved historical identity")); QCOMPARE(unchanged.orderUid,QString("sentinel"));
     QVERIFY(q.exec("DELETE FROM work_orders WHERE number=2000"));
+    QVERIFY(q.exec("INSERT INTO order_creation_reservations VALUES('retired-source','historical-uid',15,2026,15,'2026-01-01')"));
+    QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db,resolver,QDate(2026,2,1)),16);
+    OrderIdentityService::Allocation afterRetirement;
+    QVERIFY2(OrderIdentityService::allocateAnnualIdentity(db,"next-in-2026",
+        QDateTime::fromString("2026-02-01T12:00:00Z",Qt::ISODate),15,&afterRetirement,&error,resolver),qPrintable(error));
+    QCOMPARE(afterRetirement.visibleNumber,16);
+    QVERIFY(afterRetirement.internalNumber>15);
     QVERIFY(q.exec("UPDATE annual_order_counters SET last_number=2147483647 WHERE order_year=2027"));
     QVERIFY(!OrderIdentityService::allocateAnnualIdentity(db,"request-overflow",time,0,&unchanged,&error,resolver));
     QVERIFY(error.contains("range exhausted")); QCOMPARE(unchanged.orderUid,QString("sentinel"));

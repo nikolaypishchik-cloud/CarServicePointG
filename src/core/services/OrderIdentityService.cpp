@@ -296,12 +296,20 @@ int nextVisibleOrderNumber(QSqlDatabase activeDb,
     if (registryResolver) {
         maxVisibleNumber = qMax(maxVisibleNumber, maxVisibleNumberInRegistry(registryResolver(), year));
     }
-    if (objectExists(activeDb, QStringLiteral("annual_order_counters"), QStringLiteral("table"))) {
-        QSqlQuery counter(activeDb);
-        counter.prepare(QStringLiteral("SELECT last_number FROM annual_order_counters WHERE order_year=?")); counter.addBindValue(year);
-        if (!counter.exec()) {qWarning() << "Annual preview counter read failed" << counter.lastError().text();return 0;}
-        if (counter.next()) maxVisibleNumber=qMax(maxVisibleNumber,counter.value(0).toInt());
-        if (counter.lastError().isValid()) {qWarning() << "Annual preview counter fetch failed" << counter.lastError().text();return 0;}
+    const QList<QPair<QString,QString>> annualSources = {
+        {QStringLiteral("annual_order_counters"), QStringLiteral("last_number")},
+        {QStringLiteral("order_creation_reservations"), QStringLiteral("order_number")}
+    };
+    for (const auto& source : annualSources) {
+        if (!objectExists(activeDb, source.first, QStringLiteral("table"))) continue;
+        QSqlQuery query(activeDb);
+        query.prepare(QStringLiteral("SELECT COALESCE(MAX(%1),0) FROM %2 WHERE order_year=?").arg(source.second,source.first));
+        query.addBindValue(year);
+        if (!query.exec() || !query.next()) {
+            qWarning() << "Annual number preview failed for" << source.first << query.lastError().text();
+            return 0;
+        }
+        maxVisibleNumber=qMax(maxVisibleNumber,query.value(0).toInt());
     }
     if (maxVisibleNumber==std::numeric_limits<int>::max()) return 0;
     return qMax(1, maxVisibleNumber + 1);
