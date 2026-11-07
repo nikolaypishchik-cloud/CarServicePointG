@@ -48,7 +48,7 @@ QStringList buildPayrollRowCells(const PayrollOrderRow& row)
         row.orderNumber,
         row.car,
         row.works,
-        FormatUtils::money(row.masterAmount, 0) + QString::fromUtf8(" грн")
+        FormatUtils::money(row.masterAmount, 2) + QString::fromUtf8(" грн")
     };
 }
 
@@ -60,9 +60,9 @@ QStringList buildAdminPayrollCells(const ReportsPdfExpenseSupport::AdminSalaryTo
     return {
         QString::number(totals.ordersCount),
         QString::number(qRound64(totals.partsQty)),
-        FormatUtils::money(purchase, 0) + QString::fromUtf8(" грн"),
-        FormatUtils::money(margin, 0) + QString::fromUtf8(" грн"),
-        FormatUtils::money(fullSum, 0) + QString::fromUtf8(" грн")
+        FormatUtils::money(purchase, 2) + QString::fromUtf8(" грн"),
+        FormatUtils::money(margin, 2) + QString::fromUtf8(" грн"),
+        FormatUtils::money(fullSum, 2) + QString::fromUtf8(" грн")
     };
 }
 
@@ -70,7 +70,7 @@ QList<PayrollSummaryLine> buildMasterSummaryLines(int ordersCount, double accrue
 {
     return {
         {QString::fromUtf8("Виконано нарядів:"), QString::number(ordersCount), false},
-        {QString::fromUtf8("Нараховано:"), FormatUtils::money(accrued, 0) + QString::fromUtf8(" грн"), false}
+        {QString::fromUtf8("Нараховано:"), FormatUtils::money(accrued, 2) + QString::fromUtf8(" грн"), false}
     };
 }
 

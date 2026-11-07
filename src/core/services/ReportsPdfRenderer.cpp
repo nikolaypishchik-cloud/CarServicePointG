@@ -16,6 +16,10 @@
 #include "core/services/ReportsSyncSupport.h"
 #include "core/services/ReportsPdfRendererSupport.h"
 #include "infrastructure/db/sqlite/Db.h"
+#include "infrastructure/db/sqlite/DbFacadeSupport.h"
+#include "core/services/ReportsDataLoaderLocalSupport.h"
+#include <QSqlError>
+#include <QScopeGuard>
 #include "core/diagnostics/RuntimeLoggingControl.h"
 
 #include <QDir>
@@ -205,6 +209,8 @@ bool renderPartsPdf(const QDate& fromDate, const QDate& toDate, ExportResult* re
 {
     const QString df = fromDate.toString(QStringLiteral("yyyy-MM-dd"));
     const QString dt = toDate.toString(QStringLiteral("yyyy-MM-dd"));
+    QString readError;const auto groups=ReportsPdfSupport::collectPartsPdfGroups(df,dt,&readError);
+    if(!readError.isEmpty()){if(result){*result={};result->reportKind="parts";result->recordCount=0;result->errorText=readError;}return false;}
     const QString path = makeReportPdfPath(QString::fromUtf8("Звіт по запчастинам"), reportDateRangeStem(fromDate, toDate));
     QString pathError;
     if (!ensurePdfOutputPath(path, &pathError)) {
@@ -219,7 +225,6 @@ bool renderPartsPdf(const QDate& fromDate, const QDate& toDate, ExportResult* re
     }
     QElapsedTimer timer;
     timer.start();
-    const auto groups = ReportsPdfSupport::collectPartsPdfGroups(df, dt);
     int totalRows = 0;
     for (auto it = groups.begin(); it != groups.end(); ++it) totalRows += it.value().size();
     if (result) {
@@ -402,6 +407,27 @@ bool renderPayrollPdf(const QDate& fromDate, const QDate& toDate, ExportResult* 
 {
     const QString df = fromDate.toString(QStringLiteral("yyyy-MM-dd"));
     const QString dt = toDate.toString(QStringLiteral("yyyy-MM-dd"));
+    QString readError;
+    const auto fail=[&]{if(result){*result={};result->reportKind="payroll";result->recordCount=0;result->errorText=readError;}return false;};
+    if(!ReportsPdfSupport::validateFinancialPdfSource(fromDate,toDate,&readError))return fail();
+    auto db=QSqlDatabase::database(currentConnectionName(),false);
+    if(!db.transaction()){readError=db.lastError().text();return fail();}
+    auto rollback=qScopeGuard([&]{db.rollback();});
+    const auto masters=ReportsPdfSupport::collectPayrollDetails(df,dt,&readError);
+    if(!readError.isEmpty())return fail();
+    const auto expenseBreakdown=ReportsPdfExpenseSupport::periodExpenseBreakdown(df,dt,&readError);
+    if(!readError.isEmpty())return fail();
+    const auto expenseNotes=ReportsPdfExpenseSupport::periodExpenseNotes(df,dt,&readError);
+    if(!readError.isEmpty())return fail();
+    int activeMasterCount=0;
+    const auto personnel=ReportsDataLoader::LocalSupport::loadMastersForPeriodForReports(db,df,dt,&readError);
+    if(!readError.isEmpty())return fail();
+    for(const auto& master:personnel)if(master.role=="master")++activeMasterCount;
+    const auto adminSources=ReportsPdfExpenseSupport::loadAdminSalarySources(&readError);
+    if(!readError.isEmpty())return fail();
+    const auto adminTotals=ReportsPdfExpenseSupport::collectAdminSalaryTotals(df,dt,&readError);
+    if(!readError.isEmpty())return fail();
+    if(!db.commit()){readError=db.lastError().text();return fail();}rollback.dismiss();
     const QString path = makeReportPdfPath(QString::fromUtf8("Зарплата"), reportDateRangeStem(fromDate, toDate));
     QString pathError;
     if (!ensurePdfOutputPath(path, &pathError)) {
@@ -417,20 +443,11 @@ bool renderPayrollPdf(const QDate& fromDate, const QDate& toDate, ExportResult* 
     QElapsedTimer timer;
     timer.start();
 
-    QString readError;const auto masters = ReportsPdfSupport::collectPayrollDetails(df, dt,&readError);
-    if(!readError.isEmpty()){if(result){result->success=false;result->path=path;result->reportKind="payroll";result->recordCount=0;result->errorText=readError;}return false;}
-    const auto expenseBreakdown = ReportsPdfExpenseSupport::periodExpenseBreakdown(df, dt);
     if (result) {
         result->reportKind = QStringLiteral("payroll");
         result->recordCount = masters.size();
     }
     if (RuntimeLoggingControl::deepDebugEnabled()) qInfo() << "Report PDF export started:" << QStringLiteral("payroll") << path << "records" << masters.size();
-    const auto expenseNotes = ReportsPdfExpenseSupport::periodExpenseNotes(df, dt);
-    int activeMasterCount = 0;
-    for (const auto& master : Database::mastersForPeriod(df, dt)) {
-        if (master.role == QStringLiteral("master")) ++activeMasterCount;
-    }
-
     QPdfWriter pdf(path);
     pdf.setPageSize(QPageSize(QPageSize::A4));
     pdf.setResolution(144);
@@ -438,8 +455,6 @@ bool renderPayrollPdf(const QDate& fromDate, const QDate& toDate, ExportResult* 
     p.setRenderHint(QPainter::Antialiasing, false);
     const PdfTheme th = buildTheme(pdf);
 
-    const auto adminSources = ReportsPdfExpenseSupport::loadAdminSalarySources();
-    const ReportsPdfExpenseSupport::AdminSalaryTotals adminTotals = ReportsPdfExpenseSupport::collectAdminSalaryTotals(df, dt);
 
     ReportsPdfPayrollPageSupport::PayrollFonts fonts;
     fonts.title = titleFont(20);

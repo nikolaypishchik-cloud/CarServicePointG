@@ -103,10 +103,10 @@ PartFinancials resolvePartFinancialsForReports(const ReportMarkupSnapshot& snaps
 PartPeriodTotals collectClosedPartFinancialTotalsForReports(const QString& df, const QString& dt, QString* error)
 {
     PartPeriodTotals totals;
-    ReportMarkupSnapshot snapshot;snapshot.policy=PartMarkupPolicyService::loadPolicySnapshot(Database::db(),error);
+    ReportMarkupSnapshot snapshot;snapshot.policy=PartMarkupPolicyService::loadPolicySnapshot(QSqlDatabase::database(currentConnectionName(),false),error);
     if(error && !error->isEmpty())return {};
 
-    QSqlQuery q(Database::db());
+    QSqlQuery q(QSqlDatabase::database(currentConnectionName(),false));
     q.prepare(QStringLiteral(
         "SELECT COALESCE(p.name,''), COALESCE(p.store,''), COALESCE(p.qty,1), COALESCE(p.amount,0), "
         "COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END), "
@@ -190,21 +190,27 @@ QList<PeriodPdfRow> collectPeriodPdfRows(const QString& df, const QString& dt,
     return out;
 }
 
-QMap<QString, QList<PartPdfRow>> collectPartsPdfGroups(const QString& df, const QString& dt)
+QMap<QString, QList<PartPdfRow>> collectPartsPdfGroups(const QString& df, const QString& dt, QString* error)
 {
     QMap<QString, QList<PartPdfRow>> groups;
+    QString failure;if(!error)error=&failure;error->clear();
+    const QDate from=DateFormats::parseDate(df),to=DateFormats::parseDate(dt);
+    if(!validateFinancialPdfSource(from,to,error))return {};
+    auto db=QSqlDatabase::database(currentConnectionName(),false);
     QSet<QString> stockMaterials;
-    for (const auto& material : WorkshopInventoryService::loadMaterials()) stockMaterials.insert(material.key);
+    for (const auto& material : WorkshopInventoryService::loadMaterials(db,error,false)) stockMaterials.insert(material.key);
+    if(!error->isEmpty())return {};
     QSet<int> issuedSpares;
-    QSqlQuery spareQuery(Database::db());
-    if (spareQuery.exec(QStringLiteral("SELECT part_id FROM workshop_spare_movements WHERE part_id IS NOT NULL")))
-        while (spareQuery.next()) issuedSpares.insert(spareQuery.value(0).toInt());
-    const QDate from = DateFormats::parseDate(df);
-    const QDate to = DateFormats::parseDate(dt);
-    const ReportMarkupSnapshot markupSnapshot = loadReportMarkupSnapshot();
-    QSqlQuery q(Database::db());
+    QSqlQuery spareQuery(db);
+    if(!spareQuery.exec(QStringLiteral("SELECT part_id FROM workshop_spare_movements WHERE part_id IS NOT NULL"))){*error=spareQuery.lastError().text();return {};}
+    while(spareQuery.next())issuedSpares.insert(spareQuery.value(0).toInt());
+    if(spareQuery.lastError().isValid()){*error=spareQuery.lastError().text();return {};}
+    ReportMarkupSnapshot markupSnapshot;markupSnapshot.policy=PartMarkupPolicyService::loadPolicySnapshot(db,error);
+    if(!error->isEmpty())return {};
+    QSqlQuery q(db);
     q.prepare(QStringLiteral("SELECT COALESCE(p.store,''), p.ordered_at, substr(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at),1,10), COALESCE(wo.order_number,wo.number,p.order_number), COALESCE(p.name,''), COALESCE(p.part_number,''), COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END), COALESCE(p.amount,0), COALESCE(p.qty,1), COALESCE(p.purchase_price,0), COALESCE(p.markup_percent,0), COALESCE(p.manual_markup_override,0), COALESCE(a.invoice_number,''), p.id, COALESCE(p.pricing_calc_version,1) FROM router_work_order_parts p JOIN router_work_orders wo ON ((NULLIF(TRIM(p.order_uid),'') IS NOT NULL AND wo.order_uid=p.order_uid) OR (NULLIF(TRIM(p.order_uid),'') IS NULL AND wo.number=p.order_number)) LEFT JOIN work_order_parts wp ON wp.id = p.id AND COALESCE(wp.order_number,'') = COALESCE(p.order_number,'') AND COALESCE(wp.order_uid,'') = COALESCE(p.order_uid,'') LEFT JOIN work_order_part_attachments a ON a.part_id = wp.id ORDER BY COALESCE(NULLIF(TRIM(p.store),''), '(без магазину)') ASC, p.order_number ASC, p.id ASC"));
-    if (q.exec()) while (q.next()) {
+    if(!q.exec()){*error=q.lastError().text();return {};}
+    while(q.next()) {
         const QDate eff = ReportsDateUtils::effectiveDate(q.value(1).toString(), q.value(2).toString());
         if (!eff.isValid() || eff < from || eff > to) continue;
         PartPdfRow r;
@@ -244,6 +250,7 @@ QMap<QString, QList<PartPdfRow>> collectPartsPdfGroups(const QString& df, const 
         r.clientPrice = financials.clientAmount;
         groups[r.store].append(r);
     }
+    if(q.lastError().isValid()){*error=q.lastError().text();return {};}
     for (auto it = groups.begin(); it != groups.end(); ++it) std::sort(it.value().begin(), it.value().end(), [](const PartPdfRow& a, const PartPdfRow& b){ const QDate da=QDate::fromString(a.date, QStringLiteral("dd.MM.yy")); const QDate db=QDate::fromString(b.date, QStringLiteral("dd.MM.yy")); if (da.isValid() && db.isValid() && da != db) return da < db; bool okA=false, okB=false; const int oa=a.orderNumber.toInt(&okA); const int ob=b.orderNumber.toInt(&okB); if (okA && okB && oa != ob) return oa < ob; return a.name.localeAwareCompare(b.name) < 0; });
     return groups;
 }
@@ -298,7 +305,7 @@ QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& 
     QString failure;auto db=QSqlDatabase::database(currentConnectionName(),false);
     const auto fail=[&](){if(error)*error=failure;return QList<PayrollMasterPdf>{};};
     if(error)error->clear();
-    if(!db.isOpen()){failure=QStringLiteral("Payroll PDF database is not open");return fail();}
+    if(!validateFinancialPdfSource(DateFormats::parseDate(df),DateFormats::parseDate(dt),&failure))return fail();
     const auto masters=ReportsDataLoader::LocalSupport::orderedPersonnelForReports(ReportsDataLoader::LocalSupport::loadMastersForPeriodForReports(db,df,dt,&failure));if(!failure.isEmpty())return fail();
     const auto checkedResolver=ReportsDataLoader::LocalSupport::makePayrollPercentResolverForReports(db,&failure);if(!failure.isEmpty())return fail();
     const PayrollPercentResolver payrollResolver{checkedResolver.byId,checkedResolver.activeByName};

@@ -10,6 +10,8 @@
 #include "core/services/PartsQueryService.h"
 #include "core/services/ReportsPdfSupport.h"
 #include "core/services/ReportsPdfRenderer.h"
+#include "core/services/ReportsPdfExpenseSupport.h"
+#include "core/services/WorkshopInventoryService.h"
 #include "core/services/StaffAccountService.h"
 #include "core/services/AccessControlService.h"
 #include <QComboBox>
@@ -50,6 +52,20 @@ class AdditionalExpenseTests : public QObject {
         const auto reports=QDir(root).filePath("financial-pdf-output");
         QVERIFY(QDir().mkpath(reports));
         QVERIFY(Database::setSetting("settings.int.directories.reports_dir",reports));
+    }
+    void preparePartsPayrollPdfFixture() {
+        QString error;QVERIFY(ensureWorkspaceSchema(db));QVERIFY(ensureRouterCacheSchema(db));QVERIFY(rebuildRouterViews(db));
+        QVERIFY(WorkshopInventoryService::ensureSchema(db,&error));QVERIFY(WorkshopSpareStockService::ensureSchema(db,&error));
+        QVERIFY(StaffAccountService::ensureSchema(db,&error));QVERIFY(AccessControlService::ensureSchema(db,&error));
+        QSqlQuery q(db);QVERIFY(q.exec("INSERT INTO masters(id,name,role,admin_percent,active) VALUES('pdf-master','Synthetic master','master',50,1)"));
+        QVERIFY(q.exec("INSERT INTO staff_accounts(id,display_name,role,active,master_id) VALUES('pdf-owner','Synthetic owner','owner',1,'pdf-master')"));
+        ActivityAuditService::setCurrentActor({"pdf-owner","Synthetic owner","owner","test"});configureFinancialReportDirectory();
+        QVERIFY(q.exec("INSERT OR REPLACE INTO settings(key,value) VALUES('payroll_percents','{\"pdf-master\":50}')"));
+        QVERIFY(q.exec("INSERT INTO work_orders(number,order_uid,order_number,order_year,opened_at,closed_at,status,plate,plate_norm,car,client,master_id,works_sum,discount_mode) VALUES(11,'pdf-order',7,2026,'2026-01-01','2026-01-02','closed','','','Synthetic','','pdf-master',100.50,'percent')"));
+        QVERIFY(q.exec("INSERT INTO work_order_services(id,order_number,order_uid,service_uid,title,qty,price,amount) VALUES(31,11,'pdf-order','pdf-service','Synthetic service',1,100.50,100.50)"));
+        QVERIFY(q.exec("INSERT INTO service_masters(service_id,master_id,share_percent) VALUES(31,'pdf-master',100)"));
+        QVERIFY(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,name,store,ordered_at,qty,purchase_price,purchase_amount,price,amount,service_id,pricing_calc_version) VALUES(21,11,'pdf-order','pdf-part','Synthetic part','Shop','2026-01-01',1,30.10,30.10,45.25,45.25,31,3)"));
+        QVERIFY(q.exec("INSERT INTO expenses(period_from,period_to,cleaning,cleaning_note) VALUES('2026-01-01','2026-01-31',12.10,'Synthetic note')"));
     }
 private slots:
     void initTestCase() {
@@ -143,6 +159,37 @@ private slots:
         QCOMPARE(QSqlDatabase::connectionNames(), before);
     }
 
+    void partsPdfDependenciesScopeAndRepeat() {
+        preparePartsPayrollPdfFixture();QString error;
+        const auto groups=ReportsPdfSupport::collectPartsPdfGroups("2026-01-01","2026-01-31",&error);QVERIFY2(error.isEmpty(),qPrintable(error));QCOMPARE(groups.size(),1);
+        const auto part=groups.first().first();QCOMPARE(qRound64(part.purchase*100),3010);QCOMPARE(qRound64(part.clientPrice*100),4525);QCOMPARE(qRound64(part.added*100),1515);
+        ReportsPdfRenderer::ExportResult result;const auto render=[&]{return ReportsPdfRenderer::renderPartsPdf(QDate(2026,1,1),QDate(2026,1,31),&result);};
+        QVERIFY2(render(),qPrintable(result.errorText));QCOMPARE(result.recordCount,1);const auto path=result.path;QSqlQuery q(db);
+        for(const auto& table:QStringList{"work_order_part_attachments","workshop_inventory_purchases","workshop_spare_movements","settings"}) {
+            const auto good=PayrollReadFixture::bytes(path);QVERIFY(good.startsWith("%PDF"));
+            QVERIFY(q.exec("ALTER TABLE "+table+" RENAME TO broken_pdf_dependency"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());QCOMPARE(result.recordCount,0);QCOMPARE(PayrollReadFixture::bytes(path),good);
+            QVERIFY(q.exec("ALTER TABLE broken_pdf_dependency RENAME TO "+table));QVERIFY2(render(),qPrintable(result.errorText));QCOMPARE(result.recordCount,1);
+        }
+        const auto good=PayrollReadFixture::bytes(path);QVERIFY(q.exec("UPDATE staff_accounts SET role='master' WHERE id='pdf-owner'"));ActivityAuditService::setCurrentActor({"pdf-owner","Synthetic master","master","test"});QVERIFY(AccessControlService::currentOrderScope(db).restricted);
+        QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());QCOMPARE(PayrollReadFixture::bytes(path),good);
+        QVERIFY(q.exec("UPDATE staff_accounts SET role='owner' WHERE id='pdf-owner'"));ActivityAuditService::setCurrentActor({"pdf-owner","Synthetic owner","owner","test"});QVERIFY2(render(),qPrintable(result.errorText));
+        QVERIFY(ReportsPdfRenderer::renderPartsPdf(QDate(2027,1,1),QDate(2027,1,31),&result));QCOMPARE(result.recordCount,0);
+    }
+    void payrollPdfSupplementFailuresScopeAndRepeat() {
+        preparePartsPayrollPdfFixture();QString error;
+        const auto masters=ReportsPdfSupport::collectPayrollDetails("2026-01-01","2026-01-31",&error);QVERIFY2(error.isEmpty(),qPrintable(error));QCOMPARE(masters.size(),1);QCOMPARE(qRound64(masters.first().accrued*100),3815);
+        ReportsPdfRenderer::ExportResult result;const auto render=[&]{return ReportsPdfRenderer::renderPayrollPdf(QDate(2026,1,1),QDate(2026,1,31),&result);};QVERIFY2(render(),qPrintable(result.errorText));const auto path=result.path;QSqlQuery q(db);
+        const auto good=PayrollReadFixture::bytes(path);QVERIFY(good.startsWith("%PDF"));QVERIFY(q.exec("ALTER TABLE expenses RENAME COLUMN cleaning_note TO broken_note"));
+        QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());QCOMPARE(result.recordCount,0);QCOMPARE(PayrollReadFixture::bytes(path),good);
+        QVERIFY(q.exec("ALTER TABLE expenses RENAME COLUMN broken_note TO cleaning_note"));QVERIFY2(render(),qPrintable(result.errorText));
+        const auto repaired=PayrollReadFixture::bytes(path);QVERIFY(q.exec("ALTER TABLE workshop_inventory_purchases RENAME TO broken_inventory"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());QCOMPARE(PayrollReadFixture::bytes(path),repaired);
+        QVERIFY(q.exec("ALTER TABLE broken_inventory RENAME TO workshop_inventory_purchases"));QVERIFY2(render(),qPrintable(result.errorText));
+        const auto allowed=PayrollReadFixture::bytes(path);QVERIFY(q.exec("UPDATE staff_accounts SET role='master' WHERE id='pdf-owner'"));ActivityAuditService::setCurrentActor({"pdf-owner","Synthetic master","master","test"});QVERIFY(AccessControlService::currentOrderScope(db).restricted);
+        QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());QCOMPARE(PayrollReadFixture::bytes(path),allowed);
+        QVERIFY(q.exec("UPDATE staff_accounts SET role='owner',active=0 WHERE id='pdf-owner'"));ActivityAuditService::setCurrentActor({"pdf-owner","Synthetic owner","owner","test"});QVERIFY(!render());
+        QVERIFY(q.exec("UPDATE staff_accounts SET active=1 WHERE id='pdf-owner'"));QVERIFY2(render(),qPrintable(result.errorText));
+        QVERIFY(ReportsPdfRenderer::renderPayrollPdf(QDate(2027,1,1),QDate(2027,1,31),&result));QCOMPARE(result.recordCount,0);
+    }
     void financialPdfReadFailuresAndRecovery() {
         QString error;QVERIFY2(FinancialPdfReadFixture::run(db,&error),qPrintable(error));
     }

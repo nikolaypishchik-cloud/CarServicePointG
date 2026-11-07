@@ -84,13 +84,13 @@ QStringList buildPartCells(const ReportsPdfSupport::PartPdfRow& row, int seq, bo
         row.date,
         row.orderNumber,
         displayPartName(row.name),
-        FormatUtils::money(displayedPurchasePrice, 0)
+        FormatUtils::money(displayedPurchasePrice, 2)
     };
     if (!oilMode) {
-        cells << FormatUtils::money(row.added, 0);
+        cells << FormatUtils::money(row.added, 2);
     }
     cells << formatQty(row.qtyValue)
-          << FormatUtils::money(row.clientPrice, 0);
+          << FormatUtils::money(row.clientPrice, 2);
     if (!oilMode && includeInvoiceColumn) {
         cells << row.invoiceNumber;
     }
@@ -111,18 +111,18 @@ QList<PartsSummaryLine> buildSummaryLines(double qtyTotal, bool oilUnits,
     if (!oilMode) {
         lines.append({
             QString::fromUtf8("Вартість"),
-            FormatUtils::money(purchaseTotal, 0) + QString::fromUtf8(" грн"),
+            FormatUtils::money(purchaseTotal, 2) + QString::fromUtf8(" грн"),
             true
         });
         lines.append({
             QString::fromUtf8("Доданий %"),
-            FormatUtils::money(addedTotal, 0) + QString::fromUtf8(" грн"),
+            FormatUtils::money(addedTotal, 2) + QString::fromUtf8(" грн"),
             false
         });
     }
     lines.append({
         QString::fromUtf8("Разом"),
-        FormatUtils::money(clientTotal, 0) + QString::fromUtf8(" грн"),
+        FormatUtils::money(clientTotal, 2) + QString::fromUtf8(" грн"),
         true
     });
     return lines;

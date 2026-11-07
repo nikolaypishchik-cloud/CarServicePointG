@@ -41,8 +41,7 @@ QMap<QString,double> loadInventoryClientPrices(QSqlDatabase db, QMap<QString,dou
 
 QString settingString(QSqlDatabase db, const QString& settingKey, const QString& defaultValue, QString* error = nullptr)
 {
-    if (!db.isValid()) return Database::getSetting(settingKey, defaultValue).toString();
-    if (!db.isOpen() && !db.open()) return defaultValue;
+    if (!db.isValid() || !db.isOpen()) {if(error)*error=QStringLiteral("Pricing settings database is not open");return defaultValue;}
     QSqlQuery q(db);
     q.prepare(QStringLiteral("SELECT value FROM settings WHERE \"key\"=? LIMIT 1"));
     q.addBindValue(settingKey);

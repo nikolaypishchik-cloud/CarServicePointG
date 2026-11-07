@@ -12,9 +12,9 @@
 
 namespace {
 
-QString money0(double value)
+QString money2(double value)
 {
-    return FormatUtils::money(value, 0);
+    return FormatUtils::money(value, 2);
 }
 
 } // namespace
@@ -117,7 +117,7 @@ void renderPayrollPages(
     auto drawExpenseBlock = [&](int& y, const ReportsPdfExpenseSupport::ExpenseBreakdown& sharedExpenseParts, double accrued) {
         if (sharedExpenseParts.total() <= 0.0) {
             drawIssueTextWithUnderline(painter, QRect(theme.left, y, theme.contentWidth, mmToPx(&pdf, 8.0)),
-                                       QString::fromUtf8("До видачі: %1 грн").arg(money0(accrued)),
+                                       QString::fromUtf8("До видачі: %1 грн").arg(money2(accrued)),
                                        fonts.pairEmphasis, ptToPx(&pdf, 0.5));
             y += mmToPx(&pdf, 8.0);
             return;
@@ -136,7 +136,7 @@ void renderPayrollPages(
             painter.setFont(fonts.expenseBody);
             painter.drawText(QRect(theme.left, topY, labelW, rowH), Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap, label);
             painter.drawText(QRect(theme.left + labelW + mmToPx(&pdf, 4.0), topY, valueW, rowH),
-                             Qt::AlignRight | Qt::AlignTop | Qt::TextWordWrap, money0(value) + QString::fromUtf8(" грн"));
+                             Qt::AlignRight | Qt::AlignTop | Qt::TextWordWrap, money2(value) + QString::fromUtf8(" грн"));
         };
 
         QFontMetrics fm(fonts.expenseBody);
@@ -154,7 +154,7 @@ void renderPayrollPages(
         y += mmToPx(&pdf, 6.0);
 
         drawIssueTextWithUnderline(painter, QRect(theme.left, y, theme.contentWidth, mmToPx(&pdf, 8.0)),
-                                   QString::fromUtf8("До видачі: %1 грн").arg(money0(accrued)),
+                                   QString::fromUtf8("До видачі: %1 грн").arg(money2(accrued)),
                                    fonts.pairEmphasis, ptToPx(&pdf, 0.5));
         y += mmToPx(&pdf, 8.0);
     };
@@ -205,7 +205,7 @@ void renderPayrollPages(
             y += rowH + mmToPx(&pdf, 5.0);
             drawMasterPairs(y, ReportsPdfPayrollSupport::buildMasterSummaryLines(adminTotals.ordersCount, accrued));
             drawIssueTextWithUnderline(painter, QRect(theme.left, y, theme.contentWidth, mmToPx(&pdf, 8.0)),
-                                       QString::fromUtf8("До видачі: %1 грн").arg(money0(m.toIssue)),
+                                       QString::fromUtf8("До видачі: %1 грн").arg(money2(m.toIssue)),
                                        fonts.pairEmphasis, ptToPx(&pdf, 0.5));
             continue;
         }
@@ -242,7 +242,7 @@ void renderPayrollPages(
         const double grossAccrued = qRound64(m.worksTotal * m.percent / 100.0);
         drawCell(painter, QRect(x, y, w[0] + w[1] + w[2] + w[3], summaryRowH), QString::fromUtf8("ПІДСУМОК"), fonts.summary,
                  Qt::AlignCenter, Qt::white, kPdfTablePenWidth);
-        drawCell(painter, QRect(x + w[0] + w[1] + w[2] + w[3], y, w[4], summaryRowH), money0(grossAccrued) + QString::fromUtf8(" грн"),
+        drawCell(painter, QRect(x + w[0] + w[1] + w[2] + w[3], y, w[4], summaryRowH), money2(grossAccrued) + QString::fromUtf8(" грн"),
                  fonts.summary, Qt::AlignRight | Qt::AlignVCenter, Qt::white, kPdfTablePenWidth);
         y += summaryRowH + mmToPx(&pdf, 4.0);
 

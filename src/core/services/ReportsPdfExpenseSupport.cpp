@@ -2,6 +2,9 @@
 
 #include "core/services/ReportsPdfSupport.h"
 #include "infrastructure/db/sqlite/Db.h"
+#include "infrastructure/db/sqlite/DbFacadeSupport.h"
+#include "core/services/ReportsDataLoaderLocalSupport.h"
+#include <QSqlError>
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -30,30 +33,27 @@ QString normalizeAdminSalarySourceKey(QString source)
 
 } // namespace
 
-QMap<QString, QString> loadAdminSalarySources()
+QMap<QString, QString> loadAdminSalarySources(QString* error)
 {
-    QMap<QString, QString> out;
-    const auto doc = QJsonDocument::fromJson(
-        Database::getSetting(QStringLiteral("settings.staff.admin_salary_sources"), QStringLiteral("{}")).toString().toUtf8());
-    if (!doc.isObject()) return out;
-    const auto obj = doc.object();
-    for (auto it = obj.begin(); it != obj.end(); ++it) {
-        out.insert(it.key(), normalizeAdminSalarySourceKey(it.value().toString(QStringLiteral("margin"))));
-    }
-    return out;
+    if(error)error->clear();
+    auto db=QSqlDatabase::database(currentConnectionName(),false);
+    return ReportsDataLoader::LocalSupport::loadAdminSalarySourcesForReports(db,error);
 }
 
-AdminSalaryTotals collectAdminSalaryTotals(const QString& df, const QString& dt)
+AdminSalaryTotals collectAdminSalaryTotals(const QString& df, const QString& dt, QString* error)
 {
+    QString failure;if(!error)error=&failure;error->clear();
+    if(!ReportsPdfSupport::validateFinancialPdfSource(QDate::fromString(df,Qt::ISODate),QDate::fromString(dt,Qt::ISODate),error))return {};
     AdminSalaryTotals t;
 
-    const ReportsPdfSupport::PartPeriodTotals partTotals = ReportsPdfSupport::collectClosedPartFinancialTotalsForReports(df, dt);
+    const ReportsPdfSupport::PartPeriodTotals partTotals = ReportsPdfSupport::collectClosedPartFinancialTotalsForReports(df, dt,error);
+    if(!error->isEmpty())return {};
     t.purchaseTotal += partTotals.purchaseTotal;
     t.clientTotal += partTotals.clientTotal;
     t.margin += partTotals.marginTotal;
     t.partsQty = partTotals.qtyTotal;
 
-    QSqlQuery ordersQ(Database::db());
+    QSqlQuery ordersQ(QSqlDatabase::database(currentConnectionName(),false));
     ordersQ.prepare(QStringLiteral(
         "SELECT COUNT(DISTINCT wo.number) "
         "FROM router_work_orders wo "
@@ -66,7 +66,7 @@ AdminSalaryTotals collectAdminSalaryTotals(const QString& df, const QString& dt)
         t.ordersCount = ordersQ.value(0).toInt();
     }
 
-    QSqlQuery outs(Database::db());
+    QSqlQuery outs(QSqlDatabase::database(currentConnectionName(),false));
     outs.prepare(QStringLiteral(
         "SELECT COALESCE(SUM(company_price),0), COALESCE(SUM(client_price),0), COALESCE(SUM(client_price - company_price),0) "
         "FROM outsource_jobs "
@@ -80,6 +80,8 @@ AdminSalaryTotals collectAdminSalaryTotals(const QString& df, const QString& dt)
         t.margin += outs.value(2).toDouble();
     }
 
+    ordersQ.next();outs.next();
+    for(const auto* query:{&ordersQ,&outs})if(query->lastError().isValid()){*error=query->lastError().text();return {};}
     return t;
 }
 
@@ -110,7 +112,7 @@ QString mergeExpenseNotes(const QStringList& notes)
 
 double periodExpensesTotal(const QString& df, const QString& dt)
 {
-    QSqlQuery ex(Database::db());
+    QSqlQuery ex(QSqlDatabase::database(currentConnectionName(),false));
     ex.prepare(
         "SELECT COALESCE(SUM(COALESCE(elec_cost, ((COALESCE(elec_curr,0)-COALESCE(elec_prev,0))*COALESCE(elec_tariff,0))) + "
         "COALESCE(cleaning,0) + COALESCE(heating,0) + COALESCE(rent,0) + COALESCE(amortization,0) + "
@@ -122,10 +124,12 @@ double periodExpensesTotal(const QString& df, const QString& dt)
     return 0.0;
 }
 
-ExpenseBreakdown periodExpenseBreakdown(const QString& df, const QString& dt)
+ExpenseBreakdown periodExpenseBreakdown(const QString& df, const QString& dt, QString* error)
 {
+    QString failure;if(!error)error=&failure;error->clear();
+    if(!ReportsPdfSupport::validateFinancialPdfSource(QDate::fromString(df,Qt::ISODate),QDate::fromString(dt,Qt::ISODate),error))return {};
     ExpenseBreakdown out;
-    QSqlQuery ex(Database::db());
+    QSqlQuery ex(QSqlDatabase::database(currentConnectionName(),false));
     ex.prepare(
         "SELECT "
         "COALESCE(SUM(COALESCE(elec_cost, ((COALESCE(elec_curr,0)-COALESCE(elec_prev,0))*COALESCE(elec_tariff,0)))),0), "
@@ -138,7 +142,8 @@ ExpenseBreakdown periodExpenseBreakdown(const QString& df, const QString& dt)
         "FROM expenses WHERE date((CASE WHEN substr(trim(period_to),3,1)='.' AND substr(trim(period_to),6,1)='.' THEN CASE WHEN substr(trim(period_to),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_to),7,4) ELSE '20'||substr(trim(period_to),7,2) END||'-'||substr(trim(period_to),4,2)||'-'||substr(trim(period_to),1,2) ELSE period_to END)) >= date(?) AND date((CASE WHEN substr(trim(period_from),3,1)='.' AND substr(trim(period_from),6,1)='.' THEN CASE WHEN substr(trim(period_from),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_from),7,4) ELSE '20'||substr(trim(period_from),7,2) END||'-'||substr(trim(period_from),4,2)||'-'||substr(trim(period_from),1,2) ELSE period_from END)) <= date(?)");
     ex.addBindValue(df);
     ex.addBindValue(dt);
-    if (ex.exec() && ex.next()) {
+    if(!ex.exec()){*error=ex.lastError().text();return {};}
+    if(ex.next()) {
         out.electricity = ex.value(0).toDouble();
         out.cleaning = ex.value(1).toDouble();
         out.software = ex.value(2).toDouble();
@@ -147,13 +152,17 @@ ExpenseBreakdown periodExpenseBreakdown(const QString& df, const QString& dt)
         out.rent = ex.value(5).toDouble();
         out.other = ex.value(6).toDouble();
     }
+    ex.next();
+    if(ex.lastError().isValid()){*error=ex.lastError().text();return {};}
     return out;
 }
 
-ExpenseNotes periodExpenseNotes(const QString& df, const QString& dt)
+ExpenseNotes periodExpenseNotes(const QString& df, const QString& dt, QString* error)
 {
+    QString failure;if(!error)error=&failure;error->clear();
+    if(!ReportsPdfSupport::validateFinancialPdfSource(QDate::fromString(df,Qt::ISODate),QDate::fromString(dt,Qt::ISODate),error))return {};
     ExpenseNotes out;
-    QSqlQuery ex(Database::db());
+    QSqlQuery ex(QSqlDatabase::database(currentConnectionName(),false));
     ex.prepare(
         "SELECT cleaning_note, software_note, heating_note, amortization_note, rent_note, other_note "
         "FROM expenses WHERE date((CASE WHEN substr(trim(period_to),3,1)='.' AND substr(trim(period_to),6,1)='.' THEN CASE WHEN substr(trim(period_to),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_to),7,4) ELSE '20'||substr(trim(period_to),7,2) END||'-'||substr(trim(period_to),4,2)||'-'||substr(trim(period_to),1,2) ELSE period_to END)) >= date(?) AND date((CASE WHEN substr(trim(period_from),3,1)='.' AND substr(trim(period_from),6,1)='.' THEN CASE WHEN substr(trim(period_from),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_from),7,4) ELSE '20'||substr(trim(period_from),7,2) END||'-'||substr(trim(period_from),4,2)||'-'||substr(trim(period_from),1,2) ELSE period_from END)) <= date(?) ORDER BY id DESC");
@@ -181,6 +190,7 @@ ExpenseNotes periodExpenseNotes(const QString& df, const QString& dt)
         out.rent = mergeExpenseNotes(rentNotes);
         out.other = mergeExpenseNotes(otherNotes);
     }
+    if(ex.lastError().isValid()){*error=ex.lastError().text();return {};}
     return out;
 }
 

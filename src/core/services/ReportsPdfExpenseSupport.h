@@ -37,13 +37,13 @@ struct ExpenseNotes {
     QString other;
 };
 
-QMap<QString, QString> loadAdminSalarySources();
-AdminSalaryTotals collectAdminSalaryTotals(const QString& df, const QString& dt);
+QMap<QString, QString> loadAdminSalarySources(QString* error = nullptr);
+AdminSalaryTotals collectAdminSalaryTotals(const QString& df, const QString& dt, QString* error = nullptr);
 double adminSalaryBaseForSource(const AdminSalaryTotals& totals, const QString& source);
 QString expenseNoteJoined(const QString& base, const QString& note);
 QString mergeExpenseNotes(const QStringList& notes);
 double periodExpensesTotal(const QString& df, const QString& dt);
-ExpenseBreakdown periodExpenseBreakdown(const QString& df, const QString& dt);
-ExpenseNotes periodExpenseNotes(const QString& df, const QString& dt);
+ExpenseBreakdown periodExpenseBreakdown(const QString& df, const QString& dt, QString* error = nullptr);
+ExpenseNotes periodExpenseNotes(const QString& df, const QString& dt, QString* error = nullptr);
 
 } // namespace ReportsPdfExpenseSupport
