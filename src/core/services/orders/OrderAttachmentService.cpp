@@ -183,6 +183,11 @@ QHash<int, AttachmentInfo> serviceAttachmentMap(QSqlDatabase db, const QList<int
     return result;
 }
 
+QHash<int, AttachmentInfo> partAttachmentMap(QSqlDatabase db, const QList<int>& partIds)
+{
+    return partAttachmentMap(db, partIds, nullptr);
+}
+
 QHash<int, AttachmentInfo> partAttachmentMap(QSqlDatabase db, const QList<int>& partIds, QString* error)
 {
     if (error) error->clear();

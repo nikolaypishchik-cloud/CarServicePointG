@@ -25,7 +25,8 @@ QString partAttachmentPath(QSqlDatabase db,
                            QString* invoiceDate = nullptr);
 
 QHash<int, AttachmentInfo> serviceAttachmentMap(QSqlDatabase db, const QList<int>& serviceIds);
-QHash<int, AttachmentInfo> partAttachmentMap(QSqlDatabase db, const QList<int>& partIds, QString* error = nullptr);
+QHash<int, AttachmentInfo> partAttachmentMap(QSqlDatabase db, const QList<int>& partIds);
+QHash<int, AttachmentInfo> partAttachmentMap(QSqlDatabase db, const QList<int>& partIds, QString* error);
 void removeUnreferencedManagedFile(QSqlDatabase db, const QString& path);
 
 bool setServiceAttachment(QSqlDatabase db,
