@@ -6047,16 +6047,29 @@ void ReportsOrdersTests::orderListAndPrintData()
         for (const auto& sql : reportSetup) QVERIFY2(q.exec(sql), qPrintable(q.lastError().text()));
         QString partsSchemaError;QVERIFY2(WorkshopSpareStockService::ensureSchema(db,&partsSchemaError),qPrintable(partsSchemaError));
         for(const auto& ddl:QStringList{"ALTER TABLE work_order_parts ADD COLUMN installed_at TEXT DEFAULT ''","ALTER TABLE work_order_parts ADD COLUMN delivery_date TEXT DEFAULT ''","ALTER TABLE work_order_parts ADD COLUMN paid INTEGER DEFAULT 0"})QVERIFY2(q.exec(ddl),qPrintable(q.lastError().text()));
+        const auto unresolved = ReportsDataLoader::buildPartsSnapshot(path, "2026-09-01", "2026-09-30", 0, 0, {}, {});
+        QVERIFY(unresolved.error.contains("unique order for report part 3"));
+        QVERIFY(unresolved.rows.isEmpty());
+        QVERIFY(q.exec("INSERT INTO router_work_orders(number,order_number,order_uid,opened_at,car,status,order_year) "
+                       "VALUES(105,14,'wrong-uid','2026-09-01','Separate owner','open',2026)"));
         const auto purchases = ReportsDataLoader::buildPartsSnapshot(path, "2026-09-01", "2026-09-30", 0, 0, {}, {});
         QVERIFY2(purchases.error.isEmpty(),qPrintable(purchases.error));
         int linkedRows = 0;
+        int relocatedRows = 0;
         for (const auto& purchase : purchases.rows) {
+            if (purchase.partName == "Wrong part") {
+                ++relocatedRows;
+                QCOMPARE(purchase.internalOrderNumber,105);
+                QCOMPARE(purchase.orderUid,QString("wrong-uid"));
+                QCOMPARE(purchase.purchase,FormatUtils::formatNumberSpaces(9999,0));
+            }
             if (purchase.invoiceNumber.isEmpty()) continue;
             ++linkedRows;
             QCOMPARE(purchase.invoiceNumber, QStringLiteral("INV-2026-01"));
             QCOMPARE(purchase.invoicePath, QStringLiteral("C:/invoice.pdf"));
         }
         QCOMPARE(linkedRows, 1);
+        QCOMPARE(relocatedRows, 1);
         QVERIFY(ReportsDataLoader::buildOrdersSnapshot(path, "2027-01-01", "2027-01-31").rows.isEmpty());
         db.close();
     }
