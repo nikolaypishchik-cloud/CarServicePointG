@@ -15,6 +15,7 @@
 #include "infrastructure/db/sqlite/OrderArchiveShardSqlSupport.h"
 #include "core/services/ActivityAuditService.h"
 #include "core/services/StaffAccountService.h"
+#include "core/services/OrderIdentityService.h"
 #include "core/services/AccessControlService.h"
 #include "core/services/orders/OrderClosureJournal.h"
 
@@ -82,7 +83,7 @@ private slots:
             if(process.exitCode()!=0)qWarning().noquote()<<content;
             return process.exitCode()==0 && content.contains("PASS   : ArchiveCrashRecoveryTests::worker()");
         };
-        QVERIFY(child(source,"seed"));
+        QVERIFY(child(source,"seed-profile"));
         const QString script=QString::fromUtf8(__FILE__).replace("tests/ArchiveCrashRecoveryTests.cpp","scripts/profile_snapshot.py").replace("tests\\ArchiveCrashRecoveryTests.cpp","scripts/profile_snapshot.py");
         QVERIFY(QFileInfo::exists(script));
         const QString python=qEnvironmentVariable("CS_TEST_PYTHON",QStandardPaths::findExecutable("python"));
@@ -100,7 +101,7 @@ private slots:
         QString error;
         const QString boundary=qEnvironmentVariable("CS_ARCHIVE_BOUNDARY");
         const bool deletion=boundary.startsWith("deletion_");
-        if(mode=="seed") {
+        if(mode=="seed" || mode=="seed-profile") {
             QVERIFY(Database::ensureSchema());QVERIFY(ensureWorkspaceOrderStateSchema(db));QVERIFY(ensureRouterCacheSchema(db));
             QVERIFY(StaffAccountService::ensureSchema(db,&error));QVERIFY(AccessControlService::ensureSchema(db,&error));
             QSqlQuery q(db);
@@ -121,6 +122,22 @@ private slots:
             const QString attachment=QDir(App::dataDir()).filePath("synthetic-attachment.txt");
             QFile file(attachment);QVERIFY(file.open(QIODevice::WriteOnly));QCOMPARE(file.write("synthetic attachment"),qint64(20));file.close();
             settings.setValue("test/absolute_attachment",attachment);settings.sync();QCOMPARE(settings.status(),QSettings::NoError);
+            if (mode=="seed-profile") {
+                ActivityAuditService::setCurrentActor({"test-owner","Synthetic owner","owner","test"});
+                const auto created=QDateTime::fromString("2026-12-31T21:30:00Z",Qt::ISODate);
+                OrderIdentityService::Allocation allocation;
+                QVERIFY(db.transaction());
+                QVERIFY2(OrderIdentityService::allocateAnnualIdentity(db,"profile-retired",created,0,&allocation,&error),qPrintable(error));
+                QCOMPARE(allocation.visibleNumber,2); QCOMPARE(allocation.year,2026);
+                q.prepare("INSERT INTO work_orders(number,order_uid,order_number,order_year,status,opened_at,car,client,plate,plate_norm,master_id) "
+                          "VALUES(?,?,?,?,'open','2026-12-31','','','','','test-owner')");
+                q.addBindValue(allocation.internalNumber);q.addBindValue(allocation.orderUid);
+                q.addBindValue(allocation.visibleNumber);q.addBindValue(allocation.year);
+                QVERIFY2(q.exec(),qPrintable(q.lastError().text()));q.finish();QVERIFY(db.commit());
+                QVERIFY(ensurePartRegistrySchemaFile());
+                QVERIFY2(Database::hardDeleteOrder(allocation.internalNumber,&error),qPrintable(error));
+                settings.setValue("test/retired_uid",allocation.orderUid);settings.sync();QCOMPARE(settings.status(),QSettings::NoError);
+            }
             if(deletion){
                 if(qEnvironmentVariableIsSet("CS_TEST_DELETE_HAS_ARCHIVE")){
                     QSqlQuery archive(db);
@@ -139,6 +156,21 @@ private slots:
             QVERIFY(CloudSyncCredentials::loadOwnerPassword(&error)=="synthetic-profile-password");
             QSettings settings;
             QVERIFY(CloudSyncCredentials::unprotectToken(settings.value("test/protected_token").toString(),&error)=="synthetic-profile-token");
+            const auto uid=settings.value("test/retired_uid").toString();QVERIFY(!uid.isEmpty());
+            const auto afterMidnight=QDateTime::fromString("2026-12-31T22:30:00Z",Qt::ISODate);
+            OrderIdentityService::Allocation replay;
+            QVERIFY2(OrderIdentityService::allocateAnnualIdentity(db,"profile-retired",afterMidnight,0,&replay,&error),qPrintable(error));
+            QVERIFY(replay.replayed);QCOMPARE(replay.orderUid,uid);QCOMPARE(replay.visibleNumber,2);QCOMPARE(replay.year,2026);
+            QVERIFY(!Database::ensureOrderAvailableInActiveByUid(uid,&error));
+            QSqlQuery retired(db);
+            retired.prepare("SELECT pending FROM order_deletion_publications WHERE internal_number=? AND order_uid=?");
+            retired.addBindValue(replay.internalNumber);retired.addBindValue(uid);
+            QVERIFY(retired.exec());QVERIFY(retired.next());QCOMPARE(retired.value(0).toInt(),0);retired.finish();
+            QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db,{},QDate(2026,12,31)),3);
+            OrderIdentityService::Allocation next;
+            QVERIFY2(OrderIdentityService::allocateAnnualIdentity(db,"profile-new-year",afterMidnight,0,&next,&error),qPrintable(error));
+            QVERIFY(!next.replayed);QVERIFY(next.orderUid!=uid);QVERIFY(next.internalNumber>replay.internalNumber);
+            QCOMPARE(next.year,2027);QCOMPARE(next.visibleNumber,1);
             // Original profile is offline: resolving this proves relocation, not accidental access to source.
             QCOMPARE(settings.value("test/absolute_attachment").toString(),QDir(App::dataDir()).filePath("synthetic-attachment.txt"));
             QVERIFY(QFileInfo::exists(settings.value("test/absolute_attachment").toString()));
