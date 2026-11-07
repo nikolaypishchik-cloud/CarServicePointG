@@ -1,3 +1,4 @@
+#include "PayrollGraphProjectionFixture.h"
 #include "PayrollIdentityFixture.h"
 #include "ui/tabs/reports/ReportsDialogSupport.h"
 #include "PartsPdfIdentityFixture.h"
@@ -177,6 +178,14 @@ private slots:
         QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());QCOMPARE(PayrollReadFixture::bytes(path),good);
         QVERIFY(q.exec("UPDATE staff_accounts SET role='owner' WHERE id='pdf-owner'"));ActivityAuditService::setCurrentActor({"pdf-owner","Synthetic owner","owner","test"});QVERIFY2(render(),qPrintable(result.errorText));
         QVERIFY(ReportsPdfRenderer::renderPartsPdf(QDate(2027,1,1),QDate(2027,1,31),&result));QCOMPARE(result.recordCount,0);
+    }
+    void payrollGraphProjectionAndIndexReuse() {
+        QTemporaryDir sourceDir;QVERIFY(sourceDir.isValid());
+        const QString connection=QStringLiteral("payroll-projection-")+QUuid::createUuid().toString(QUuid::WithoutBraces);
+        auto source=QSqlDatabase::addDatabase("QSQLITE",connection);source.setDatabaseName(sourceDir.filePath("synthetic.db"));
+        const auto cleanup=qScopeGuard([&]{source.close();source={};QSqlDatabase::removeDatabase(connection);});
+        QVERIFY(source.open());QString error;
+        QVERIFY2(PayrollGraphProjectionFixture::run(source,&error),qPrintable(error));
     }
     void payrollIdentityOwnersSplitAndRepeat() {
         QString error;QVERIFY2(PayrollIdentityFixture::run(db,&error),qPrintable(error));

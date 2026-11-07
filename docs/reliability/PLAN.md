@@ -109,3 +109,5 @@
 DBY-T189 follow-up: obtain Windows results for invoice owner selection, physical archive routing, v1 receipt guards and CSV/PDF review; retain DBY-04/06/07 as IN_PROGRESS until native and full-suite acceptance. Evidence and exact slots: DBY_T189_INVOICE_OWNER.md. Continue scenario-level evidence rather than treating portable owner SQL tests as full import acceptance.
 
 DBY-T190 follow-up: accept Windows payroll UID/rounding/file-preservation slots, rerun existing payroll read/UI/PDF regressions and full suite, then measure the shared identity graph on supported Windows data volumes. Do not equate portable master-payroll coverage with acceptance of unchanged admin salary-source formulas. See DBY_T190_PAYROLL_IDENTITY.md.
+
+DBY-T191 follow-up: run payrollGraphProjectionAndIndexReuse plus existing identity/read slots on Windows, then repeat the same desktop read-only financial and 20-sample profile protocol. Keep synthetic Linux graph results separate from private-profile Windows evidence and full PDF runtime acceptance. See DBY_T191_PAYROLL_GRAPH_PROFILE.md.

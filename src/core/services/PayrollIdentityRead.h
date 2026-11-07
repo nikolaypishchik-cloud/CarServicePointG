@@ -10,6 +10,7 @@
 #include <QSet>
 #include <QHash>
 #include <algorithm>
+#include <utility>
 
 namespace PayrollIdentityRead {
 inline QString composePlateCarForUi(const QString& plate,const QString& car){
@@ -18,17 +19,28 @@ inline QString composePlateCarForUi(const QString& plate,const QString& car){
 }
 using Record=QMap<QString,QVariant>;
 inline bool reject(QString* error,const QString& text){if(error)*error=text;return false;}
-inline bool load(QSqlDatabase db,const QString& table,const QStringList& required,QList<Record>* rows,QString* error)
+inline bool load(QSqlDatabase db,const QString& table,const QStringList& required,const QStringList& optional,QList<Record>* rows,QString* error)
 {
     QSqlQuery q(db);
-    if(!q.exec("SELECT * FROM "+table))return reject(error,q.lastError().text());
+    // Metadata only: optional UID/display columns vary in older databases.
+    if(!q.exec("SELECT * FROM "+table+" LIMIT 0"))return reject(error,q.lastError().text());
     const auto columns=q.record();
     for(const auto& column:required)if(columns.indexOf(column)<0)return reject(error,"Payroll column unavailable: "+table+"."+column);
-    while(q.next()) {Record row;for(int i=0;i<columns.count();++i)row.insert(columns.fieldName(i),q.value(i));rows->append(row);}
+    QStringList selected;
+    for(const auto& column:required+optional) {
+        const int index=columns.indexOf(column);
+        if(index>=0)selected.append(columns.fieldName(index));
+    }
+    q.finish();
+    QStringList quoted;for(const auto& column:selected)quoted.append(QStringLiteral("\"%1\"").arg(QString(column).replace('"',"\"\"")));
+    if(!q.exec("SELECT "+quoted.join(',')+" FROM "+table))return reject(error,q.lastError().text());
+    while(q.next()) {Record row;for(int i=0;i<selected.size();++i)row.insert(selected[i],q.value(i));rows->append(row);}
     return !q.lastError().isValid()||reject(error,q.lastError().text());
 }
+
 struct Index {
     QHash<QString,QList<int>> uids,numbers;
+    Index()=default;
     Index(const QList<Record>& rows,const QString& uid,const QString& number){
         for(int i=0;i<rows.size();++i){const auto u=rows[i].value(uid).toString().trimmed();if(!u.isEmpty())uids[u].append(i);numbers[rows[i].value(number).toString()].append(i);}
     }
@@ -36,18 +48,25 @@ struct Index {
         const auto u=row.value(uid).toString().trimmed();return u.isEmpty()?numbers.value(row.value(number).toString()):uids.value(u);
     }
 };
-struct Graph {QList<Record> headers,services,assignments,adjustments,outsources;};
+struct Graph {
+    QList<Record> headers,services,assignments,adjustments,outsources;
+    Index orderIndex,serviceIndex;
+};
 inline bool loadGraph(QSqlDatabase db,Graph* graph,QString* error) {
-    auto& headers=graph->headers;auto& services=graph->services;auto& assignments=graph->assignments;
-    auto& adjustments=graph->adjustments;auto& outsources=graph->outsources;
-
-    if(!load(db,"router_work_orders",{"number","closed_at","status","discount","discount_mode","works_sum"},&headers,error)
-        ||!load(db,"router_work_order_services",{"id","order_number","amount"},&services,error)
-        ||!load(db,"router_service_masters",{"service_id","master_id","share_percent"},&assignments,error)
-        ||!load(db,"payroll_order_adjustments",{"master_id","order_number","absent","deleted"},&adjustments,error)
-        ||!load(db,"outsource_jobs",{"service_id"},&outsources,error))return false;
+    *graph={};
+    Graph next;
+    if(!load(db,"router_work_orders",{"number","closed_at","status","discount","discount_mode","works_sum"},
+             {"order_uid","order_number","opened_at","plate","car","engine_type","engine_volume"},&next.headers,error)
+        ||!load(db,"router_work_order_services",{"id","order_number","amount"},{"order_uid","service_uid","title"},&next.services,error)
+        ||!load(db,"router_service_masters",{"service_id","master_id","share_percent"},{"service_uid","order_uid"},&next.assignments,error)
+        ||!load(db,"payroll_order_adjustments",{"master_id","order_number","absent","deleted"},{"order_uid"},&next.adjustments,error)
+        ||!load(db,"outsource_jobs",{"service_id"},{"service_uid","order_uid"},&next.outsources,error))return false;
+    next.orderIndex=Index(next.headers,"order_uid","number");
+    next.serviceIndex=Index(next.services,"service_uid","id");
+    *graph=std::move(next);
     return true;
 }
+
 inline QDate closedDate(const Record& row){return DateFormats::parseDate(row.value("closed_at").toString().trimmed().left(10));}
 inline QList<PayrollOrderRow> read(QSqlDatabase db,const QString& master,const QString& from,const QString& to,
                                   double percent,QString* error,const QString& internalOnly={},const Graph* prepared=nullptr)
@@ -61,7 +80,7 @@ inline QList<PayrollOrderRow> read(QSqlDatabase db,const QString& master,const Q
     const auto& graph=prepared?*prepared:local;
     const auto& headers=graph.headers;const auto& services=graph.services;const auto& assignments=graph.assignments;
     const auto& adjustments=graph.adjustments;const auto& outsources=graph.outsources;
-    const Index orderIndex(headers,"order_uid","number"),serviceIndex(services,"service_uid","id");
+    const auto& orderIndex=graph.orderIndex;const auto& serviceIndex=graph.serviceIndex;
     if(!internalOnly.isEmpty()&&orderIndex.numbers.value(internalOnly).size()!=1)return fail("Payroll order identity is ambiguous or unavailable");
     const QDate start=DateFormats::parseDate(from),end=DateFormats::parseDate(to);
     QSet<int> selected;

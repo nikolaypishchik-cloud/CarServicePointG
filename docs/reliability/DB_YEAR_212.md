@@ -43,3 +43,5 @@
 DBY-T189 (DBY-04/06/07): invoice import selects by visible number and stable UID without using invoice year or creating missing orders. Active/archive owner and v1 receipt guards have portable Qt evidence; public service/review/archive native slots await Windows. See DBY_T189_INVOICE_OWNER.md; these workstreams remain IN_PROGRESS.
 
 DBY-T190 (DBY-02/06): master payroll detail/text/PDF/snapshot now share checked UID ownership and per-work half-up amounts. Numeric-only ambiguous assignments/adjustments reject unconfirmed earnings. Linux public-read evidence and exact Windows slots: DBY_T190_PAYROLL_IDENTITY.md; native/full-suite acceptance remains pending.
+
+DBY-T191 (DBY-03/08): payroll graph loads only consumed fields and reuses per-graph UID/numeric indexes. Read-only synthetic Linux profile and full-field equality checks are recorded in DBY_T191_PAYROLL_GRAPH_PROFILE.md. Windows comparison remains pending; PDF presentation is owned by desktop.
