@@ -1,4 +1,5 @@
 #include "core/services/LegacyMutationLogSupport.h"
+#include "infrastructure/db/sqlite/MutationJournalSchema.h"
 #include "core/util/DateFormats.h"
 
 #include <QJsonDocument>
@@ -6,6 +7,12 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QSqlRecord>
+
+const QString& mutationJournalTableName()
+{
+    static const QString name = QStringLiteral("legacy_mutation_log");
+    return name;
+}
 
 namespace {
 
@@ -169,8 +176,8 @@ bool logMutation(QSqlDatabase database,
 
     QSqlQuery q(database);
     q.prepare(QStringLiteral(
-        "INSERT INTO legacy_mutation_log(entity_name, action, order_number, order_uid, record_key, before_json, after_json) "
-        "VALUES(?,?,?,?,?,?,?)"));
+        "INSERT INTO %1(entity_name, action, order_number, order_uid, record_key, before_json, after_json) "
+        "VALUES(?,?,?,?,?,?,?)").arg(mutationJournalTableName()));
     const QString safeEntityName = nonNullText(entityName);
     const QString safeAction = nonNullText(action);
     const QString safeOrderUid = nonNullText(orderUid);

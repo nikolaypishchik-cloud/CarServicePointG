@@ -1,5 +1,6 @@
 #pragma once
 #include "infrastructure/db/sqlite/HistoricalRecordStore.h"
+#include "infrastructure/db/sqlite/MutationJournalSchema.h"
 #include "infrastructure/db/sqlite/Db.h"
 #include "core/services/AccessControlService.h"
 
@@ -44,7 +45,14 @@ inline bool tables(const QString& owner,const QString& id,QStringList* output,QS
         if(!q.exec())return fail(error,q.lastError().text());
         const bool inspectAdditional=AccessControlService::currentUserHasPermission(db,"security.manage");
         const QStringList orderTables={"work_orders","work_order_services","work_order_parts","service_masters","work_order_part_attachments","work_order_service_attachments","outsource_jobs","outsource_repairs"};
-        while(q.next()) {const auto name=q.value(0).toString();if(owner.isEmpty() ? catalogue(name) : (orderTables.contains(name) || inspectAdditional))names<<name;}
+        const bool sourceJournal = inspectAdditional && !AccessControlService::currentOrderScope(db).restricted;
+        while(q.next()) {
+            const auto name=q.value(0).toString();
+            const bool visible=owner.isEmpty()
+                ? catalogue(name) || (sourceJournal && name==mutationJournalTableName())
+                : orderTables.contains(name) || inspectAdditional;
+            if(visible)names<<name;
+        }
     }
     if(q.lastError().isValid())return fail(error,q.lastError().text());*output=names;return true;
 }

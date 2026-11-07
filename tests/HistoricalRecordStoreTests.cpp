@@ -18,6 +18,8 @@ int main(int argc,char** argv) {
  sql("INSERT INTO parts_catalog VALUES(1,60,'Historical catalogue',38.50)");
  sql("CREATE TABLE historical_adjustments(order_uid TEXT,cents INTEGER)");
  sql("INSERT INTO historical_adjustments VALUES('order-a',123),('order-a',123)");
+ sql("CREATE TABLE legacy_mutation_log(order_uid TEXT,action TEXT)");
+ sql("INSERT INTO legacy_mutation_log VALUES('removed-order','delete')");
  sql("ATTACH DATABASE '"+dir.filePath("current.db")+"' AS archive_rollover");
  for(const auto& table:QStringList{"work_orders","work_order_services","work_order_parts","service_masters","parts_catalog"}) {
   sql("SELECT sql FROM main.sqlite_master WHERE name='"+table+"'");check(q.next());const auto ddl=q.value(0).toString();q.finish();
@@ -40,6 +42,9 @@ int main(int argc,char** argv) {
  check(rows.size()==1 && field(rows[0],"amount").toInt()==3850 && field(rows[0],"paid").toInt()==0 && field(rows[0],"note").toByteArray()==QByteArray::fromHex("AB00FF"));
  check(HistoricalRecordStore::read(view,first,"parts_catalog",{}, {},0,100,&rows,&error));check(rows.size()==1 && field(rows[0],"name")=="Historical catalogue" && field(rows[0],"price").toDouble()==38.5 && rows[0].recordUid.isEmpty());
  check(HistoricalRecordStore::read(view,first,"historical_adjustments","order-a",{},0,100,&rows,&error));check(rows.size()==2 && rows[0].rowKey!=rows[1].rowKey);
+ check(HistoricalRecordStore::read(view,first,"legacy_mutation_log",{}, {},0,100,&rows,&error));
+ check(rows.size()==1 && rows[0].ownerUid=="removed-order" && field(rows[0],"action")=="delete");
+ sql("SELECT count(*) FROM archive_rollover.work_orders WHERE order_uid='removed-order'");check(q.next() && q.value(0).toInt()==0);q.finish();
  sql("SELECT part_uid,paid,SUM(amount) FROM archive_rollover.work_order_parts");check(q.next() && q.value(0)=="current-part" && q.value(1).toInt()==1 && q.value(2).toInt()==4000);q.finish();
  sql("SELECT name,price FROM archive_rollover.parts_catalog");check(q.next() && q.value(0)=="Current catalogue" && q.value(1).toDouble()==40);q.finish();
  // Equal data from a different origin is not a UID alias or the same source version.

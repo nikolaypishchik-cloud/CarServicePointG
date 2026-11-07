@@ -1,4 +1,5 @@
 #include "ui/common/dialogs/HistoricalVersionsDialog.h"
+#include "core/services/LegacyMutationLogSupport.h"
 #include "infrastructure/db/sqlite/MigrationOrderKeys.h"
 #include <QtTest/QtTest>
 #include <QDataStream>
@@ -1491,6 +1492,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             QVERIFY(StaffAccountService::ensureSchema(active,&detail));QVERIFY(AccessControlService::ensureSchema(active,&detail));
             QVERIFY(baseline.exec("INSERT INTO staff_accounts(id,display_name,role,active) VALUES('history-owner','History owner','owner',1)"));
             ActivityAuditService::setCurrentActor({"history-owner","History owner","owner","test"});
+            QVERIFY2(LegacyMutationLogSupport::logMutation(active,"order","delete",919,"removed-order","919","{}","{}",&detail),qPrintable(detail));
             QVERIFY(baseline.exec("ALTER TABLE parts_catalog ADD COLUMN part_id INTEGER"));
             QVERIFY(baseline.exec("INSERT INTO parts_catalog(id,part_number,name,price,part_id) VALUES(9000,'SYN-HISTORY','Historical catalogue',38.50,21)"));
             TransactionContext tx(active,"HistoricalChildrenBaseline");QVERIFY(tx.begin("test",&detail));
@@ -1675,12 +1677,13 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     }
     if(historicalConflict) {
         QVERIFY2(ok,qPrintable(error));
+        QString historicalId;
         for(int boot=0;boot<2;++boot) {
             Database::close();QVERIFY2(Database::prepareRuntime(&setupError),qPrintable(setupError));QVERIFY2(Database::openPrepared(&setupError),qPrintable(setupError));
             QVERIFY2(Database::runStartupMigrationCheck(&setupError),qPrintable(setupError));QVERIFY2(Database::runStartupRegistryRefresh(&setupError),qPrintable(setupError));
             QVERIFY2(Database::ensureOrderAvailableInActiveByUid("existing-target-order",&setupError),qPrintable(setupError));
             QList<HistoricalVersionsService::Version> versions;QVERIFY2(HistoricalVersionsService::versions("existing-target-order",&versions,&setupError),qPrintable(setupError));
-            QString historicalId;for(const auto& version:versions)if(version.origin==AppRuntime::archiveDbFilePath())historicalId=version.id;QVERIFY(!historicalId.isEmpty());
+            historicalId.clear();for(const auto& version:versions)if(version.origin==AppRuntime::archiveDbFilePath())historicalId=version.id;QVERIFY(!historicalId.isEmpty());
             HistoricalVersionsService::Page old,current;
             QVERIFY2(HistoricalVersionsService::read("existing-target-order",historicalId,"work_order_parts",0,100,&old,&setupError,"existing-target-part"),qPrintable(setupError));QCOMPARE(old.rows.size(),1);
             auto value=[](const HistoricalVersionsService::Page& page,const QString& field){return page.rows[0].value(page.columns.indexOf(field));};
@@ -1694,6 +1697,13 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             QVERIFY2(HistoricalVersionsService::read({},"current","parts_catalog",0,100,&currentCatalog,&setupError),qPrintable(setupError));
             auto catalogPrice=[](const HistoricalVersionsService::Page& page){for(const auto& row:page.rows)if(row.value(page.columns.indexOf("id")).toInt()==9000)return qRound(row.value(page.columns.indexOf("price")).toDouble()*100);return -1;};
             QCOMPARE(catalogPrice(oldCatalog),3850);QCOMPARE(catalogPrice(currentCatalog),4000);
+            HistoricalVersionsService::Page journal;
+            QVERIFY2(HistoricalVersionsService::read({},historicalId,"legacy_mutation_log",0,100,&journal,&setupError),qPrintable(setupError));
+            const int ownerCol=journal.columns.indexOf("order_uid"),actionCol=journal.columns.indexOf("action");
+            QVERIFY(ownerCol>=0 && actionCol>=0);
+            QVERIFY(std::any_of(journal.rows.cbegin(),journal.rows.cend(),[&](const auto& row){
+                return row.at(ownerCol).toString()=="removed-order" && row.at(actionCol).toString()=="delete";
+            }));
             {QSqlQuery sums(Database::db());QVERIFY(sums.exec("SELECT COUNT(*),ROUND(SUM(amount)*100) FROM work_order_parts WHERE order_uid='existing-target-order'"));QVERIFY(sums.next());QCOMPARE(sums.value(0).toInt(),1);QCOMPARE(sums.value(1).toInt(),3850);}
             if(boot==0) {
                 std::unique_ptr<QDialog> viewer(HistoricalVersionsDialog::create(nullptr,"existing-target-order",&setupError));QVERIFY2(viewer,qPrintable(setupError));
@@ -1708,6 +1718,9 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             QList<HistoricalVersionsService::Version> denied;QString accessError;
             QVERIFY(!HistoricalVersionsService::versions("existing-target-order",&denied,&accessError));QVERIFY(denied.isEmpty());QVERIFY(!accessError.isEmpty());
             QVERIFY(!HistoricalVersionsService::versions({},&denied,&accessError));QVERIFY(denied.isEmpty());
+            HistoricalVersionsService::Page journal;
+            QVERIFY(!HistoricalVersionsService::read({},historicalId,"legacy_mutation_log",0,100,&journal,&accessError));
+            QVERIFY(journal.rows.isEmpty());
         }
         QSqlQuery count(Database::db());QVERIFY(count.exec("SELECT COUNT(*) FROM historical_records"));QVERIFY(count.next());const auto historyCount=count.value(0).toLongLong();count.finish();
         stages.clear();error.clear();QEventLoop repeatLoop;

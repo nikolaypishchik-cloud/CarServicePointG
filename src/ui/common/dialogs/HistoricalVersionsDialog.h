@@ -21,7 +21,7 @@ inline QDialog* create(QWidget* parent,const QString& owner,QString* error)
     QList<HistoricalVersionsService::Version> versions;
     if(!HistoricalVersionsService::versions(owner,&versions,error))return nullptr;
     auto* dialog=new QDialog(parent);dialog->setObjectName("historicalVersionsDialog");dialog->resize(1050,650);
-    dialog->setWindowTitle(owner.isEmpty()?QString::fromUtf8("Історичні версії каталогу"):QString::fromUtf8("Історичні версії наряду"));
+    dialog->setWindowTitle(owner.isEmpty()?QString::fromUtf8("Історичні версії джерела"):QString::fromUtf8("Історичні версії наряду"));
     auto* layout=new QVBoxLayout(dialog);
     auto* explanation=new QLabel(QString::fromUtf8("Рахунки використовують поточну версію. Історичні знімки доступні для читання з указаного джерела."),dialog);explanation->setWordWrap(true);layout->addWidget(explanation);
     auto* source=new QComboBox(dialog);source->setObjectName("historySource");layout->addWidget(source);

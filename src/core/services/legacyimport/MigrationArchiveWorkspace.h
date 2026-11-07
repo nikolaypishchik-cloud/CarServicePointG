@@ -2,6 +2,7 @@
 
 #include "infrastructure/db/sqlite/OrderArchiveShardSqlSupport.h"
 #include "infrastructure/db/sqlite/HistoricalRecordStore.h"
+#include "infrastructure/db/sqlite/MutationJournalSchema.h"
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
 #include "infrastructure/db/sqlite/SqliteSchemaInspection.h"
 #include <QScopeGuard>
@@ -71,6 +72,9 @@ inline bool reconcile(QSqlDatabase db,QString* error,bool versioned=false)
         if(!q.exec("SELECT 1 FROM main."+ident(table.name)+" LIMIT 1"))return fail(q.lastError().text());
         const bool populated=q.next();if(q.lastError().isValid())return fail(q.lastError().text());q.finish();
         if(!populated)continue;
+        // A deletion event may outlive its order. Its recorded UID and typed fields
+        // belong to the captured source and must never recreate an active order.
+        if(versioned && table.name==mutationJournalTableName())continue;
         if(versioned && table.name.startsWith("parts_catalog"))continue; // Catalogue links are source-scoped evidence, not current owners.
         if(names.contains("order_uid")) {
             if(!q.exec("SELECT 1 FROM main."+ident(table.name)+" c WHERE COALESCE(c.order_uid,'')<>'' AND (NOT EXISTS(SELECT 1 FROM main.work_orders s WHERE s.order_uid=c.order_uid) OR NOT EXISTS(SELECT 1 FROM archive_rollover.work_orders t WHERE t.order_uid=c.order_uid)) LIMIT 1"))return fail(q.lastError().text());
