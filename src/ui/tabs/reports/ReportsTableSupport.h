@@ -12,6 +12,8 @@ class QTableView;
 
 namespace ReportsTableSupport {
 
+constexpr int OrderUidRole = Qt::UserRole + 32;
+
 class ReportsSnapshotTableModel final : public QAbstractTableModel
 {
 public:

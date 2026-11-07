@@ -259,6 +259,7 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
             const PartMarkupPolicyService::PolicySnapshot policySnapshot = PartMarkupPolicyService::loadPolicySnapshot(db,&snapshot.error);
             if(!snapshot.error.isEmpty())return;
             struct PartReportRow {
+                QString orderUid;
                 QDate date;
                 int orderInternalNumber = 0;
                 int orderSortVisible = 0;
@@ -299,10 +300,15 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                     PartReportRow row;
                     row.rowId = q.value(0).toInt();
                     row.date = ReportsDateUtils::effectiveDate(q.value(1).toString(), q.value(2).toString());
+                    if (q.value(3).toInt() <= 0 && (!row.date.isValid() || (row.date >= from && row.date <= to))) {
+                        snapshot.error = QStringLiteral("Cannot resolve a unique order for report part %1").arg(row.rowId);
+                        return;
+                    }
                     if (!row.date.isValid() || row.date < from || row.date > to) continue;
                     row.orderInternalNumber = q.value(3).toInt();
                     row.orderSortVisible = q.value(4).toInt();
                     row.orderDisplay = q.value(4).toString();
+                    row.orderUid = q.value(21).toString();
                     const QString rawStore = q.value(5).toString().trimmed();
                     const QString rawInvoiceNumber = q.value(17).toString().trimmed();
                     row.invoiceNumber = rawInvoiceNumber;
@@ -375,6 +381,7 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 }
 
                 PartsSnapshotRow out;
+                out.orderUid = row.orderUid;
                 out.date = row.date.toString(QStringLiteral("dd.MM.yy"));
                 out.orderNumber = row.orderDisplay;
                 out.internalOrderNumber = row.orderInternalNumber;

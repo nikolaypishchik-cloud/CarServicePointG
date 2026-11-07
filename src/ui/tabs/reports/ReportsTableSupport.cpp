@@ -365,6 +365,7 @@ void applyPartsSnapshot(QTableView* table, ReportsSnapshotTableModel* model, con
             makeCell(row.client, int(Qt::AlignRight | Qt::AlignVCenter))
         };
         out.cells[3].link = !row.invoiceNumber.trimmed().isEmpty();
+        out.cells[1].extraRoles[OrderUidRole] = row.orderUid;
         rows.push_back(out);
     }
     model->setSnapshot(partsHeaders(), rows);

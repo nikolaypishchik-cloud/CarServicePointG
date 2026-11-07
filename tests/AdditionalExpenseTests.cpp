@@ -36,6 +36,7 @@
 #include "core/services/ReportsSyncSupport.h"
 #include "core/util/FormatUtils.h"
 #include "ui/tabs/reports/ReportsPage.h"
+#include "ui/tabs/reports/ReportsTableSupport.h"
 #include "ui/theme/ThemeManager.h"
 
 class AdditionalExpenseTests : public QObject {
@@ -200,6 +201,33 @@ private slots:
         PartsQueryService::invalidateCache();
         auto good=read(db.databaseName());QVERIFY2(good.error.isEmpty(),qPrintable(good.error));QCOMPARE(good.rows.size(),2);
         QCOMPARE(good.rows.last().purchase,QString("30"));
+        QVERIFY(q.exec("CREATE TABLE other_report_header AS SELECT * FROM work_orders WHERE number=11"));
+        QVERIFY(q.exec("UPDATE other_report_header SET order_uid='different-order',order_year=2025,car='Other owner'"));
+        QVERIFY(q.exec("DROP VIEW router_work_orders"));
+        QVERIFY(q.exec("CREATE VIEW router_work_orders AS SELECT * FROM work_orders UNION ALL SELECT * FROM other_report_header"));
+        const auto routed=read(db.databaseName());
+        QVERIFY2(routed.error.isEmpty(),qPrintable(routed.error));
+        QCOMPARE(routed.rows.size(),2);
+        QCOMPARE(routed.rows.last().purchase,QString("30"));
+        QCOMPARE(routed.rows.last().orderUid,QString("parts-report-order"));
+        ReportsTableSupport::ReportsSnapshotTableModel model;
+        QTableView table;
+        table.setModel(&model);
+        ReportsTableSupport::applyPartsSnapshot(&table,&model,routed);
+        QCOMPARE(model.index(1,1).data(Qt::UserRole).toInt(),11);
+        QCOMPARE(model.index(1,1).data(ReportsTableSupport::OrderUidRole).toString(),QString("parts-report-order"));
+        QVERIFY(!routed.rows.last().tooltip.contains("Other owner"));
+        QVERIFY(q.exec("DROP VIEW router_work_orders"));
+        QVERIFY(q.exec("CREATE VIEW router_work_orders AS SELECT * FROM other_report_header"));
+        const auto missingOwner=read(db.databaseName());
+        QVERIFY(missingOwner.error.contains("unique order"));
+        QVERIFY(missingOwner.rows.isEmpty());
+        QVERIFY(q.exec("DROP VIEW router_work_orders"));
+        QVERIFY(q.exec("DROP TABLE other_report_header"));
+        QVERIFY(rebuildRouterViews(db));
+        const auto repairedOwner=read(db.databaseName());
+        QVERIFY2(repairedOwner.error.isEmpty(),qPrintable(repairedOwner.error));
+        QCOMPARE(repairedOwner.rows.size(),2);
         const auto original=PayrollReadFixture::bytes(db.databaseName());
         for(const auto& table:QStringList{"work_order_part_attachments","workshop_inventory_purchases","workshop_spare_movements","workshop_spare_returns","workshop_spare_attachments","settings"}) {
             QVERIFY2(q.exec("ALTER TABLE "+table+" RENAME TO parts_broken"),qPrintable(q.lastError().text()));

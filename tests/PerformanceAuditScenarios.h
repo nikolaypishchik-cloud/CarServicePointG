@@ -93,10 +93,10 @@ inline int runAudit(QSqlDatabase db, const QString& output) {
     auto snap=[](int n,const QStringList& stats){QString e;for(const auto& s:stats)if(s.contains(QString::fromUtf8("Не вдалося")))e="snapshot_error";return checked(n,e);};
     rec.run("reports.period","service",[&]{auto r=ReportsDataLoader::buildPeriodSnapshot(dbPath,df,dt);return snap(r.rows.size(),r.stats);},reset);
     rec.run("reports.orders","service",[&]{auto r=ReportsDataLoader::buildOrdersSnapshot(dbPath,df,dt);return snap(r.rows.size(),r.stats);},reset);
-    rec.run("reports.parts","service",[&]{auto r=ReportsDataLoader::buildPartsSnapshot(dbPath,df,dt,0,0,{},{});return snap(r.rows.size(),r.stats);},reset);
-    rec.run("reports.payroll","service",[&]{auto r=ReportsDataLoader::buildPayrollSnapshot(dbPath,df,dt);return snap(r.rows.size(),r.stats);},reset);
-    rec.run("reports.outsource","service",[&]{auto r=ReportsDataLoader::buildOutsourceSnapshot(dbPath,df,dt);return snap(r.rows.size(),r.stats);},reset);
-    rec.run("statistics.snapshot","service",[&]{auto r=StatisticsSnapshotService::collectFromPath(dbPath,from,to);return checked(r.closedOrders+r.openOrders);},reset);
+    rec.run("reports.parts","service",[&]{auto r=ReportsDataLoader::buildPartsSnapshot(dbPath,df,dt,0,0,{},{});return checked(r.rows.size(),r.error);},reset);
+    rec.run("reports.payroll","service",[&]{auto r=ReportsDataLoader::buildPayrollSnapshot(dbPath,df,dt);return checked(r.rows.size(),r.error);},reset);
+    rec.run("reports.outsource","service",[&]{auto r=ReportsDataLoader::buildOutsourceSnapshot(dbPath,df,dt);return checked(r.rows.size(),r.error);},reset);
+    rec.run("statistics.snapshot","service",[&]{auto r=StatisticsSnapshotService::collectFromPath(dbPath,from,to);return checked(r.closedOrders+r.openOrders,r.error);},reset);
     rec.run("invoices.registry","service",[&]{QString e;auto r=InvoiceRegistryService::load(db,&e);return checked(r.size(),e);},reset);
     const auto selectedScenarios=qEnvironmentVariable("CS_PERF_SCENARIOS");
     if ((selectedScenarios.isEmpty() || selectedScenarios.split(',').contains("invoices.registry"))

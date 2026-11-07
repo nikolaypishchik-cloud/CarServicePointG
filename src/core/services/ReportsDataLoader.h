@@ -48,6 +48,7 @@ struct PartsSnapshotRow {
     QString date;
     QString orderNumber;
     int internalOrderNumber = 0;
+    QString orderUid;
     QString partName;
     QString invoiceNumber;
     QString invoicePath;

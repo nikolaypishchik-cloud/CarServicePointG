@@ -9,6 +9,7 @@
 #include "core/backup/BackupPerformanceGuard.h"
 #include "core/services/ActiveArchiveRoutingLayer.h"
 #include "ui/common/dialogs/OrderDialog.h"
+#include "ui/tabs/reports/ReportsTableSupport.h"
 #include "ui/tabs/orders/WorkPartsDialog.h"
 #include "core/import/InvoiceAttachmentPdfService.h"
 #include "ui/common/dialogs/InvoiceDocumentOpenSupport.h"
@@ -211,10 +212,11 @@ void openOrderFromReportTable(
         orderNumber = orderIndex.data(Qt::DisplayRole).toString().trimmed().toInt(&ok);
     }
     if (!ok || orderNumber <= 0) return;
-    const QString orderUid = AppRuntimeService::resolveOrderUid(orderNumber);
+    const auto recordedUid = orderIndex.data(ReportsTableSupport::OrderUidRole).toString();
+    const QString orderUid = recordedUid.isEmpty() ? AppRuntimeService::resolveOrderUid(orderNumber) : recordedUid;
     QString routingError;
     if (!orderUid.trimmed().isEmpty()) {
-        if (!ActiveArchiveRoutingLayer::prepareOrderForOpen(orderUid, orderNumber, &orderNumber, &routingError)) {
+        if (!ActiveArchiveRoutingLayer::prepareOrderForOpen(orderUid, recordedUid.isEmpty() ? orderNumber : 0, &orderNumber, &routingError)) {
             QMessageBox::critical(parent, QString::fromUtf8("Помилка"), routingError);
             return;
         }
