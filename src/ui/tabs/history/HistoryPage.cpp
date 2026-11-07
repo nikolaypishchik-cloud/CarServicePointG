@@ -213,7 +213,7 @@ public:
             }
             case 4: return PlateUtils::formatPlateDisplay(src.toString());
             case 8:
-            case 9: return FormatUtils::money(src.toDouble(), 0);
+            case 9: return FormatUtils::money(src.toDouble());
             default: break;
             }
         }

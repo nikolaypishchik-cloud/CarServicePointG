@@ -75,6 +75,7 @@
 #include "core/services/ReportsDateUtils.h"
 #include "infrastructure/db/sqlite/Db.h"
 #include "infrastructure/db/sqlite/DbBootstrapEnsureSchema.h"
+#include "core/services/orders/OrderFinancialService.h"
 #include <QDateEdit>
 #include "core/services/ActivityAuditService.h"
 #include "core/services/StaffAccountService.h"
@@ -6232,6 +6233,16 @@ void ReportsOrdersTests::annualOrderUiPdfVisibleIdentity()
         for(const auto& statement:sql)QVERIFY2(q.exec(statement),qPrintable(q.lastError().text()));
     }
     ActivityAuditService::setCurrentActor({"year-owner","Synthetic Owner","owner","test"});
+    for(const int year:{2025,2026}) {
+        const QString uid=QString("year-%1").arg(year);
+        QVERIFY2(Database::ensureOrderAvailableInActiveByUid(uid,&error),qPrintable(error));
+        QVERIFY2(OrderFinancialService::refreshOrderFinancialSumsByUid(Database::db(),uid,&error),qPrintable(error));
+        QSqlQuery header(Database::db());
+        header.prepare("SELECT parts_sum FROM work_orders WHERE order_uid=?");
+        header.addBindValue(uid);
+        QVERIFY(header.exec() && header.next());
+        QCOMPARE(qRound64(header.value(0).toDouble()*100),year==2025?12345:23456);
+    }
     QString extractor=qEnvironmentVariable("CS_TEST_PDFTOTEXT");
     if(extractor.isEmpty())extractor=QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../resources/windows/ocr-layer/poppler/bin/pdftotext.exe");
     QVERIFY2(QFileInfo::exists(extractor),"Set CS_TEST_PDFTOTEXT to a real pdftotext executable");
@@ -6260,6 +6271,16 @@ void ReportsOrdersTests::annualOrderUiPdfVisibleIdentity()
     QVERIFY2(Database::archiveSingleActiveOrderToArchive(900101,&error),qPrintable(error));
     Database::close();QVERIFY2(Database::prepareRuntime(&error),qPrintable(error));QVERIFY2(Database::openPrepared(&error),qPrintable(error));
     {
+        ScopedSqliteConnection physical(archiveShardFilePathForOrder(900101),"annual_pdf_archive",&error);
+        QVERIFY2(physical.isOpen(),qPrintable(error));
+        QSqlQuery archived(physical.db());
+        QVERIFY(archived.exec("SELECT parts_sum FROM work_orders WHERE order_uid='year-2025'") && archived.next());
+        QCOMPARE(qRound64(archived.value(0).toDouble()*100),12345);
+        QSqlQuery registry(Database::db());
+        QVERIFY(registry.exec("SELECT parts_sum FROM order_registry WHERE order_uid='year-2025'") && registry.next());
+        QCOMPARE(qRound64(registry.value(0).toDouble()*100),12345);
+    }
+    {
         HistoryPage page;page.resize(1400,900);page.show();
         auto* table=page.findChild<QTableView*>();QVERIFY(table);
         auto* from=page.findChild<QDateEdit*>("historyDateFrom");
@@ -6272,6 +6293,12 @@ void ReportsOrdersTests::annualOrderUiPdfVisibleIdentity()
             int col=-1;for(int c=0;c<m->columnCount();++c)if(m->headerData(c,Qt::Horizontal).toString()=="__order_uid")col=c;
             if(col<0)return -1;for(int r=0;r<m->rowCount();++r)if(m->index(r,col).data().toString()==uid)return r;return -1;};
         QTRY_VERIFY_WITH_TIMEOUT(rowFor("year-2025")>=0&&rowFor("year-2026")>=0,15000);
+        int partsColumn=-1;
+        for(int c=0;c<table->model()->columnCount();++c)
+            if(table->model()->headerData(c,Qt::Horizontal).toString()==QString::fromUtf8("Запчастини"))partsColumn=c;
+        QVERIFY(partsColumn>=0);
+        QCOMPARE(table->model()->index(rowFor("year-2025"),partsColumn).data().toString(),QString("123.45"));
+        QCOMPARE(table->model()->index(rowFor("year-2026"),partsColumn).data().toString(),QString("234.56"));
         const auto visibleYear=[&] {
             for(int c=0;c<table->model()->columnCount();++c)
                 if(table->model()->headerData(c,Qt::Horizontal).toString()==QString::fromUtf8("Рік"))return c;
