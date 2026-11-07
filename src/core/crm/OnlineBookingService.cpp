@@ -13,7 +13,7 @@
 #include <QSqlQuery>
 #include <QVariant>
 #include <QTimeZone>
-#include "core/services/OrderIdentityService.h"
+#include "core/services/OrderNumberService.h"
 
 namespace {
 
@@ -227,7 +227,7 @@ bool createOrderFromRequestDirect(QSqlDatabase db, const QString& appointmentUid
     src.finish();
     const auto createdAt=QDateTime::currentDateTimeUtc();
     OrderIdentityService::Allocation identity;
-    if (!OrderIdentityService::allocateAnnualIdentity(db,QStringLiteral("booking:")+appointmentUid,createdAt,0,&identity,errorText)) return false;
+    if (!OrderNumberService::allocate(db,QStringLiteral("booking:")+appointmentUid,createdAt,0,&identity,errorText)) return false;
     const auto uid=identity.orderUid;
     const int nextNumber=identity.internalNumber;
     if (identity.replayed) {

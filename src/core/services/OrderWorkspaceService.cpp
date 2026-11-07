@@ -5,7 +5,7 @@
 #include "infrastructure/db/sqlite/Db.h"
 #include "core/util/PlateUtils.h"
 #include "core/crm/CrmClientService.h"
-#include "core/services/OrderIdentityService.h"
+#include "core/services/OrderNumberService.h"
 #include "core/backup/BackupCommitPublisher.h"
 #include "core/services/MutationExecutor.h"
 
@@ -18,10 +18,6 @@
 #include <QApplication>
 #include <QUuid>
 #include <cmath>
-#include <memory>
-#include <QFileInfo>
-#include "runtime/AppRuntime.h"
-#include "infrastructure/db/sqlite/ScopedConnectionManager.h"
 
 namespace {
 QString nonNullText(const QString& value)
@@ -144,16 +140,8 @@ MutationResult upsertOrderInternal(const OrderWorkspaceInput& input, int* orderN
         if (number > 0 && !loadExisting()) return false;
         if (!exists) {
             const int preferred = number > 0 ? number : Database::nextOrderInternalNumber();
-            std::unique_ptr<ScopedSqliteConnection> registry;
-            std::function<QSqlDatabase()> registryResolver;
-            const auto registryPath = AppRuntime::registryDbFilePath();
-            if (QFileInfo::exists(registryPath)) {
-                registry = std::make_unique<ScopedSqliteConnection>(registryPath, QStringLiteral("annual_identity_registry"), txError);
-                if (!registry->isOpen()) return false;
-                registryResolver = [&] { return registry->db(); };
-            }
-            if (!OrderIdentityService::allocateAnnualIdentity(txDb, input.creationRequestUid, creationTime,
-                                                               preferred, &allocation, txError, registryResolver)) return false;
+            if (!OrderNumberService::allocate(txDb, input.creationRequestUid, creationTime,
+                                               preferred, &allocation, txError)) return false;
             number = allocation.internalNumber;
             if (allocation.replayed) {
                 if (!loadExisting()) return false;

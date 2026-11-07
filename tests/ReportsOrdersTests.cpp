@@ -4376,6 +4376,22 @@ void ReportsOrdersTests::annualBookingConversionIsIdempotent()
     QVERIFY(q.prepare("SELECT count(*) FROM activity_audit_events WHERE entity_type='work_order' AND entity_id=? AND order_number=? AND action='create'"));
     q.addBindValue(QString::number(internal)); q.addBindValue(internal); QVERIFY(q.exec()); QVERIFY(q.next()); QVERIFY(q.value(0).toInt()>=1); q.finish();
     QCOMPARE(OrderNumberService::nextVisibleOrderNumber(),9);
+    QVERIFY(ensureRegistrySchemaFile());
+    QSqlQuery archived(QSqlDatabase::database(dbRegistryConnectionName()));
+    archived.prepare("INSERT INTO order_registry(order_number,order_uid,visible_order_number,order_year) VALUES(801,'external-booking-owner',33,?)");
+    archived.addBindValue(year);
+    QVERIFY2(archived.exec(),qPrintable(archived.lastError().text()));
+    QCOMPARE(OrderNumberService::nextVisibleOrderNumber(),34);
+    payload["appointment_uid"]="booking-after-external";
+    QVERIFY2(OnlineBookingService::upsertRequest(db,payload,&error),qPrintable(error));
+    QString nextUid;
+    QVERIFY2(OnlineBookingService::createOrderFromRequest(db,"booking-after-external",&nextUid,&error),qPrintable(error));
+    QVERIFY(q.prepare("SELECT number,order_number FROM work_orders WHERE order_uid=?"));
+    q.addBindValue(nextUid); QVERIFY(q.exec()); QVERIFY(q.next());
+    QCOMPARE(q.value(0).toInt(),802); QCOMPARE(q.value(1).toInt(),34); q.finish();
+    QVERIFY2(OnlineBookingService::createOrderFromRequest(db,"booking-after-external",&uid,&error),qPrintable(error));
+    QCOMPARE(uid,nextUid);
+    QCOMPARE(OrderNumberService::nextVisibleOrderNumber(),35);
 }
 
 void ReportsOrdersTests::annualWorkspaceCreationIsPersistent()
