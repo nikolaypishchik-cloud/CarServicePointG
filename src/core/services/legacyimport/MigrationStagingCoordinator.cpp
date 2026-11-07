@@ -47,7 +47,7 @@ bool seedWorkspace(const QString& destination, bool* copied, QString* error)
     return RuntimeDbPreflightValidator::validateFile(destination, RuntimeDbPreflightValidator::DbRole::Workspace,error);
 }
 
-bool retainPreviousArchive(const QString& temporary, QString* retained, QString* error)
+bool retainPreviousArchive(const QString& temporary, QString* mergeSource, QString* error)
 {
     const auto runtime=AppRuntime::archiveDbFilePath();
     const auto sealed=AppRuntime::sealedArchiveDbFilePath();
@@ -68,9 +68,12 @@ bool retainPreviousArchive(const QString& temporary, QString* retained, QString*
     if(digest.isEmpty())return NativeSnapshotMetadata::fail(error,"Cannot hash previous archive");
     const auto directory=QDir(AppRuntime::securityDir()).filePath("migration_retained_archives");
     if(!QDir().mkpath(directory) || !NativeSnapshotMetadata::protectBackupDirectory(directory,error))return false;
-    *retained=QDir(directory).filePath("archive_"+QString::fromLatin1(digest.toHex())+".db");
-    if(!QFileInfo::exists(*retained) && !QFile::copy(copy,*retained))return NativeSnapshotMetadata::fail(error,"Cannot retain previous archive shard");
-    if(hash(*retained)!=digest)return NativeSnapshotMetadata::fail(error,"Previous archive shard differs from snapshot");
+    const auto retained=QDir(directory).filePath("archive_"+QString::fromLatin1(digest.toHex())+".db");
+    if(!QFileInfo::exists(retained) && !QFile::copy(copy,retained))return NativeSnapshotMetadata::fail(error,"Cannot retain previous archive shard");
+    if(hash(retained)!=digest)return NativeSnapshotMetadata::fail(error,"Previous archive shard differs from snapshot");
+    // Reconcile from the verified staging snapshot. The immutable retained
+    // file must not be reopened for SQLite writes or journal creation.
+    *mergeSource=copy;
     return true;
 }
 

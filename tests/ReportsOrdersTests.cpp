@@ -1212,16 +1212,21 @@ void ReportsOrdersTests::migrationPublicationCrashRecovery_data()
 void ReportsOrdersTests::migrationPublicationCrashRecovery()
 {
     QFETCH(QString,boundary);
-    QTemporaryDir parent;QVERIFY(parent.isValid());
+    QTemporaryDir parent(QDir::temp().filePath("crash-XXXXXX"));QVERIFY(parent.isValid());
     const auto markerPath=parent.filePath("crash.json");
     auto environment=QProcessEnvironment::systemEnvironment();
     environment.insert("CS_TEST_MIGRATION_PARENT",parent.path());
     environment.insert("CS_TEST_MIGRATION_CRASH_MARKER",markerPath);
     environment.insert("CS_TEST_MIGRATION_CRASH_STAGE",boundary);
     QProcess child;child.setProcessEnvironment(environment);
-    child.start(QCoreApplication::applicationFilePath(),{"migrationServiceRoundTrip:populated-retained-stores"});
+    const auto childLogPath = parent.filePath("child-result.txt");
+    child.start(QCoreApplication::applicationFilePath(),{"-o",childLogPath+",txt","migrationServiceRoundTrip:populated-retained-stores"});
     QVERIFY(child.waitForStarted());QVERIFY(child.waitForFinished(120000));
-    QVERIFY2(child.exitCode()==87,qPrintable(QString::fromUtf8(child.readAllStandardOutput()+child.readAllStandardError())));
+    if (child.exitCode()!=87) {
+        QFile childLog(childLogPath);
+        const auto report=childLog.open(QIODevice::ReadOnly) ? childLog.readAll() : QByteArray();
+        QFAIL(qPrintable(QString("Expected crash exit 87, got %1: %2").arg(child.exitCode()).arg(QString::fromUtf8(report+child.readAllStandardError()))));
+    }
     QFile marker(markerPath);QVERIFY(marker.open(QIODevice::ReadOnly));
     QJsonParseError parse;const auto evidence=QJsonDocument::fromJson(marker.readAll(),&parse).object();
     QCOMPARE(parse.error,QJsonParseError::NoError);
@@ -1229,13 +1234,20 @@ void ReportsOrdersTests::migrationPublicationCrashRecovery()
     const auto oldRoot=qEnvironmentVariable("CS_TEST_DATA_ROOT");const auto oldName=QCoreApplication::applicationName();
     const auto oldOrg=QCoreApplication::organizationName(),oldDomain=QCoreApplication::organizationDomain();
     const bool oldTest=QStandardPaths::isTestModeEnabled();
-    const auto cleanup=qScopeGuard([&]{Database::close();QSettings().clear();QSettings().sync();
+    const auto oldFormat=QSettings::defaultFormat();
+    const auto cleanup=qScopeGuard([&]{Database::close();QSettings::setDefaultFormat(oldFormat);
         setIsolatedTestRoot(oldRoot);QCoreApplication::setApplicationName(oldName);QCoreApplication::setOrganizationName(oldOrg);
         QCoreApplication::setOrganizationDomain(oldDomain);QStandardPaths::setTestModeEnabled(oldTest);});
     QVERIFY(setIsolatedTestRoot(root));QStandardPaths::setTestModeEnabled(true);
     QCoreApplication::setApplicationName(evidence.value("name").toString());
     QCoreApplication::setOrganizationName(evidence.value("organization").toString());
     QCoreApplication::setOrganizationDomain(evidence.value("domain").toString());
+    // A previous test can select an INI backend in this process. Reopen the
+    // same settings store the terminated child used for the captured snapshot.
+    QVERIFY(evidence.contains("settingsFormat"));
+    QSettings::setDefaultFormat(static_cast<QSettings::Format>(evidence.value("settingsFormat").toInt()));
+    QCOMPARE(QSettings().fileName(),evidence.value("settingsFile").toString());
+    const auto cleanFixtureSettings=qScopeGuard([]{QSettings settings;settings.clear();settings.sync();});
     QString error,pending;QVERIFY2(MigrationRestoreJournal::pending(&pending,&error),qPrintable(error));
     QCOMPARE(pending,evidence.value("snapshot").toString());
     QVERIFY2(RuntimeRecoveryCoordinator::recoverPendingSnapshotRestore(&error),qPrintable(error));
@@ -1445,6 +1457,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
                         hashes.insert(it.key(),QString::fromLatin1(QCryptographicHash::hash(it.value(),QCryptographicHash::Sha256).toHex()));
                     const QJsonObject evidence{{"root",root.path()},{"name",QCoreApplication::applicationName()},
                         {"organization",QCoreApplication::organizationName()},{"domain",QCoreApplication::organizationDomain()},
+                        {"settingsFormat",int(QSettings().format())},{"settingsFile",QSettings().fileName()},
                         {"snapshot",pending},{"source",sourcePath},{"hashes",hashes}};
                     QSaveFile marker(qEnvironmentVariable("CS_TEST_MIGRATION_CRASH_MARKER"));
                     const auto bytes=QJsonDocument(evidence).toJson();
