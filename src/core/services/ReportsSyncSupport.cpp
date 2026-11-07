@@ -3,6 +3,7 @@
 #include "core/services/ReportsDateUtils.h"
 
 #include "core/util/FormatUtils.h"
+#include "core/util/DateFormats.h"
 #include "core/util/PlateUtils.h"
 #include "infrastructure/db/sqlite/Db.h"
 
@@ -267,35 +268,94 @@ bool setPayrollOrderDeleted(const QString& masterId, int orderNumber, bool delet
     return upsertPayrollOrderAdjustment(masterId, orderNumber, QStringLiteral("deleted"), deleted, errorMessage);
 }
 
-bool saveExpensesRecord(const QString& df, const QString& dt, const ExpensesSavePayload& payload, QString* errorMessage)
+// Both tables describe the same period. Updating an existing row keeps its ID,
+// creation time and fields added by historical installations.
+static bool writeExpenseRow(QSqlDatabase db, const QString& table, const QString& df, const QString& dt,
+                            const QStringList& fields, const QVariantList& values, QString& error)
 {
-    const QString beforeJson = LegacyAncillaryMutationLogSupport::snapshotExpensePeriod(Database::db(), df, dt);
-    QSqlQuery del(Database::db());
-    del.prepare(QStringLiteral("DELETE FROM expenses WHERE (CASE WHEN substr(period_from,3,1)='.' THEN '20'||substr(period_from,7,2)||'-'||substr(period_from,4,2)||'-'||substr(period_from,1,2) ELSE period_from END)=? AND (CASE WHEN substr(period_to,3,1)='.' THEN '20'||substr(period_to,7,2)||'-'||substr(period_to,4,2)||'-'||substr(period_to,1,2) ELSE period_to END)=?"));
-    del.addBindValue(df);
-    del.addBindValue(dt);
-    if (!del.exec() && errorMessage) *errorMessage = del.lastError().text();
-
-    QSqlQuery ins(Database::db());
-    ins.prepare(QStringLiteral("INSERT INTO expenses(period_from, period_to, elec_prev, elec_curr, elec_tariff, cleaning, heating, rent, amortization, sw_opendatabot, sw_tecalliance, other_amount, cleaning_note, software_note, heating_note, amortization_note, rent_note, other_note, elec_kwh, elec_cost) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
-    for (auto v : {QVariant(df), QVariant(dt), QVariant(payload.elecPrev), QVariant(payload.elecCurr), QVariant(payload.elecTariff), QVariant(payload.cleaning), QVariant(payload.heating), QVariant(payload.rent), QVariant(payload.amortization), QVariant(payload.software), QVariant(0.0), QVariant(payload.other), QVariant(payload.cleaningNote.trimmed()), QVariant(payload.softwareNote.trimmed()), QVariant(payload.heatingNote.trimmed()), QVariant(payload.amortizationNote.trimmed()), QVariant(payload.rentNote.trimmed()), QVariant(payload.otherNote.trimmed()), QVariant(payload.elecKwh), QVariant(payload.elecCost)}) ins.addBindValue(v);
-    if (!ins.exec()) {
-        if (errorMessage) *errorMessage = ins.lastError().text();
+    QSqlQuery lookup(db);
+    lookup.prepare(QStringLiteral("SELECT id FROM %1 WHERE %2=? AND %3=? LIMIT 2")
+                       .arg(table, DateFormats::isoSql("period_from"), DateFormats::isoSql("period_to")));
+    lookup.addBindValue(df);
+    lookup.addBindValue(dt);
+    if (!lookup.exec()) { error = lookup.lastError().text(); return false; }
+    const bool existing = lookup.next();
+    const auto id = existing ? lookup.value(0) : QVariant();
+    if (existing && lookup.next()) {
+        error = QStringLiteral("Кілька записів за один період у таблиці %1").arg(table);
         return false;
     }
+    if (lookup.lastError().isValid()) { error = lookup.lastError().text(); return false; }
+    lookup.finish();
 
-    QSqlQuery e(Database::db());
-    e.prepare(QStringLiteral("DELETE FROM electricity_periods WHERE (CASE WHEN substr(period_from,3,1)='.' THEN '20'||substr(period_from,7,2)||'-'||substr(period_from,4,2)||'-'||substr(period_from,1,2) ELSE period_from END)=? AND (CASE WHEN substr(period_to,3,1)='.' THEN '20'||substr(period_to,7,2)||'-'||substr(period_to,4,2)||'-'||substr(period_to,1,2) ELSE period_to END)=?"));
-    e.addBindValue(df);
-    e.addBindValue(dt);
-    e.exec();
+    QSqlQuery write(db);
+    if (existing) {
+        QStringList assignments;
+        for (const auto& field : fields) assignments.append(field + "=?");
+        write.prepare(QStringLiteral("UPDATE %1 SET %2 WHERE id=?").arg(table, assignments.join(',')));
+        for (const auto& value : values) write.addBindValue(value);
+        write.addBindValue(id);
+    } else {
+        QStringList placeholders;
+        for (qsizetype i = 0; i < fields.size(); ++i) placeholders.append("?");
+        write.prepare(QStringLiteral("INSERT INTO %1(period_from,period_to,%2) VALUES(?,?,%3)")
+                          .arg(table, fields.join(','), placeholders.join(',')));
+        write.addBindValue(df);
+        write.addBindValue(dt);
+        for (const auto& value : values) write.addBindValue(value);
+    }
+    if (!write.exec()) { error = write.lastError().text(); return false; }
+    if (write.numRowsAffected() == 1) return true;
+    error = QStringLiteral("Запис за період у %1 не збережено").arg(table);
+    return false;
+}
 
-    QSqlQuery ein(Database::db());
-    ein.prepare(QStringLiteral("INSERT INTO electricity_periods(period_from, period_to, meter_before, meter_after, consumed_kwh, tariff, amount) VALUES(?,?,?,?,?,?,?)"));
-    for (auto v : {QVariant(df), QVariant(dt), QVariant(payload.elecPrev), QVariant(payload.elecCurr), QVariant(payload.elecKwh), QVariant(payload.elecTariff), QVariant(payload.elecCost)}) ein.addBindValue(v);
-    if (!ein.exec() && errorMessage) *errorMessage = ein.lastError().text();
-    QString logError;
-    LegacyAncillaryMutationLogSupport::logExpenseMutation(Database::db(), beforeJson == QStringLiteral("{}") ? QStringLiteral("insert") : QStringLiteral("update"), df, dt, beforeJson, LegacyAncillaryMutationLogSupport::snapshotExpensePeriod(Database::db(), df, dt), &logError);
+bool saveExpensesRecord(const QString& df, const QString& dt, const ExpensesSavePayload& payload, QString* errorMessage)
+{
+    if (errorMessage) errorMessage->clear();
+    auto db = Database::db();
+    QSqlQuery tx(db);
+    QString error;
+    const auto fail = [&](const QString& detail) {
+        if (errorMessage) *errorMessage = detail;
+        return false;
+    };
+    const auto from = QDate::fromString(df, Qt::ISODate);
+    const auto to = QDate::fromString(dt, Qt::ISODate);
+    if (!from.isValid() || !to.isValid() || from > to)
+        return fail(QStringLiteral("Некоректний період витрат"));
+    if (!tx.exec("SAVEPOINT report_expense_period")) return fail(tx.lastError().text());
+    const auto rollback = [&]() {
+        if (!tx.exec("ROLLBACK TO report_expense_period") || !tx.exec("RELEASE report_expense_period"))
+            error += " | " + tx.lastError().text();
+        return fail(error);
+    };
+
+    const auto before = LegacyAncillaryMutationLogSupport::snapshotExpensePeriod(db, df, dt, &error);
+    if (before.isEmpty()) return rollback();
+    const auto note = [](const QString& text) { return text.isNull() ? QStringLiteral("") : text.trimmed(); };
+    if (!writeExpenseRow(db, "expenses", df, dt,
+            {"elec_prev","elec_curr","elec_tariff","cleaning","heating","rent","amortization","sw_opendatabot",
+             "sw_tecalliance","other_amount","cleaning_note","software_note","heating_note","amortization_note",
+             "rent_note","other_note","elec_kwh","elec_cost"},
+            {payload.elecPrev,payload.elecCurr,payload.elecTariff,payload.cleaning,payload.heating,payload.rent,
+             payload.amortization,payload.software,0.0,payload.other,note(payload.cleaningNote),note(payload.softwareNote),
+             note(payload.heatingNote),note(payload.amortizationNote),note(payload.rentNote),note(payload.otherNote),
+             payload.elecKwh,payload.elecCost}, error)) return rollback();
+    if (!writeExpenseRow(db, "electricity_periods", df, dt,
+            {"meter_before","meter_after","consumed_kwh","tariff","amount"},
+            {payload.elecPrev,payload.elecCurr,payload.elecKwh,payload.elecTariff,payload.elecCost}, error)) return rollback();
+    const auto after = LegacyAncillaryMutationLogSupport::snapshotExpensePeriod(db, df, dt, &error);
+    if (after.isEmpty() || after == "{}") {
+        if (error.isEmpty()) error = QStringLiteral("Не вдалося звірити запис витрат після збереження");
+        return rollback();
+    }
+    if (!LegacyAncillaryMutationLogSupport::logExpenseMutation(db, before == "{}" ? QStringLiteral("insert") : QStringLiteral("update"),
+                                                               df, dt, before, after, &error)) return rollback();
+    if (!tx.exec("RELEASE report_expense_period")) {
+        error = tx.lastError().text();
+        return rollback();
+    }
     return true;
 }
 

@@ -1,6 +1,7 @@
 #include "core/services/LegacyAncillaryMutationLogSupport.h"
 
 #include "core/services/LegacyMutationLogSupport.h"
+#include "core/util/DateFormats.h"
 
 #include <QSqlError>
 #include <QSqlQuery>
@@ -33,15 +34,26 @@ QString snapshotCatalogItem(QSqlDatabase database, int catalogId)
     return jsonForSingleRow(q);
 }
 
-QString snapshotExpensePeriod(QSqlDatabase database, const QString& periodFrom, const QString& periodTo)
+QString snapshotExpensePeriod(QSqlDatabase database, const QString& periodFrom, const QString& periodTo, QString* errorText)
 {
-    if (periodFrom.trimmed().isEmpty() || periodTo.trimmed().isEmpty()) return QStringLiteral("{}");
     QSqlQuery q(database);
-    q.prepare(QStringLiteral("SELECT * FROM expenses WHERE (CASE WHEN substr(period_from,3,1)='.' THEN '20'||substr(period_from,7,2)||'-'||substr(period_from,4,2)||'-'||substr(period_from,1,2) ELSE period_from END)=? AND (CASE WHEN substr(period_to,3,1)='.' THEN '20'||substr(period_to,7,2)||'-'||substr(period_to,4,2)||'-'||substr(period_to,1,2) ELSE period_to END)=? ORDER BY id DESC LIMIT 1"));
+    q.prepare(QStringLiteral("SELECT * FROM expenses WHERE %1=? AND %2=? LIMIT 2")
+                  .arg(DateFormats::isoSql("period_from"), DateFormats::isoSql("period_to")));
     q.addBindValue(periodFrom);
     q.addBindValue(periodTo);
-    if (!q.exec()) return QStringLiteral("{}");
-    return jsonForSingleRow(q);
+    if (q.exec()) {
+        const auto row = jsonForSingleRow(q);
+        if (!q.lastError().isValid()) {
+            if (row == "{}") return row;
+            if (q.next()) {
+                if (errorText) *errorText = QStringLiteral("Кілька записів витрат за один період");
+                return {};
+            }
+            if (!q.lastError().isValid()) return row;
+        }
+    }
+    if (errorText) *errorText = q.lastError().text();
+    return {};
 }
 
 QString snapshotOutsourceService(QSqlDatabase database, int serviceId)

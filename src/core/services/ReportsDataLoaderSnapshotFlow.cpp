@@ -725,7 +725,7 @@ static ExpensesSnapshot readExpensePeriod(QSqlDatabase& db, const QString& df, c
 {
     ExpensesSnapshot snapshot;
     QSqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT elec_prev, elec_curr, elec_tariff, cleaning, cleaning_note, sw_opendatabot, software_note, heating, heating_note, amortization, amortization_note, rent, rent_note, other_amount, other_note FROM expenses WHERE (CASE WHEN substr(period_from,3,1)='.' THEN '20'||substr(period_from,7,2)||'-'||substr(period_from,4,2)||'-'||substr(period_from,1,2) ELSE period_from END)=? AND (CASE WHEN substr(period_to,3,1)='.' THEN '20'||substr(period_to,7,2)||'-'||substr(period_to,4,2)||'-'||substr(period_to,1,2) ELSE period_to END)=? ORDER BY id DESC LIMIT 1"));
+    q.prepare(QStringLiteral("SELECT elec_prev, elec_curr, elec_tariff, cleaning, cleaning_note, sw_opendatabot, software_note, heating, heating_note, amortization, amortization_note, rent, rent_note, other_amount, other_note FROM expenses WHERE %1=? AND %2=? ORDER BY id DESC LIMIT 1").arg(DateFormats::isoSql("period_from"), DateFormats::isoSql("period_to")));
     q.addBindValue(df);
     q.addBindValue(dt);
     const double savedTariff = reportsWorkerSetting(db, QStringLiteral("reports.expenses.electricity_tariff"), 0.0, &snapshot.error).toDouble();

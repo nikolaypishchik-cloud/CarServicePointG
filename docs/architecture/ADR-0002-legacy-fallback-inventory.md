@@ -546,3 +546,6 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `tests/MigrationRetainedStoresTests.cpp` | test-only | Exercises preservation of previous encrypted archive, registry and legacy store files in an isolated fixture. |
 | `docs/reliability/DBY_T171_PUBLICATION.md` | active | Records the migration-service rollback marker and the crash/retry fixtures used for publication validation. |
 | `docs/reliability/DBY_T172_REGISTRY_KEYS.md` | active | Records key reservation for archived orders during migration. |
+| `tests/AdditionalExpenseTests.cpp` | test-only | Uses an aborting trigger on the expense mutation log to prove financial updates roll back when their audit insert fails. |
+| `docs/reliability/DBY_T174_ARCHIVE_ROUTING.md` | active | Describes the production archive hydration and verified scopes. |
+| `tests/MigrationArchiveWorkspaceTests.cpp` | test-only | Uses synthetic stored order graphs and prior database roles to verify archive merge and refusal on identity conflict. |

@@ -22,6 +22,7 @@
 #include "core/services/AdditionalExpenseService.h"
 #include "core/services/ActivityAuditService.h"
 #include "core/services/ReportsDataLoader.h"
+#include "core/services/ReportsSyncSupport.h"
 #include "core/util/FormatUtils.h"
 #include "ui/tabs/reports/ReportsPage.h"
 #include "ui/theme/ThemeManager.h"
@@ -166,6 +167,51 @@ private slots:
         page.refresh();
         QTRY_VERIFY_WITH_TIMEOUT(form->isEnabled(), 10000);
         QVERIFY(!stats->text().contains(QStringLiteral("Не вдалося прочитати витрати")));
+    }
+
+    void expenseSavePreservesHistoryAcrossLateFailure() {
+        QSqlQuery q(db);
+        QVERIFY(q.exec("ALTER TABLE expenses ADD COLUMN elec_kwh REAL"));
+        QVERIFY(q.exec("CREATE TABLE electricity_periods(id INTEGER PRIMARY KEY,period_from TEXT,period_to TEXT,"
+                       "meter_before REAL,meter_after REAL,consumed_kwh REAL,tariff REAL,amount REAL)"));
+        QVERIFY(q.exec("INSERT INTO expenses(id,period_from,period_to,cleaning) VALUES(41,'01.02.2026','28.02.2026',28.75)"));
+        QVERIFY(q.exec("INSERT INTO electricity_periods(id,period_from,period_to,amount) VALUES(71,'01.02.26','28.02.26',12)"));
+        const auto read = [&] { return ReportsDataLoader::buildExpensesSnapshot(db.databaseName(), "2026-02-01", "2026-02-28"); };
+        QVERIFY(read().foundRow);
+        QCOMPARE(read().cleaning, 28.75);
+        ExpensesSavePayload payload;
+        payload.cleaning = 32.25;
+        payload.elecCost = 16;
+        QString error;
+        auto save = [&] { return ReportsSyncSupport::saveExpensesRecord("2026-02-01", "2026-02-28", payload, &error); };
+        QVERIFY(q.exec("CREATE TRIGGER fail_power BEFORE UPDATE ON electricity_periods BEGIN SELECT RAISE(ABORT,'late meter error'); END"));
+        QVERIFY(db.transaction());
+        QVERIFY(q.exec("INSERT INTO settings VALUES('outer','retained')"));
+        QVERIFY(!save());
+        QVERIFY(error.contains("late meter error"));
+        QVERIFY(q.exec("SELECT id,cleaning FROM expenses")); QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(),41); QCOMPARE(q.value(1).toDouble(),28.75); QVERIFY(!q.next()); q.finish();
+        QVERIFY(db.commit()); // The savepoint did not roll back the caller's other change.
+        QVERIFY(q.exec("SELECT value FROM settings WHERE key='outer'")); QVERIFY(q.next());
+        QCOMPARE(q.value(0).toString(), QString("retained")); q.finish();
+        QVERIFY(q.exec("DROP TRIGGER fail_power"));
+        QVERIFY2(save(), qPrintable(error));
+        QVERIFY(q.exec("SELECT id,period_from,cleaning FROM expenses")); QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(),41); QCOMPARE(q.value(1).toString(),QString("01.02.2026"));
+        QCOMPARE(q.value(2).toDouble(),32.25); QVERIFY(!q.next()); q.finish();
+        QVERIFY(q.exec("SELECT id,amount FROM electricity_periods")); QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(),71); QCOMPARE(q.value(1).toDouble(),16.0); QVERIFY(!q.next()); q.finish();
+        QVERIFY(q.exec("SELECT action FROM legacy_mutation_log WHERE entity_name='expenses'")); QVERIFY(q.next());
+        QCOMPARE(q.value(0).toString(),QString("update")); QVERIFY(!q.next()); q.finish();
+        QVERIFY(q.exec("CREATE TRIGGER fail_audit BEFORE INSERT ON legacy_mutation_log BEGIN SELECT RAISE(ABORT,'audit error'); END"));
+        payload.cleaning = 50; payload.elecCost = 21;
+        QVERIFY(!save()); QVERIFY(error.contains("audit error"));
+        QCOMPARE(read().cleaning,32.25);
+        QVERIFY(q.exec("SELECT amount FROM electricity_periods WHERE id=71")); QVERIFY(q.next());
+        QCOMPARE(q.value(0).toDouble(),16.0); q.finish();
+        QVERIFY(q.exec("INSERT INTO expenses(id,period_from,period_to,cleaning) VALUES(42,'2026-02-01','2026-02-28',19)"));
+        QVERIFY(!save()); QVERIFY(error.contains(QStringLiteral("Кілька записів")));
+        QVERIFY(q.exec("SELECT COUNT(*) FROM expenses")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),2);
     }
 
     void validationPermissionsAndRollback() {

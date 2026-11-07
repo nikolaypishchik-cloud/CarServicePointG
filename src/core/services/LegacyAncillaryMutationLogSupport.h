@@ -6,7 +6,8 @@
 namespace LegacyAncillaryMutationLogSupport {
 
 QString snapshotCatalogItem(QSqlDatabase database, int catalogId);
-QString snapshotExpensePeriod(QSqlDatabase database, const QString& periodFrom, const QString& periodTo);
+QString snapshotExpensePeriod(QSqlDatabase database, const QString& periodFrom, const QString& periodTo,
+                             QString* errorText = nullptr);
 QString snapshotOutsourceService(QSqlDatabase database, int serviceId);
 
 bool logCatalogMutation(QSqlDatabase database,

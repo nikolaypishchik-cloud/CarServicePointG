@@ -668,7 +668,7 @@ void ReportsPage::recalcExpensesForm()
         m_heatingEdit, m_heatingNoteEdit, m_amortizationEdit, m_amortizationNoteEdit,
         m_rentEdit, m_rentNoteEdit, m_otherEdit, m_otherNoteEdit, m_expensesTotalEdit,
         m_expensesSaveButton, m_electricityPdfButton
-    }, true);
+    }, sender() == m_elecTariffEdit);
 
     QStringList stats = {
         QString::fromUtf8("Період:  %1 — %2").arg(m_from->date().toString("dd.MM.yy"), m_to->date().toString("dd.MM.yy"))
@@ -720,14 +720,15 @@ void ReportsPage::saveExpenses()
         || existing.otherNote != payload.otherNote
         || (payload.elecTariff > 0.0 && !nearlyEqual(persistedTariffSetting, payload.elecTariff));
 
-    if (payload.elecTariff > 0.0) {
-        ReportsSettingsService::saveElectricityTariff(payload.elecTariff);
-    }
-
     QString errorText;
     if (!ReportsSyncSupport::saveExpensesRecord(df, dt, payload, &errorText)) {
         QMessageBox::warning(this, QString::fromUtf8("Витрати"), errorText);
         return;
+    }
+    if (payload.elecTariff > 0.0 && !nearlyEqual(persistedTariffSetting, payload.elecTariff)
+        && !ReportsSettingsService::saveElectricityTariff(payload.elecTariff)) {
+        QMessageBox::warning(this, QStringLiteral("Витрати"),
+                             QStringLiteral("Витрати збережено. Не вдалося оновити тариф за замовчуванням."));
     }
 
     if (expensesChanged) {
