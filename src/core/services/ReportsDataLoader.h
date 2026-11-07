@@ -60,6 +60,7 @@ struct PartsSnapshotRow {
 };
 
 struct PartsSnapshot {
+    QString error;
     QList<PartsSnapshotRow> rows;
     QStringList stats;
     QString oilHtml;

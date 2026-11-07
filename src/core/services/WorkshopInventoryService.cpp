@@ -426,10 +426,10 @@ bool removePurchase(QSqlDatabase database, qint64 purchaseId, QString* errorText
     return true;
 }
 
-QVector<WorkshopInventoryMaterial> loadMaterials(QSqlDatabase database, QString* errorText)
+QVector<WorkshopInventoryMaterial> loadMaterials(QSqlDatabase database, QString* errorText, bool initializeSchema)
 {
     QVector<WorkshopInventoryMaterial> materials;
-    if (!ensureSchema(database, errorText)) return materials;
+    if (initializeSchema && !ensureSchema(database, errorText)) return materials;
 
     QSqlQuery query(database);
     if (!query.exec(QStringLiteral(
@@ -447,19 +447,20 @@ QVector<WorkshopInventoryMaterial> loadMaterials(QSqlDatabase database, QString*
         seen.insert(key);
         materials.append({key, canonicalMaterialName(query.value(1).toString()), displayUnit(query.value(2).toString())});
     }
+    if(query.lastError().isValid()){setError(errorText,query.lastError().text());return {};}
     std::sort(materials.begin(), materials.end(), [](const WorkshopInventoryMaterial& left, const WorkshopInventoryMaterial& right) {
         return QString::compare(left.name, right.name, Qt::CaseInsensitive) < 0;
     });
     return materials;
 }
-WorkshopInventorySnapshot buildSnapshot(QSqlDatabase database, const QDate& from, const QDate& to)
+WorkshopInventorySnapshot buildSnapshot(QSqlDatabase database, const QDate& from, const QDate& to, bool initializeSchema)
 {
     WorkshopInventorySnapshot snapshot;
     if (!from.isValid() || !to.isValid() || from > to) {
         snapshot.errorText = QString::fromUtf8("Некоректний період складу.");
         return snapshot;
     }
-    if (!ensureSchema(database, &snapshot.errorText)) return snapshot;
+    if (initializeSchema && !ensureSchema(database, &snapshot.errorText)) return snapshot;
 
     QVector<WorkshopInventoryPurchaseRow> purchasesUntilEnd;
     QHash<QString, LedgerState> states;
@@ -475,6 +476,7 @@ WorkshopInventorySnapshot buildSnapshot(QSqlDatabase database, const QDate& from
         return snapshot;
     }
     const auto payments = PurchasePaymentService::balances(database, &snapshot.errorText);
+    if(!snapshot.errorText.isEmpty())return snapshot;
     const auto remoteLinks=SupplierInvoiceLedger::activeLinks(database);
     while (purchaseQuery.next()) {
         if (purchaseQuery.value(11).toString() != "material") continue;
@@ -508,6 +510,7 @@ WorkshopInventorySnapshot buildSnapshot(QSqlDatabase database, const QDate& from
         purchasesUntilEnd.append(row);
     }
 
+    if(purchaseQuery.lastError().isValid()){snapshot={};snapshot.errorText=purchaseQuery.lastError().text();return snapshot;}
     const QString partsSource = tableOrViewExists(database, QStringLiteral("router_work_order_parts"))
         ? QStringLiteral("router_work_order_parts") : QStringLiteral("work_order_parts");
     const QString ordersSource = tableOrViewExists(database, QStringLiteral("router_work_orders"))
@@ -663,6 +666,7 @@ WorkshopInventorySnapshot buildSnapshot(QSqlDatabase database, const QDate& from
     std::sort(snapshot.balanceRows.begin(), snapshot.balanceRows.end(), [](const WorkshopInventoryBalanceRow& left, const WorkshopInventoryBalanceRow& right) {
         return QString::compare(left.materialName, right.materialName, Qt::CaseInsensitive) < 0;
     });
+    if(consumptionQuery.lastError().isValid()){snapshot={};snapshot.errorText=consumptionQuery.lastError().text();}
     return snapshot;
 }
 bool addPurchase(const WorkshopInventoryPurchaseInput& input, qint64* purchaseId, QString* errorText)

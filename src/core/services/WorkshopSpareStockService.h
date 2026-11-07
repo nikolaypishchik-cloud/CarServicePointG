@@ -32,7 +32,7 @@ bool addOrder(QSqlDatabase db, const WorkshopSpareOrder& input, qint64* id, QStr
               const QDate& initialReceiptDate = {}, bool publishCommitted = true);
 struct BatchLine { WorkshopSpareOrder part; int orderNumber = 0; };
 bool addBatch(QSqlDatabase db, const QVector<BatchLine>& lines, const QDate& receiptDate, QString* error = nullptr);
-QVector<WorkshopSpareOrder> orders(QSqlDatabase db, QString* error = nullptr);
+QVector<WorkshopSpareOrder> orders(QSqlDatabase db, QString* error = nullptr, bool initializeSchema = true);
 QVector<WorkshopSpareReceipt> receipts(QSqlDatabase db, qint64 id, QString* error = nullptr);
 bool receive(QSqlDatabase db, const WorkshopSpareOrder& expected, double quantity, const QDate& date,
              double paidAmount, QString* error = nullptr, bool publishCommitted = true);

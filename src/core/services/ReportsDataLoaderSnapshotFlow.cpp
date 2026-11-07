@@ -14,6 +14,7 @@
 #include "core/util/OilServiceClassifier.h"
 #include <QSqlError>
 #include "core/services/InvoiceRegistryService.h"
+#include "core/services/PartsReportQuery.h"
 
 namespace ReportsDataLoader {
 using namespace LocalSupport;
@@ -252,11 +253,11 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
     const QString connName = makeReportsWorkerConnectionName(QStringLiteral("parts"));
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connName);
-        db.setDatabaseName(dbPath);
-        if (!db.open()) {
-            snapshot.stats = { QString::fromUtf8("Помилка відкриття БД для звіту по запчастинах") };
+        if (!PartsReportQuery::openSnapshot(db,dbPath,&snapshot.error)) {
         } else {
-            const PartMarkupPolicyService::PolicySnapshot policySnapshot = PartMarkupPolicyService::loadPolicySnapshot(db);
+            const auto read=[&] {
+            const PartMarkupPolicyService::PolicySnapshot policySnapshot = PartMarkupPolicyService::loadPolicySnapshot(db,&snapshot.error);
+            if(!snapshot.error.isEmpty())return;
             struct PartReportRow {
                 QDate date;
                 int orderInternalNumber = 0;
@@ -281,26 +282,19 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
 
             QList<PartReportRow> rows;
             QMap<QString, QString> stockUnits;
-            for (const auto& material : WorkshopInventoryService::loadMaterials(db)) stockUnits.insert(material.key, material.unit);
+            for (const auto& material : WorkshopInventoryService::loadMaterials(db,&snapshot.error,false)) stockUnits.insert(material.key, material.unit);
+            if(!snapshot.error.isEmpty())return;
             QSet<int> issuedSpares;
             QSqlQuery spareQuery(db);
-            if (db.tables().contains("workshop_spare_movements") && spareQuery.exec("SELECT part_id FROM workshop_spare_movements WHERE operation='issue'"))
-                while (spareQuery.next()) issuedSpares.insert(spareQuery.value(0).toInt());
+            if(!spareQuery.exec("SELECT part_id FROM workshop_spare_movements WHERE operation='issue'")){snapshot.error=spareQuery.lastError().text();return;}
+            while(spareQuery.next())issuedSpares.insert(spareQuery.value(0).toInt());
+            if(spareQuery.lastError().isValid()){snapshot.error=spareQuery.lastError().text();return;}
             const QDate from = DateFormats::parseDate(df);
             const QDate to = DateFormats::parseDate(dt);
             QSqlQuery q(db);
-            q.prepare(
-                "SELECT p.id, p.ordered_at, substr(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at),1,10), COALESCE(p.order_number,0), COALESCE(wo.order_number,wo.number,p.order_number), "
-                "COALESCE(p.store,''), COALESCE(p.name,''), COALESCE(p.part_number,''), "
-                "COALESCE(wo.plate,''), COALESCE(wo.car,''), COALESCE(wo.vin,''), "
-                "COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END), "
-                "COALESCE(p.qty,1), COALESCE(p.amount,0), COALESCE(p.purchase_price,0), COALESCE(p.markup_percent,0), COALESCE(p.manual_markup_override,0), COALESCE(a.invoice_number,''), COALESCE(a.file_path,''), COALESCE(a.invoice_date,''), COALESCE(p.pricing_calc_version,1) "
-                "FROM router_work_order_parts p "
-                "JOIN router_work_orders wo ON wo.number = p.order_number "
-                "LEFT JOIN work_order_parts wp ON wp.id = p.id AND COALESCE(wp.order_number,'') = COALESCE(p.order_number,'') AND COALESCE(wp.order_uid,'') = COALESCE(p.order_uid,'') "
-                "LEFT JOIN work_order_part_attachments a ON a.part_id = wp.id");
+            if(!PartsReportQuery::execute(db,&q,&snapshot.error))return;
 
-            if (q.exec()) {
+            {
                 while (q.next()) {
                     PartReportRow row;
                     row.rowId = q.value(0).toInt();
@@ -343,6 +337,7 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 }
             }
 
+            if(q.lastError().isValid()){snapshot.error=q.lastError().text();return;}
             std::sort(rows.begin(), rows.end(), [](const PartReportRow& a, const PartReportRow& b) {
                 if (a.isOil != b.isOil) return !a.isOil;
                 if (a.store != b.store) {
@@ -457,7 +452,8 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                          money0(oilTotalPurchase), money0(oilTotalClient - oilTotalPurchase));
             }
 
-            const auto stock = WorkshopInventoryService::buildSnapshot(db,QDate::fromString(df,Qt::ISODate),QDate::fromString(dt,Qt::ISODate));
+            const auto stock = WorkshopInventoryService::buildSnapshot(db,QDate::fromString(df,Qt::ISODate),QDate::fromString(dt,Qt::ISODate),false);
+            if(!stock.errorText.isEmpty()){snapshot.error=stock.errorText;return;}
             QMap<QString,double> sold, received;
             for (const auto& movement : stock.consumptions) sold[movement.materialKey] += movement.quantity;
             for (const auto& purchase : stock.purchases) received[purchase.materialKey] += purchase.quantity;
@@ -478,8 +474,10 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 else if (part.deliveryDate.isValid()) delivered += part.qty;
                 else ordered += part.qty;
             }
+            if(!partsError.isEmpty()){snapshot.error=partsError;return;}
             QString stockError;
-            for (const auto& reserve : WorkshopSpareStockService::orders(db,&stockError)) onHand+=qMax(0.0,reserve.received-reserve.issued);
+            for (const auto& reserve : WorkshopSpareStockService::orders(db,&stockError,false)) onHand+=qMax(0.0,reserve.received-reserve.issued);
+            if(!stockError.isEmpty()){snapshot.error=stockError;return;}
             snapshot.stats = {QString::fromUtf8("Запчастини:"),
                 QString::fromUtf8("На складі зараз: %1 од.").arg(FormatUtils::smartQty(onHand)),
                 QString::fromUtf8("Замовлено: %1 од. · Доставлено: %2 од.").arg(FormatUtils::smartQty(ordered),FormatUtils::smartQty(delivered)),
@@ -544,8 +542,12 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 QString::fromUtf8("<table cellspacing='0' cellpadding='0'><tr><td align='left'>Видано в наряди:</td><td width='REPORT_TILE_VALUE_GAP'></td><td align='left'>%1 од.</td></tr><tr><td align='left'>Встановлено:</td><td width='REPORT_TILE_VALUE_GAP'></td><td align='left'>%2 од.</td></tr></table>").arg(quantity(issued),quantity(installed))};
             if(!stock.errorText.isEmpty())for(int i=0;i<2;++i)snapshot.tileBodies[i]=stock.errorText.toHtmlEscaped();
             if(!partsError.isEmpty()||!stockError.isEmpty())for(int i=2;i<4;++i)snapshot.tileBodies[i]=(partsError+" "+stockError).trimmed().toHtmlEscaped();
+            };read();
+            if(snapshot.error.isEmpty() && !db.commit())snapshot.error=db.lastError().text();
+            if(!snapshot.error.isEmpty())db.rollback();
         }
     }
+    if(!snapshot.error.isEmpty()){const auto error=snapshot.error;snapshot={};snapshot.error=error;snapshot.stats={QString::fromUtf8("Помилка читання запчастин: ")+error};}
     SqliteConnectionUtils::safeCloseAndRemoveDatabase(connName);
     return snapshot;
 }

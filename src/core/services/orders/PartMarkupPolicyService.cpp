@@ -13,6 +13,7 @@
 #include <QRegularExpression>
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QSqlError>
 #include <QSqlRecord>
 #include <QDate>
 #include <algorithm>
@@ -20,10 +21,10 @@
 
 namespace {
 
-QMap<QString,double> loadInventoryClientPrices(QSqlDatabase db, QMap<QString,double>* purchasePrices)
+QMap<QString,double> loadInventoryClientPrices(QSqlDatabase db, QMap<QString,double>* purchasePrices, QString* error = nullptr)
 {
     QMap<QString,double> prices;
-    if (!db.isValid() || !db.isOpen() || db.record("workshop_inventory_purchases").indexOf("client_price") < 0) return prices;
+    if (!db.isValid() || !db.isOpen()) {if(error)*error=QStringLiteral("Inventory pricing database is not open");return prices;}
     QSqlQuery query(db);
     const QString materialOnly = db.record("workshop_inventory_purchases").indexOf("stock_kind") >= 0
         ? QStringLiteral("stock_kind='material' AND ") : QString();
@@ -34,10 +35,11 @@ QMap<QString,double> loadInventoryClientPrices(QSqlDatabase db, QMap<QString,dou
         prices.insert(WorkshopInventoryService::normalizedMaterialKey(query.value(0).toString()),query.value(1).toDouble());
         purchasePrices->insert(WorkshopInventoryService::normalizedMaterialKey(query.value(0).toString()),query.value(2).toDouble());
     }
+    if(query.lastError().isValid()){if(error)*error=query.lastError().text();return {};}
     return prices;
 }
 
-QString settingString(QSqlDatabase db, const QString& settingKey, const QString& defaultValue)
+QString settingString(QSqlDatabase db, const QString& settingKey, const QString& defaultValue, QString* error = nullptr)
 {
     if (!db.isValid()) return Database::getSetting(settingKey, defaultValue).toString();
     if (!db.isOpen() && !db.open()) return defaultValue;
@@ -45,6 +47,7 @@ QString settingString(QSqlDatabase db, const QString& settingKey, const QString&
     q.prepare(QStringLiteral("SELECT value FROM settings WHERE \"key\"=? LIMIT 1"));
     q.addBindValue(settingKey);
     if (q.exec() && q.next()) return q.value(0).toString();
+    if(q.lastError().isValid() && error)*error=q.lastError().text();
     return defaultValue;
 }
 
@@ -68,9 +71,9 @@ QMap<QString,double> loadMarkupMapFromSetting(const QString& settingKey)
     return parseMarkupMap(Database::getSetting(settingKey, QStringLiteral("{}")).toString());
 }
 
-QMap<QString,double> loadMarkupMapFromSetting(QSqlDatabase db, const QString& settingKey)
+QMap<QString,double> loadMarkupMapFromSetting(QSqlDatabase db, const QString& settingKey, QString* error = nullptr)
 {
-    return parseMarkupMap(settingString(db, settingKey, QStringLiteral("{}")));
+    return parseMarkupMap(settingString(db, settingKey, QStringLiteral("{}"),error));
 }
 
 QString detectOilGradeFromText(const QString& text)
@@ -122,9 +125,9 @@ QList<PartMarkupPolicyService::OilMarkupRule> loadOilMarkupRules()
     return parseOilMarkupRules(Database::getSetting(QStringLiteral("settings.fin.oil_store_markups"), QStringLiteral("[]")).toString());
 }
 
-QList<PartMarkupPolicyService::OilMarkupRule> loadOilMarkupRules(QSqlDatabase db)
+QList<PartMarkupPolicyService::OilMarkupRule> loadOilMarkupRules(QSqlDatabase db, QString* error = nullptr)
 {
-    return parseOilMarkupRules(settingString(db, QStringLiteral("settings.fin.oil_store_markups"), QStringLiteral("[]")));
+    return parseOilMarkupRules(settingString(db, QStringLiteral("settings.fin.oil_store_markups"), QStringLiteral("[]"),error));
 }
 
 double lookupStoreMarkupPercent(const QMap<QString,double>& map, const QString& store, bool* found = nullptr)
@@ -212,14 +215,15 @@ PartMarkupPolicyService::PolicySnapshot PartMarkupPolicyService::loadPolicySnaps
     return snapshot;
 }
 
-PartMarkupPolicyService::PolicySnapshot PartMarkupPolicyService::loadPolicySnapshot(QSqlDatabase db)
+PartMarkupPolicyService::PolicySnapshot PartMarkupPolicyService::loadPolicySnapshot(QSqlDatabase db, QString* error)
 {
     PolicySnapshot snapshot;
-    snapshot.inventoryClientPrices = loadInventoryClientPrices(db, &snapshot.inventoryPurchasePrices);
-    snapshot.storeMarkups = loadMarkupMapFromSetting(db, QStringLiteral("settings.fin.store_markups"));
-    snapshot.oilRules = loadOilMarkupRules(db);
-    snapshot.defaultPartsMarkupPercent = settingString(db, QStringLiteral("settings.fin.parts_markup"), QStringLiteral("0")).toDouble();
-    snapshot.defaultOilMarkupPercent = settingString(db, QStringLiteral("settings.fin.oil_markup"), QStringLiteral("0")).toDouble();
+    if(error)error->clear();
+    snapshot.inventoryClientPrices = loadInventoryClientPrices(db, &snapshot.inventoryPurchasePrices,error);
+    snapshot.storeMarkups = loadMarkupMapFromSetting(db, QStringLiteral("settings.fin.store_markups"),error);
+    snapshot.oilRules = loadOilMarkupRules(db,error);
+    snapshot.defaultPartsMarkupPercent = settingString(db, QStringLiteral("settings.fin.parts_markup"), QStringLiteral("0"),error).toDouble();
+    snapshot.defaultOilMarkupPercent = settingString(db, QStringLiteral("settings.fin.oil_markup"), QStringLiteral("0"),error).toDouble();
     return snapshot;
 }
 

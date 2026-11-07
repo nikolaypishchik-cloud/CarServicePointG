@@ -26,7 +26,7 @@ public:
     };
 
     static PolicySnapshot loadPolicySnapshot();
-    static PolicySnapshot loadPolicySnapshot(QSqlDatabase db);
+    static PolicySnapshot loadPolicySnapshot(QSqlDatabase db, QString* error = nullptr);
     static double effectivePartMarkupPercent(const QString& partName, const QString& store);
     static double effectivePartMarkupPercent(const QString& partName, const QString& store, const PolicySnapshot& snapshot);
     static QString effectiveOilBrand(const QString& partName, const QString& store);
