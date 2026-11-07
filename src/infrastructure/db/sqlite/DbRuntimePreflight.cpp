@@ -1,5 +1,6 @@
 #include "infrastructure/db/sqlite/Db.h"
 #include "infrastructure/db/sqlite/DbContext.h"
+#include "infrastructure/db/sqlite/OrderDeletionPublication.h"
 #include "infrastructure/db/sqlite/DbWorkspaceOrderStateSupport.h"
 #include "infrastructure/db/sqlite/ScopedConnectionManager.h"
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
@@ -228,7 +229,8 @@ bool Database::runStartupRegistryRefresh(QString* errorText)
         return false;
     }
 
-    // Reject recorded identity conflicts before replay, DDL, mirror sync or cached readiness.
+    // A retired header can still have its exact former locator after a process interruption.
+    if (!OrderDeletionPublication::replay(d,errorText)) return false;
     if (!validateStartupRegistryIdentity(d, AppRuntime::registryDbFilePath(), errorText)) return false;
 
     // Pending canonical commits take precedence over cached stamps and bulk mirrors.

@@ -17,6 +17,7 @@ set(CS_INFRASTRUCTURE_SOURCES
     src/infrastructure/db/sqlite/DbSettingsSqlSupport.cpp
     src/infrastructure/db/sqlite/DbSourceFingerprintSupport.cpp
     src/infrastructure/db/sqlite/DbWorkspaceOrderStateSupport.cpp
+    src/infrastructure/db/sqlite/OrderDeletionPublication.cpp
     src/infrastructure/db/sqlite/DbCanonicalRewriteSupport.cpp
     src/infrastructure/db/sqlite/DbCanonicalRewriteExecutionSupport.cpp
     src/infrastructure/db/sqlite/DbCanonicalRewriteFinalizeSupport.cpp

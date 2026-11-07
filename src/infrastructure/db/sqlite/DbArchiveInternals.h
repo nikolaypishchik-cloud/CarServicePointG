@@ -42,4 +42,5 @@ bool importSingleLegacyOrderToActive(int orderNumber, QString* errorText);
 bool ensureWorkspaceOrderStateSchema(QSqlDatabase database);
 bool purgeActiveOrderGraph(QSqlDatabase database, int orderNumber, QString* errorText = nullptr);
 bool purgeDeletedOrderGraph(QSqlDatabase database, int orderNumber, QString* errorText);
+bool recordConfirmedOrderDeletion(QSqlDatabase database, int orderNumber, QString* errorText);
 bool purgeVerifiedArchivedOrderGraph(QSqlDatabase database, int orderNumber, QString* errorText);

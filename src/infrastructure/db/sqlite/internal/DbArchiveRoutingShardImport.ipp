@@ -445,11 +445,13 @@ static bool purgeOrderGraphImpl(QSqlDatabase database, int orderNumber, QString*
                              QStringLiteral("work_order_parts"), QStringLiteral("work_order_services"), QStringLiteral("work_orders")};
     request.beginErrorFallback = QStringLiteral("Не вдалося розпочати видалення active order graph.");
     request.commitErrorFallback = QStringLiteral("Не вдалося завершити видалення active order graph.");
-    if (reason == PurgeReason::ConfirmedDeletion) request.changedTables.append(QStringLiteral("order_creation_reservations"));
+    if (reason == PurgeReason::ConfirmedDeletion) request.changedTables.append(QStringList{
+        "order_creation_reservations","order_deletion_publications","order_registry","workspace_order_state"});
 
     const auto tx = MutationExecutor::execute(database, request, [&](QSqlDatabase& txDb, QString* txError) {
         if (reason == PurgeReason::ConfirmedDeletion
-            && !OrderIdentityService::reserveIdentityBeforeDeletion(txDb, orderNumber, txError)) return false;
+            && (!OrderIdentityService::reserveIdentityBeforeDeletion(txDb, orderNumber, txError)
+                || !recordConfirmedOrderDeletion(txDb, orderNumber, txError))) return false;
         return purgeOrderGraphRowsInOwnedTransaction(txDb, orderNumber, txError, reason == PurgeReason::ArchivedCopy,
                                                     reason == PurgeReason::ConfirmedDeletion);
     });
@@ -457,6 +459,7 @@ static bool purgeOrderGraphImpl(QSqlDatabase database, int orderNumber, QString*
         if (errorText) *errorText = tx.errorText;
         return false;
     }
+    if (reason == PurgeReason::ConfirmedDeletion) return true;
     removeRegistryMirrorRow(database, orderNumber);
     removeWorkspaceOrderStateEntry(database, orderNumber);
     return true;

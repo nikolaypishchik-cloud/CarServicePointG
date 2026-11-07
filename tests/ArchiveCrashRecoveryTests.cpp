@@ -26,6 +26,7 @@ class ArchiveCrashRecoveryTests : public QObject {
         for(const auto& mode:{QString("seed"),QString("crash"),QString("resume")}) {
             QProcess process;auto env=QProcessEnvironment::systemEnvironment();
             env.insert("CS_ARCHIVE_ID",identity);env.insert("CS_ARCHIVE_MODE",mode);
+            env.insert("CS_ARCHIVE_BOUNDARY",phase);
             env.insert("CS_ARCHIVE_CRASH",mode=="crash"?phase:QString());
             process.setProcessEnvironment(env);
             const QString report=QDir(root).filePath(identity+"-"+mode+".txt");
@@ -57,6 +58,8 @@ private slots:
     void routed(){runBoundary("routed");}
     void beforePurgeCommit(){runBoundary("before_purge_commit");}
     void afterPurgeCommit(){runBoundary("after_purge_commit");}
+    void deletionSourceCommitted(){runBoundary("deletion_source_committed");}
+    void deletionRegistryCommitted(){runBoundary("deletion_registry_committed");}
     void restoredProfileWithProtectedSettings() {
         const QString identity="Safety-archive-"+QUuid::createUuid().toString(QUuid::Id128).left(8);
         const QString source=QDir(root).filePath("source-"+identity);
@@ -92,6 +95,8 @@ private slots:
         const auto mode=qEnvironmentVariable("CS_ARCHIVE_MODE");QVERIFY(!mode.isEmpty());
         auto db=QSqlDatabase::addDatabase("QSQLITE","carservice_main");db.setDatabaseName(App::activeDbFilePath());QVERIFY(db.open());
         QString error;
+        const QString boundary=qEnvironmentVariable("CS_ARCHIVE_BOUNDARY");
+        const bool deletion=boundary.startsWith("deletion_");
         if(mode=="seed") {
             QVERIFY(Database::ensureSchema());QVERIFY(ensureWorkspaceOrderStateSchema(db));QVERIFY(ensureRouterCacheSchema(db));
             QVERIFY(StaffAccountService::ensureSchema(db,&error));QVERIFY(AccessControlService::ensureSchema(db,&error));
@@ -113,6 +118,12 @@ private slots:
             const QString attachment=QDir(App::dataDir()).filePath("synthetic-attachment.txt");
             QFile file(attachment);QVERIFY(file.open(QIODevice::WriteOnly));QCOMPARE(file.write("synthetic attachment"),qint64(20));file.close();
             settings.setValue("test/absolute_attachment",attachment);settings.sync();QCOMPARE(settings.status(),QSettings::NoError);
+            if(deletion){
+                QVERIFY(ensurePartRegistrySchemaFile());
+                QSqlQuery registry(QSqlDatabase::database(dbRegistryConnectionName()));
+                QVERIFY(registry.exec("INSERT INTO order_registry(order_number,order_uid,order_year,visible_order_number) VALUES(1,'crash-order',2026,1)"));
+                QVERIFY(registry.exec("INSERT INTO part_registry(entry_key,order_number,order_uid,part_uid) VALUES('test-part',1,'crash-order','retained-original')"));
+            }
             return;
         }
         if(mode=="profile") {
@@ -133,6 +144,35 @@ private slots:
             return;
         }
         ActivityAuditService::setCurrentActor({"test-owner","Test Owner","owner","test"});
+        if(deletion){
+            if(mode=="crash"){
+                const bool ok=Database::hardDeleteOrder(1,&error);
+                QFAIL(qPrintable(QString("Deletion crash point not reached: %1 %2").arg(ok).arg(error)));
+            }
+            QSqlQuery q(db);
+            QVERIFY(q.exec("SELECT pending FROM order_deletion_publications WHERE internal_number=1 AND order_uid='crash-order'"));
+            QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),1);q.finish();
+            QVERIFY(ensurePartRegistrySchemaFile());
+            QSqlQuery registry(QSqlDatabase::database(dbRegistryConnectionName()));
+            const int expected=boundary=="deletion_source_committed"?1:0;
+            for(const auto& table:QStringList{"order_registry","part_registry"}){
+                QVERIFY(registry.exec("SELECT COUNT(*) FROM "+table+" WHERE order_uid='crash-order'"));
+                QVERIFY(registry.next());QCOMPARE(registry.value(0).toInt(),expected);registry.finish();
+            }
+            QVERIFY2(Database::runStartupSchemaCheck(&error),qPrintable(error));
+            QVERIFY2(Database::runStartupRegistryRefresh(&error),qPrintable(error));
+            QVERIFY2(Database::hardDeleteOrder(1,&error),qPrintable(error));
+            QVERIFY(q.exec("SELECT pending FROM order_deletion_publications WHERE internal_number=1"));
+            QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),0);q.finish();
+            QVERIFY(q.exec("SELECT COUNT(*) FROM work_orders"));QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),0);q.finish();
+            QVERIFY(q.exec("SELECT SUM(amount_cents) FROM client_payments WHERE order_uid='crash-order'"));
+            QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),1000);q.finish();
+            for(const auto& table:QStringList{"order_registry","part_registry"}){
+                QVERIFY(registry.exec("SELECT COUNT(*) FROM "+table+" WHERE order_uid='crash-order'"));
+                QVERIFY(registry.next());QCOMPARE(registry.value(0).toInt(),0);registry.finish();
+            }
+            return;
+        }
         if(mode=="crash") {
             const bool ok=OrderArchiveShardSqlSupport::archiveSingleActiveOrderToShard(db,1,&error);
             QFAIL(qPrintable(QString("Crash point not reached; result=%1 error=%2").arg(ok).arg(error)));

@@ -3976,10 +3976,9 @@ void ReportsOrdersTests::deletedHistoricalOrderKeepsIdentity()
         auto db = Database::db();
         QVERIFY(Database::ensureSchema());
         QSqlQuery q(db);
-        QVERIFY2(q.exec("INSERT INTO masters(id,name,role) VALUES('delete-master','Test','master')"), qPrintable(q.lastError().text()));
         QVERIFY2(q.exec("INSERT INTO work_orders(number,order_uid,order_number,order_year,opened_at,status,"
                         "plate,plate_norm,car,client,master_id) VALUES(91,'old-order-to-delete',42,2024,"
-                        "'2024-11-01','open','AA1111AA','AA1111AA','Test car','Test client','delete-master')"), qPrintable(q.lastError().text()));
+                        "'2024-11-01','open','AA1111AA','AA1111AA','Test car','Test client','m1')"), qPrintable(q.lastError().text()));
         QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db, {}, QDate(2024,11,2)), 43);
         QVERIFY(q.exec("CREATE TRIGGER retain_header BEFORE DELETE ON work_orders BEGIN SELECT RAISE(IGNORE); END"));
         QTest::ignoreMessage(QtCriticalMsg,QRegularExpression("^DB_TRANSACTION_CONTEXT phase= rollback_ok  transactionId= [0-9a-f-]{36}  owner= TransactionRunner  operationId= tx_runner_[0-9]+  connection= carservice_main  threadId= [0-9]+  error= step_failed$"));
@@ -3992,13 +3991,41 @@ void ReportsOrdersTests::deletedHistoricalOrderKeepsIdentity()
         q.finish();
         QVERIFY(q.exec("DROP TRIGGER retain_header"));
         error.clear();
-        QVERIFY2(Database::hardDeleteOrder(91, &error), qPrintable(error));
+        QSqlQuery registry(QSqlDatabase::database(dbRegistryConnectionName()));
+        QVERIFY(registry.exec("INSERT INTO order_registry(order_number,order_uid,visible_order_number,order_year) VALUES(91,'different-owner',42,2024)"));
+        QVERIFY(!Database::hardDeleteOrder(91,&error));
+        QVERIFY(q.exec("SELECT order_uid FROM work_orders WHERE number=91"));
+        QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("old-order-to-delete")); q.finish();
+        QVERIFY(registry.exec("UPDATE order_registry SET order_uid='old-order-to-delete' WHERE order_number=91"));
+        QVERIFY(registry.exec("INSERT INTO part_registry(entry_key,order_number,order_uid) VALUES('unverified-part',91,'different-owner')"));
+        QVERIFY(!Database::hardDeleteOrder(91,&error));
+        QVERIFY(q.exec("SELECT order_uid FROM work_orders WHERE number=91")); QVERIFY(q.next());
+        QCOMPARE(q.value(0).toString(),QString("old-order-to-delete")); q.finish();
+        QVERIFY(registry.exec("UPDATE part_registry SET order_uid='old-order-to-delete' WHERE entry_key='unverified-part'"));
+        QVERIFY(registry.exec("CREATE TRIGGER delay_publication BEFORE DELETE ON order_registry BEGIN SELECT RAISE(IGNORE); END"));
+        QVERIFY(!Database::hardDeleteOrder(91,&error));
+        QVERIFY(q.exec("SELECT COUNT(*) FROM work_orders WHERE number=91")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),0); q.finish();
+        QVERIFY(registry.exec("DROP TRIGGER delay_publication"));
+        QVERIFY(q.exec("CREATE TRIGGER delay_ack BEFORE UPDATE OF pending ON order_deletion_publications "
+                       "WHEN NEW.pending=0 BEGIN SELECT RAISE(IGNORE); END"));
         QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db, {}, QDate(2024,11,2)), 43);
     }
     Database::close();
     QVERIFY2(Database::openPrepared(&error), qPrintable(error));
+    QVERIFY2(Database::runStartupSchemaCheck(&error),qPrintable(error));
+    QVERIFY2(Database::runStartupMigrationCheck(&error),qPrintable(error));
     auto db = Database::db();
     QSqlQuery q(db);
+    QVERIFY(!Database::runStartupRegistryRefresh(&error));
+    QVERIFY2(error.contains("acknowledgement"),qPrintable(error));
+    QVERIFY(q.exec("SELECT pending FROM order_deletion_publications WHERE internal_number=91"));
+    QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),1); q.finish();
+    QVERIFY(q.exec("DROP TRIGGER delay_ack"));
+    QVERIFY2(Database::runStartupRegistryRefresh(&error),qPrintable(error));
+    QSqlQuery projection(QSqlDatabase::database(dbRegistryConnectionName()));
+    QVERIFY(projection.exec("SELECT COUNT(*) FROM order_registry WHERE order_number=91")); QVERIFY(projection.next());
+    QCOMPARE(projection.value(0).toInt(),0); projection.finish();
+    QVERIFY2(Database::hardDeleteOrder(91,&error),qPrintable(error));
     QVERIFY(q.exec("SELECT COUNT(*) FROM work_orders WHERE order_uid='old-order-to-delete'"));
     QVERIFY(q.next());
     QCOMPARE(q.value(0).toInt(), 0);

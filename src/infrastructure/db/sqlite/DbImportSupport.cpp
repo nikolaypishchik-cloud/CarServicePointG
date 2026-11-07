@@ -25,6 +25,7 @@ bool inspectRewriteTarget(QSqlDatabase database, bool* populated, QString* error
     // predate local orders, payments and catalogue edits after a normal restart.
     *populated = false;
     const QStringList tables = {"workspace_order_state", "order_registry", "work_orders",
+        "order_creation_reservations", "annual_order_counters", "order_deletion_publications",
         "work_order_parts", "work_order_services", "service_masters", "outsource_repairs",
         "planning_calendar", "expenses", "parts_catalog", "deleted_imports", "masters"};
     for (const auto& table : tables) {

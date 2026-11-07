@@ -4,6 +4,7 @@
 #include "infrastructure/db/sqlite/DbArchiveRoutingSupportModulePrelude.h"
 #include "core/services/orders/LocalWorkshopBackend.h"
 #include "infrastructure/db/sqlite/DbContext.h"
+#include "infrastructure/db/sqlite/OrderDeletionPublication.h"
 #include <QScopeGuard>
 
 namespace {
@@ -712,22 +713,40 @@ bool Database::refreshOrderRegistry(int orderNumber, QString* errorText)
     return true;
 }
 
+bool recordConfirmedOrderDeletion(QSqlDatabase source,int orderNumber,QString* errorText)
+{
+    const auto before=LegacyMutationLogSupport::snapshotOrder(source,orderNumber);
+    const auto uid=LegacyMutationLogSupport::orderUidForNumber(source,orderNumber);
+    if(before.isEmpty() || before=="{}" || uid.isEmpty()){
+        if(errorText)*errorText="Cannot capture deleted order for the audit log";
+        return false;
+    }
+    return OrderDeletionPublication::record(source,orderNumber,errorText)
+        && LegacyMutationLogSupport::logMutation(source,"order","delete",orderNumber,uid,QString::number(orderNumber),before,"{}",errorText);
+}
+
 bool Database::hardDeleteOrder(int orderNumber, QString* errorText)
 {
+    if(errorText)errorText->clear();
     if (orderNumber <= 0) return true;
-    const QString beforeJson = LegacyMutationLogSupport::snapshotOrder(db(), orderNumber);
-    const QString orderUid = LegacyMutationLogSupport::orderUidForNumber(db(), orderNumber);
+    auto source=db(errorText);
+    if(!source.isOpen() || !OrderDeletionPublication::replay(source,errorText))return false;
+    QSqlQuery header(source);
+    header.prepare("SELECT order_uid FROM work_orders WHERE number=?");
+    header.addBindValue(orderNumber);
+    if(!header.exec()){if(errorText)*errorText=header.lastError().text();return false;}
+    if(!header.next()){
+        if(header.lastError().isValid()){if(errorText)*errorText=header.lastError().text();return false;}
+        return OrderDeletionPublication::alreadyDeleted(source,orderNumber,errorText);
+    }
+    const auto orderUid=header.value(0).toString();header.finish();
+    if(!validateStartupRegistryIdentity(source,AppRuntime::registryDbFilePath(),errorText)
+       || !OrderDeletionPublication::validatePartLocators(orderNumber,orderUid,errorText))return false;
 
     const auto blocked=LocalWorkshopBackend::deletionBlockReason(db(),orderUid);
     if(!blocked.isEmpty()){if(errorText)*errorText=blocked;return false;}
 
-    if (!purgeDeletedOrderGraph(db(), orderNumber, errorText)) return false;
-    if (!removeOrderFromRegistry(orderNumber, errorText)) return false;
-
-    QString logError;
-    LegacyMutationLogSupport::logMutation(db(), QStringLiteral("order"), QStringLiteral("delete"), orderNumber, orderUid, QString::number(orderNumber), beforeJson, QStringLiteral("{}"), &logError);
-    if (!logError.trimmed().isEmpty()) qWarning() << "Order delete mutation log failed:" << logError;
-    return true;
+    return purgeDeletedOrderGraph(source,orderNumber,errorText) && OrderDeletionPublication::replay(source,errorText);
 }
 
 bool Database::removeOrderFromRegistry(int orderNumber, QString* errorText)

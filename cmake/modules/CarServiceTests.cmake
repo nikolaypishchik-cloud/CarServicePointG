@@ -49,6 +49,7 @@ if (CS_INTERNAL_QT_TESTS_AVAILABLE)
     add_executable(ArchiveCrashRecoveryTests
         tests/ArchiveCrashRecoveryTests.cpp
         src/infrastructure/db/sqlite/OrderArchiveShardSqlSupport.cpp
+        src/infrastructure/db/sqlite/OrderDeletionPublication.cpp
         src/infrastructure/db/sqlite/DbArchiveRoutingStageSupport.cpp
         resources/resources.qrc)
     set_target_properties(ArchiveCrashRecoveryTests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests")
@@ -59,7 +60,7 @@ if (CS_INTERNAL_QT_TESTS_AVAILABLE)
     add_test(NAME ArchiveCrashRecoveryTests COMMAND ${CS_PYTHON_NO_BYTECODE_CMD}
         "${CMAKE_SOURCE_DIR}/scripts/run_qt_test.py" $<TARGET_FILE:ArchiveCrashRecoveryTests>
         prepared copyCommitted verified routeCommitted routed beforePurgeCommit afterPurgeCommit
-        restoredProfileWithProtectedSettings)
+        restoredProfileWithProtectedSettings deletionSourceCommitted deletionRegistryCommitted)
     set_tests_properties(ArchiveCrashRecoveryTests PROPERTIES TIMEOUT 300
         ENVIRONMENT "QT_QPA_PLATFORM=windows;CS_TEST_DATA_ROOT=${CMAKE_BINARY_DIR}/change-gate-test-data/archive-crash;CS_TEST_PYTHON=${Python3_EXECUTABLE};PYTHONUTF8=1")
 
