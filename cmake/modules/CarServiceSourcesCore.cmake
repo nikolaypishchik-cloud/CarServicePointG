@@ -27,6 +27,7 @@ set(CS_CORE_SOURCES
     src/app/Logger.cpp
     src/app/Settings.cpp
     src/app/StartupPipeline.cpp
+    src/app/AcceptanceProfile.cpp
     src/app/update/UpdateService.cpp
     src/app/update/UpdateServiceSupport.cpp
     src/core/diagnostics/RuntimeLoggingControl.cpp

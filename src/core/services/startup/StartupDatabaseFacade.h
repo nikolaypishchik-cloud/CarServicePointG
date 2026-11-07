@@ -11,5 +11,5 @@ public:
     static bool prepareRuntime(QString* errorText);
     static bool openPrepared(QString* errorText);
     static bool runStartupSchemaCheck(QString* errorText);
-    static void setSetting(QStringView key, const QString& value);
+    static bool setSetting(QStringView key, const QString& value);
 };

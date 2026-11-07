@@ -172,14 +172,16 @@ const QList<StartupPipeline::PhaseContract>& StartupPipeline::contracts()
     return kContracts;
 }
 
-StartupPipeline::Result StartupPipeline::runCoreStartup(QApplication& app)
+StartupPipeline::Result StartupPipeline::runCoreStartup(QApplication& app, bool isolatedAcceptance)
 {
     Result result;
     result.ok = false;
 
     if (!runPhase(Phase::Bootstrap, [&](QString*) {
-            QApplication::setApplicationName(App::appName());
-            QApplication::setOrganizationName(App::orgName());
+            if (!isolatedAcceptance) {
+                QApplication::setApplicationName(App::appName());
+                QApplication::setOrganizationName(App::orgName());
+            }
             QApplication::setApplicationDisplayName(QStringLiteral("CarServicePointG_Sergiy&Soul"));
             app.setQuitOnLastWindowClosed(false);
             return true;

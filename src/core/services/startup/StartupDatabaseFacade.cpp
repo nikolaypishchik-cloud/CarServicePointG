@@ -27,7 +27,7 @@ bool StartupDatabaseFacade::runStartupSchemaCheck(QString* errorText)
     return Database::runStartupSchemaCheck(errorText);
 }
 
-void StartupDatabaseFacade::setSetting(QStringView key, const QString& value)
+bool StartupDatabaseFacade::setSetting(QStringView key, const QString& value)
 {
-    Database::setSetting(key.toString(), value);
+    return Database::setSetting(key.toString(), value);
 }

@@ -38,7 +38,7 @@ public:
         QString errorText;
     };
 
-    static Result runCoreStartup(QApplication& app);
+    static Result runCoreStartup(QApplication& app, bool isolatedAcceptance = false);
     static const QList<PhaseContract>& contracts();
 
     static void beginPhase(Phase phase);

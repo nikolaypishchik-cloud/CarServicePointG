@@ -1,4 +1,5 @@
 #include "app/App.h"
+#include "app/AcceptanceProfile.h"
 #include "ui/common/dialogs/OrderClosureFlow.h"
 #include "AppVersion.h"
 #include "app/AppContext.h"
@@ -95,6 +96,19 @@ int main(int argc, char *argv[])
         QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
         QLocale::setDefault(QLocale(QLocale::Ukrainian, QLocale::Ukraine));
         QApplication app(argc, argv);
+        const bool isolatedAcceptance = app.arguments().contains(QStringLiteral("--isolated-acceptance"));
+        const bool checkIsolatedStartup = app.arguments().contains(QStringLiteral("--check-isolated-startup"));
+        if (checkIsolatedStartup && !isolatedAcceptance) {
+            qCritical() << "Startup check requires --isolated-acceptance";
+            return 2;
+        }
+        QString acceptanceRoot;
+        QString acceptanceError;
+        if (isolatedAcceptance) {
+            acceptanceRoot = AcceptanceProfile::create(&acceptanceError);
+            if (acceptanceRoot.isEmpty()) { qCritical().noquote() << acceptanceError; return 2; }
+            qInfo().noquote() << "Acceptance profile:" << acceptanceRoot;
+        }
         Q_INIT_RESOURCE(resources);
         QTranslator ukrainianDialogs;
         if (ukrainianDialogs.load(QStringLiteral(":/translations/qtbase_uk.qm"))) {
@@ -138,13 +152,16 @@ int main(int argc, char *argv[])
         splash.repaint();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 
-        const StartupPipeline::Result startupResult = StartupPipeline::runCoreStartup(app);
+        const StartupPipeline::Result startupResult = StartupPipeline::runCoreStartup(app, isolatedAcceptance);
         if (!startupResult.ok) {
             qCritical() << "Startup failed at phase" << StartupPipeline::phaseKey(startupResult.failedPhase)
                         << ':' << startupResult.errorText;
             return 1;
         }
 
+        if (isolatedAcceptance && !AcceptanceProfile::configureServices(acceptanceRoot,&acceptanceError)) {
+            qCritical().noquote() << acceptanceError; return 2;
+        }
         qInfo() << "Startup core completed";
         AppContext::instance().initializeRuntimeServices();
         if (!AppContext::instance().runtimeServicesHealthy()) {
@@ -457,6 +474,8 @@ int main(int argc, char *argv[])
         // A wall-clock fallback would bypass the remaining visible animation.
         splash.setStartupReady();
 
+        if (checkIsolatedStartup)
+            QTimer::singleShot(0, &app, &QCoreApplication::quit);
         return app.exec();
     } catch (const std::exception& e) {
         qCritical() << "Fatal std::exception during phase" << StartupPipeline::currentPhaseKey() << ':' << e.what();
