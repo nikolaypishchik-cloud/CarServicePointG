@@ -56,3 +56,13 @@ Check full-service repetition separately; repeated projection/correspondence is
 not proof of full migration idempotency. Run the complete acceptance suite on the
 new binary with the existing approved invoice fixtures. Historical 8-row and
 122/122 passes do not certify this patch. Do not change dist before acceptance.
+
+## Short independent boundary checks
+
+After publishing 2121c1c90abb890bb289300b7d169ccfcd40173b, the focused runner
+also exercised child-only collisions with an empty order-key map: source order
+7 stayed 7 while its service/part IDs became 22 and their link stayed intact.
+An existing maximum service ID 2147483647 caused an explicit allocation failure;
+the synthetic transaction was rolled back. Command:
+`bash scripts/run_migration_child_projection.sh` (exit 0).
+This does not close archive-retention or full-service-repeat acceptance.

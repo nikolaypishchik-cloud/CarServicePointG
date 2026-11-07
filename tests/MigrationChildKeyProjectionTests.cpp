@@ -49,6 +49,25 @@ int main(int argc,char** argv) {
   sql("SELECT COUNT(*) FROM projected.work_order_services child JOIN projected.work_order_services parent ON parent.id=child.parent_id JOIN projected.service_masters m ON m.service_id=parent.id WHERE child.service_uid='service-b' AND parent.service_uid='service-a'");check(q.next() && q.value(0).toInt()==1);q.finish();
   sql("DETACH DATABASE projected");
  }
+ // Independent case: only child keys collide; order projection map stays empty.
+ sql("ATTACH DATABASE '"+dir.filePath("source.db")+"' AS source");
+ check(db.transaction());
+ sql("UPDATE main.work_orders SET number=9 WHERE number=7");
+ sql("UPDATE main.work_order_services SET order_number=9");
+ sql("UPDATE main.work_order_parts SET order_number=9");
+ MigrationOrderKeys::Map childOnly;
+ check(MigrationOrderKeys::plan(db,"source",&childOnly,&error));
+ check(childOnly.isEmpty() && !childOnly.children.isEmpty());check(db.rollback());
+ check(MigrationOrderKeys::project(dir.filePath("source.db"),dir.filePath("child-only.db"),childOnly,&error));
+ sql("ATTACH DATABASE '"+dir.filePath("child-only.db")+"' AS child_only");
+ sql("SELECT p.id,s.id,p.order_number,s.order_number FROM child_only.work_order_parts p JOIN child_only.work_order_services s ON s.id=p.service_id");
+ check(q.next() && q.value(0).toInt()==22 && q.value(1).toInt()==22 && q.value(2).toInt()==7 && q.value(3).toInt()==7);q.finish();
+ sql("DETACH DATABASE child_only");
+ check(db.transaction());sql("INSERT INTO main.work_order_services(id) VALUES(2147483647)");
+ MigrationOrderKeys::Map exhausted;
+ check(!MigrationOrderKeys::plan(db,"source",&exhausted,&error));
+ check(error.contains("exhausted"));check(db.rollback());error.clear();
+ sql("DETACH DATABASE source");
  sql("ATTACH DATABASE '"+dir.filePath("projection0.db")+"' AS legacy_rewrite");
  CanonicalRewriteSourceSchema projected,original;
  check(loadCanonicalRewriteSourceSchema(db,"legacy_rewrite",&projected,&error));
