@@ -1,3 +1,4 @@
+#include "AdminPayrollIdentityFixture.h"
 #include "PayrollGraphProjectionFixture.h"
 #include "PayrollIdentityFixture.h"
 #include "ui/tabs/reports/ReportsDialogSupport.h"
@@ -187,6 +188,10 @@ private slots:
         QVERIFY(source.open());QString error;
         QVERIFY2(PayrollGraphProjectionFixture::run(source,&error),qPrintable(error));
     }
+    void adminPayrollIdentityOwnersAndRepeat() {
+        QString error;QVERIFY2(AdminPayrollIdentityFixture::run(&error),qPrintable(error));
+    }
+
     void payrollIdentityOwnersSplitAndRepeat() {
         QString error;QVERIFY2(PayrollIdentityFixture::run(db,&error),qPrintable(error));
         QVERIFY(!ReportsSyncSupport::setPayrollOrderAbsent("m",1,true,&error));QVERIFY(!error.isEmpty());

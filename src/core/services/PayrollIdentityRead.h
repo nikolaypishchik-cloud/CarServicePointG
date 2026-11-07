@@ -48,6 +48,37 @@ struct Index {
         const auto u=row.value(uid).toString().trimmed();return u.isEmpty()?numbers.value(row.value(number).toString()):uids.value(u);
     }
 };
+// Admin detail uses header totals, but service captions still require a proven owner.
+struct AdminTitles {
+    QList<Record> headers;
+    Index index;
+    QHash<int,QStringList> titles;
+    QSet<int> invalid;
+    bool hasUid=false;
+    bool loadFrom(QSqlDatabase db,QString* error) {
+        QList<Record> services;
+        if(!load(db,"router_work_orders",{"number"},{"order_uid"},&headers,error)
+            ||!load(db,"router_work_order_services",{"order_number","title"},{"order_uid"},&services,error))return false;
+        index=Index(headers,"order_uid","number");
+        hasUid=!headers.isEmpty()&&headers.first().contains("order_uid");
+        for(const auto& service:services) {
+            const auto owners=index.matches(service,"order_uid","order_number");
+            if(owners.size()!=1) {
+                const auto affected=owners.isEmpty()?index.numbers.value(service.value("order_number").toString()):owners;
+                for(int owner:affected)invalid.insert(owner);
+                continue;
+            }
+            if(!service.value("title").isNull())titles[owners.first()].append(service.value("title").toString());
+        }
+        return true;
+    }
+    bool text(const QVariant& number,const QVariant& uid,QString* output,QString* error)const {
+        const auto owners=index.matches({{"number",number},{"order_uid",uid}},"order_uid","number");
+        if(owners.size()!=1 || invalid.contains(owners.first()))
+            return reject(error,"Payroll admin service owner is ambiguous or unavailable");
+        *output=titles.value(owners.first()).join(", ");return true;
+    }
+};
 struct Graph {
     QList<Record> headers,services,assignments,adjustments,outsources;
     Index orderIndex,serviceIndex;

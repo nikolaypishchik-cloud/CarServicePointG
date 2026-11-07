@@ -172,17 +172,19 @@ QList<PayrollOrderRow> collectPayrollOrdersForMaster(QSqlDatabase db,const QStri
     }
 
     if (role == QStringLiteral("admin")) {
+        PayrollIdentityRead::AdminTitles titles;
+        if(!titles.loadFrom(db,&failure))return fail();
         QSqlQuery q(db);
         q.prepare(
             QStringLiteral("SELECT wo.number, COALESCE(wo.order_number,wo.number), substr(COALESCE(NULLIF(wo.opened_at,''),''),1,10), substr(NULLIF(TRIM(wo.closed_at),''),1,10), "
                            "COALESCE(wo.plate,''), COALESCE(wo.car,''), "
-                           "COALESCE((SELECT GROUP_CONCAT(s.title, ', ') FROM router_work_order_services s WHERE s.order_number = wo.number), ''), "
+                           "%1, "
                            "COALESCE(wo.works_sum,0) "
                            "FROM router_work_orders wo "
                            "WHERE wo.status='closed' "
                            "AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) >= date(?) "
                            "AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) <= date(?) "
-                           "ORDER BY date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) DESC, wo.number DESC"));
+                           "ORDER BY date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) DESC, wo.number DESC").arg(titles.hasUid?QStringLiteral("wo.order_uid"):QStringLiteral("NULL")));
         q.addBindValue(df);
         q.addBindValue(dt);
         if(!q.exec()){failure=q.lastError().text();return fail();}
@@ -194,7 +196,7 @@ QList<PayrollOrderRow> collectPayrollOrdersForMaster(QSqlDatabase db,const QStri
                 row.dateStart = ReportsDateUtils::displayDate(q.value(2).toString());
                 row.dateEnd = ReportsDateUtils::displayDate(q.value(3).toString(), q.value(2).toString());
                 row.car = composePlateCarForUi(q.value(4).toString(), q.value(5).toString());
-                row.works = q.value(6).toString();
+                if(!titles.text(q.value(0),q.value(6),&row.works,&failure))return fail();
                 row.amount = q.value(7).toDouble();
                 row.absent = false;
                 row.masterAmount = FormatUtils::roundMoneyValue(row.amount * percent / 100.0);
