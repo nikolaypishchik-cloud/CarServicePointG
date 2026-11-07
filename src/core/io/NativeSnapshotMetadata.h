@@ -115,6 +115,11 @@ inline bool apply(const QString& path,const QJsonObject& value,QString* error)
     if(!SetFileAttributesW(native.c_str(),mutableBits?mutableBits:FILE_ATTRIBUTE_NORMAL))return fail(error,"Cannot restore snapshot file attributes");
     const DWORD security=OWNER_SECURITY_INFORMATION|GROUP_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION
         |((control&SE_DACL_PROTECTED)?PROTECTED_DACL_SECURITY_INFORMATION:UNPROTECTED_DACL_SECURITY_INFORMATION);
+    // NTFS consumes the request bit when applying an auto-inherited DACL.
+    // Without it the ACEs survive but the captured auto-inheritance flag is lost.
+    if((control&SE_DACL_AUTO_INHERITED)
+        && !SetSecurityDescriptorControl(descriptor,SE_DACL_AUTO_INHERIT_REQ,SE_DACL_AUTO_INHERIT_REQ))
+        return fail(error,"Cannot request restoration of DACL inheritance: "+QString::number(GetLastError()));
     // Replay the serialized descriptor control flags as well as its ACL entries.
     // SetNamedSecurityInfo recalculates auto-inheritance and changes this contract.
     if(!SetFileSecurityW(native.c_str(),security,descriptor))return fail(error,"Cannot restore snapshot security descriptor: "+QString::number(GetLastError()));

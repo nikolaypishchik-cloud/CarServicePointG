@@ -730,7 +730,7 @@ void ReportsOrdersTests::migrationExternalStorageSnapshot()
 void ReportsOrdersTests::secureSnapshotRestore_data()
 {
     QTest::addColumn<QString>("fault");
-    for(const auto& fault:QStringList{"success","copy-failure","promotion-lock","readonly","metadata-failure","post-copy-corruption"})QTest::newRow(qPrintable(fault))<<fault;
+    for(const auto& fault:QStringList{"success","inherited-acl","copy-failure","promotion-lock","readonly","metadata-failure","post-copy-corruption"})QTest::newRow(qPrintable(fault))<<fault;
 }
 
 void ReportsOrdersTests::secureSnapshotRestore()
@@ -746,6 +746,17 @@ void ReportsOrdersTests::secureSnapshotRestore()
     if(fault=="readonly")for(const auto& path:{sourceNative,targetNative})QVERIFY(SetFileAttributesW(path.c_str(),GetFileAttributesW(path.c_str())|FILE_ATTRIBUTE_READONLY));
     QString error;QJsonObject metadata,before;
     QVERIFY2(NativeSnapshotMetadata::capture(source,&metadata,&error),qPrintable(error));QVERIFY(NativeSnapshotMetadata::capture(target,&before,&error));
+    if(fault=="inherited-acl") {
+        PSECURITY_DESCRIPTOR descriptor=nullptr;
+        const auto sddl=metadata.value("security").toString().toStdWString();
+        QVERIFY(ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(),SDDL_REVISION_1,&descriptor,nullptr));
+        const auto freeDescriptor=qScopeGuard([&]{LocalFree(descriptor);});
+        const auto inheritance=SE_DACL_AUTO_INHERIT_REQ|SE_DACL_AUTO_INHERITED;
+        QVERIFY(SetSecurityDescriptorControl(descriptor,inheritance,inheritance));
+        QVERIFY(SetFileSecurityW(sourceNative.c_str(),DACL_SECURITY_INFORMATION,descriptor));
+        QVERIFY2(NativeSnapshotMetadata::capture(source,&metadata,&error),qPrintable(error));
+        QVERIFY(metadata.value("security").toString().section("D:",1).section('(',0,0).contains("AI"));
+    }
     if(fault=="metadata-failure") {
         QString security=metadata.value("security").toString();const int group=security.indexOf("G:");QVERIFY(group>0);
         security="O:WD"+security.mid(group);metadata.insert("security",security);
@@ -780,7 +791,7 @@ void ReportsOrdersTests::secureSnapshotRestore()
     const bool restored=SecureSnapshotRestore::restoreFile(source,target,hash,metadata,copier,&error);
     QVERIFY(privateStage);QVERIFY(encryptedPayload);
     QVERIFY(QDir(root.path()).entryList({".migration_restore_*"},QDir::Dirs|QDir::Hidden|QDir::NoDotAndDotDot).isEmpty());
-    if(fault=="success" || fault=="readonly"){
+    if(fault=="success" || fault=="readonly" || fault=="inherited-acl"){
         QVERIFY2(restored,qPrintable(error));QCOMPARE(read(target),original);QJsonObject actual;
         QVERIFY(NativeSnapshotMetadata::capture(target,&actual,&error));QCOMPARE(actual,metadata);
         QVERIFY2(SecureSnapshotRestore::restoreFile(source,target,hash,metadata,copier,&error),qPrintable(error));
