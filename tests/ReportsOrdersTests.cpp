@@ -4056,6 +4056,18 @@ void ReportsOrdersTests::annualAllocationRollbackAndSources()
     QVERIFY(reg.exec("INSERT INTO order_registry VALUES(1000,'external',11,2027)"));
     const auto time = QDateTime::fromString("2026-12-31T22:30:00Z", Qt::ISODate);
     const auto resolver = [&] { return external; };
+    QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db,resolver,QDate(2026,12,31)),8);
+    QVERIFY(q.exec("UPDATE router_cache_work_orders SET order_number=17"));
+    QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db,resolver,QDate(2027,1,1)),18);
+    QVERIFY(q.exec("UPDATE router_cache_work_orders SET order_number=4"));
+    QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db,[]{return QSqlDatabase();},QDate(2027,1,1)),0);
+    QVERIFY(reg.exec("ALTER TABLE order_registry RENAME COLUMN visible_order_number TO broken_visible"));
+    QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db,resolver,QDate(2027,1,1)),0);
+    QVERIFY(reg.exec("ALTER TABLE order_registry RENAME COLUMN broken_visible TO visible_order_number"));
+    QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db,resolver,QDate(2027,1,1)),12);
+    QVERIFY(reg.exec("UPDATE order_registry SET visible_order_number=2147483648"));
+    QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db,resolver,QDate(2027,1,1)),0);
+    QVERIFY(reg.exec("UPDATE order_registry SET visible_order_number=11"));
     QString error; OrderIdentityService::Allocation first;
     QVERIFY2(OrderIdentityService::allocateAnnualIdentity(db,"request-first",time,100,&first,&error,resolver),qPrintable(error));
     QCOMPARE(first.year,2027); QCOMPARE(first.visibleNumber,12); QCOMPARE(first.internalNumber,1001); QVERIFY(!first.replayed);

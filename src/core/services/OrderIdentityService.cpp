@@ -255,30 +255,47 @@ bool repairCanonicalIdentityData(QSqlDatabase database, QString* errorText)
     return true;
 }
 
-int maxVisibleNumberInWorkOrders(QSqlDatabase database, int year)
+bool annualIdentityBounds(QSqlDatabase database, int year,
+                          const std::function<QSqlDatabase()>& registryResolver,
+                          bool requireReservations, qint64& maxInternal, qint64& maxVisible, QString* error)
 {
-    if (!isUsableDatabase(database)) return 0;
-    QSqlQuery q(database);
-    q.prepare(QStringLiteral(
-        "SELECT COALESCE(MAX(COALESCE(order_number, number)),0) "
-        "FROM work_orders "
-        "WHERE COALESCE(NULLIF(order_year,0), CAST(strftime('%Y', (CASE WHEN substr(trim(COALESCE(opened_at,'')),3,1)='.' AND substr(trim(COALESCE(opened_at,'')),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(opened_at,'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(opened_at,'')),7,4) ELSE '20'||substr(trim(COALESCE(opened_at,'')),7,2) END||'-'||substr(trim(COALESCE(opened_at,'')),4,2)||'-'||substr(trim(COALESCE(opened_at,'')),1,2) ELSE COALESCE(opened_at,'') END)) AS INTEGER), ?) = ?"));
-    q.addBindValue(year);
-    q.addBindValue(year);
-    if (q.exec() && q.next()) return q.value(0).toInt();
-    return 0;
-}
-
-int maxVisibleNumberInRegistry(QSqlDatabase database, int year)
-{
-    if (!isUsableDatabase(database)) return 0;
-    QSqlQuery q(database);
-    q.prepare(QStringLiteral(
-        "SELECT COALESCE(MAX(COALESCE(NULLIF(visible_order_number,0), 0)),0) "
-        "FROM order_registry WHERE COALESCE(order_year,0)=?"));
-    q.addBindValue(year);
-    if (q.exec() && q.next()) return q.value(0).toInt();
-    return 0;
+    const auto fail = [&](const QString& reason) {
+        *error = reason;
+        return false;
+    };
+    auto maxima = [&](QSqlDatabase source, const QString& table, const QString& internal, const QString& visible, bool required) {
+        if (!source.isOpen()) return fail(QStringLiteral("identity source is not open"));
+        QSqlQuery exists(source);
+        if (!exists.prepare(QStringLiteral("SELECT 1 FROM sqlite_master WHERE name=? AND type IN ('table','view')"))) return fail(exists.lastError().text());
+        exists.addBindValue(table);
+        if (!exists.exec()) return fail(exists.lastError().text());
+        if (!exists.next()) {
+            if (exists.lastError().isValid()) return fail(exists.lastError().text());
+            return !required || fail(QStringLiteral("missing identity source: ") + table);
+        }
+        exists.finish();
+        QSqlQuery q(source);
+        if (!q.exec(QStringLiteral("SELECT %1 FROM %2 WHERE COALESCE(%1,0)<=0 OR COALESCE(order_year,0)<=0 "
+                                  "OR COALESCE(%3,0)<=0 OR TRIM(COALESCE(order_uid,''))='' LIMIT 1").arg(internal, table, visible)))
+            return fail(q.lastError().text());
+        if (q.next()) return fail(QStringLiteral("unresolved historical identity in ") + table);
+        if (q.lastError().isValid()) return fail(q.lastError().text());
+        q.finish();
+        if (!q.prepare(QStringLiteral("SELECT COALESCE(MAX(%1),0),COALESCE(MAX(CASE WHEN order_year=? THEN %2 ELSE 0 END),0) FROM %3")
+                       .arg(internal, visible, table))) return fail(q.lastError().text());
+        q.addBindValue(year);
+        if (!q.exec() || !q.next()) return fail(q.lastError().text());
+        maxInternal = qMax(maxInternal, q.value(0).toLongLong()); maxVisible = qMax(maxVisible, q.value(1).toLongLong());
+        return true;
+    };
+    if (!maxima(database, QStringLiteral("work_orders"), QStringLiteral("number"), QStringLiteral("order_number"), true)
+        || !maxima(database, QStringLiteral("router_cache_work_orders"), QStringLiteral("number"), QStringLiteral("order_number"), false)
+        || !maxima(database, QStringLiteral("order_registry"), QStringLiteral("order_number"), QStringLiteral("visible_order_number"), false)
+        || !maxima(database, QStringLiteral("order_creation_reservations"), QStringLiteral("internal_number"), QStringLiteral("order_number"), requireReservations)) return false;
+    if (registryResolver && !maxima(registryResolver(), QStringLiteral("order_registry"), QStringLiteral("order_number"), QStringLiteral("visible_order_number"), true)) return false;
+    if (maxInternal >= std::numeric_limits<int>::max() || maxVisible >= std::numeric_limits<int>::max())
+        return fail(QStringLiteral("order number range exhausted"));
+    return true;
 }
 
 } // namespace
@@ -299,30 +316,26 @@ int nextVisibleOrderNumber(QSqlDatabase activeDb,
                            const std::function<QSqlDatabase()>& registryResolver,
                            const QDate& openedDate)
 {
-    const int year = orderYearForDate(openedDate);
-    int maxVisibleNumber = 0;
-    maxVisibleNumber = qMax(maxVisibleNumber, maxVisibleNumberInWorkOrders(activeDb, year));
-    maxVisibleNumber = qMax(maxVisibleNumber, maxVisibleNumberInRegistry(activeDb, year));
-    if (registryResolver) {
-        maxVisibleNumber = qMax(maxVisibleNumber, maxVisibleNumberInRegistry(registryResolver(), year));
+    if (!openedDate.isValid()) return 0;
+    qint64 maxInternal = 0, maxVisible = 0;
+    QString error;
+    if (!annualIdentityBounds(activeDb, openedDate.year(), registryResolver, false, maxInternal, maxVisible, &error)) {
+        qWarning() << "Annual number preview unavailable:" << error;
+        return 0;
     }
-    const QList<QPair<QString,QString>> annualSources = {
-        {QStringLiteral("annual_order_counters"), QStringLiteral("last_number")},
-        {QStringLiteral("order_creation_reservations"), QStringLiteral("order_number")}
-    };
-    for (const auto& source : annualSources) {
-        if (!objectExists(activeDb, source.first, QStringLiteral("table"))) continue;
-        QSqlQuery query(activeDb);
-        query.prepare(QStringLiteral("SELECT COALESCE(MAX(%1),0) FROM %2 WHERE order_year=?").arg(source.second,source.first));
-        query.addBindValue(year);
-        if (!query.exec() || !query.next()) {
-            qWarning() << "Annual number preview failed for" << source.first << query.lastError().text();
-            return 0;
-        }
-        maxVisibleNumber=qMax(maxVisibleNumber,query.value(0).toInt());
+
+    QSqlQuery counter(activeDb);
+    if (!counter.exec("SELECT 1 FROM sqlite_master WHERE type='table' AND name='annual_order_counters'")) return 0;
+    if (counter.next()) {
+        counter.finish();
+        if (!counter.prepare("SELECT COALESCE(MAX(last_number),0) FROM annual_order_counters WHERE order_year=?")) return 0;
+        counter.addBindValue(openedDate.year());
+        if (!counter.exec() || !counter.next()) return 0;
+        maxVisible = qMax(maxVisible, counter.value(0).toLongLong());
+    } else if (counter.lastError().isValid()) {
+        return 0;
     }
-    if (maxVisibleNumber==std::numeric_limits<int>::max()) return 0;
-    return qMax(1, maxVisibleNumber + 1);
+    return maxVisible < std::numeric_limits<int>::max() ? int(maxVisible + 1) : 0;
 }
 
 bool reserveIdentityBeforeDeletion(QSqlDatabase database, int internalNumber, QString* errorText)
@@ -421,38 +434,9 @@ bool allocateAnnualIdentity(QSqlDatabase database, const QString& requestUid,
     if (replay.lastError().isValid()) return fail(replay.lastError().text());
     replay.finish();
     qint64 maxInternal = 0, maxVisible = 0;
-    auto maxima = [&](QSqlDatabase source, const QString& table, const QString& internal, const QString& visible, bool required) {
-        if (!source.isOpen()) return fail(QStringLiteral("identity source is not open"));
-        QSqlQuery exists(source);
-        if (!exists.prepare(QStringLiteral("SELECT 1 FROM sqlite_master WHERE name=? AND type IN ('table','view')"))) return fail(exists.lastError().text());
-        exists.addBindValue(table);
-        if (!exists.exec()) return fail(exists.lastError().text());
-        if (!exists.next()) {
-            if (exists.lastError().isValid()) return fail(exists.lastError().text());
-            return !required || fail(QStringLiteral("missing identity source: ") + table);
-        }
-        exists.finish();
-        QSqlQuery q(source);
-        if (!q.exec(QStringLiteral("SELECT %1 FROM %2 WHERE COALESCE(%1,0)<=0 OR COALESCE(order_year,0)<=0 "
-                                  "OR COALESCE(%3,0)<=0 OR TRIM(COALESCE(order_uid,''))='' LIMIT 1").arg(internal, table, visible)))
-            return fail(q.lastError().text());
-        if (q.next()) return fail(QStringLiteral("unresolved historical identity in ") + table);
-        if (q.lastError().isValid()) return fail(q.lastError().text());
-        q.finish();
-        if (!q.prepare(QStringLiteral("SELECT COALESCE(MAX(%1),0),COALESCE(MAX(CASE WHEN order_year=? THEN %2 ELSE 0 END),0) FROM %3")
-                       .arg(internal, visible, table))) return fail(q.lastError().text());
-        q.addBindValue(year);
-        if (!q.exec() || !q.next()) return fail(q.lastError().text());
-        maxInternal = qMax(maxInternal, q.value(0).toLongLong()); maxVisible = qMax(maxVisible, q.value(1).toLongLong());
-        return true;
-    };
-    if (!maxima(database, QStringLiteral("work_orders"), QStringLiteral("number"), QStringLiteral("order_number"), true)
-        || !maxima(database, QStringLiteral("router_cache_work_orders"), QStringLiteral("number"), QStringLiteral("order_number"), false)
-        || !maxima(database, QStringLiteral("order_registry"), QStringLiteral("order_number"), QStringLiteral("visible_order_number"), false)
-        || !maxima(database, QStringLiteral("order_creation_reservations"), QStringLiteral("internal_number"), QStringLiteral("order_number"), true)) return false;
-    if (registryResolver && !maxima(registryResolver(), QStringLiteral("order_registry"), QStringLiteral("order_number"), QStringLiteral("visible_order_number"), true)) return false;
-    if (maxInternal >= std::numeric_limits<int>::max() || maxVisible >= std::numeric_limits<int>::max())
-        return fail(QStringLiteral("order number range exhausted"));
+    QString boundsError;
+    if (!annualIdentityBounds(database, year, registryResolver, true, maxInternal, maxVisible, &boundsError))
+        return fail(boundsError);
     if (!run(QStringLiteral("INSERT INTO annual_order_counters(order_year,last_number) VALUES(?,?) "
                             "ON CONFLICT(order_year) DO UPDATE SET last_number=MAX(last_number,excluded.last_number)"), {year, maxVisible})) return false;
     QSqlQuery advance(database);

@@ -16,7 +16,7 @@ int OrderNumberService::nextVisibleOrderNumber()
     std::unique_ptr<ScopedSqliteConnection> registry;
     std::function<QSqlDatabase()> resolver;
     if (QFileInfo::exists(AppRuntime::registryDbFilePath())) {
-        registry=std::make_unique<ScopedSqliteConnection>(AppRuntime::registryDbFilePath(),QStringLiteral("annual_number_preview"));
+        registry=std::make_unique<ScopedSqliteConnection>(AppRuntime::registryDbFilePath(),QStringLiteral("annual_number_preview"),nullptr,true);
         if (!registry->isOpen()) return 0;
         resolver=[&]{return registry->db();};
     }
