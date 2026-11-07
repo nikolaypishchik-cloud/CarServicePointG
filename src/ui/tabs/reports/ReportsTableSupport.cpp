@@ -424,7 +424,8 @@ void applyPayrollSnapshot(QTableView* table, ReportsSnapshotTableModel* model, c
         rows.push_back(out);
     }
     model->setSnapshot(payrollHeaders(), rows);
-    if (rows.isEmpty()) model->setMessageRow(QString::fromUtf8("За вибраний період немає нарахувань"));
+    if (rows.isEmpty() && snapshot.error.isEmpty())
+        model->setMessageRow(QString::fromUtf8("За вибраний період немає нарахувань"));
 
     table->blockSignals(false);
     table->setUpdatesEnabled(true);
