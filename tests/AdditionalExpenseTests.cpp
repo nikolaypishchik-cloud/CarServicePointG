@@ -1,4 +1,5 @@
 #include <QtTest/QtTest>
+#include "PayrollReadFixture.h"
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -123,6 +124,26 @@ private slots:
         QCOMPARE(QSqlDatabase::connectionNames(), before);
     }
 
+    void payrollReadFailuresAndRecovery() {
+        QString error;QVERIFY2(PayrollReadFixture::run(&error),qPrintable(error));
+    }
+    void payrollUiRecoversAfterReadFailure() {
+        QString error;QVERIFY2(PayrollReadFixture::schema(db,&error),qPrintable(error));
+        QVERIFY2(PayrollReadFixture::populate(db,&error),qPrintable(error));
+        QSqlQuery q(db);QVERIFY(q.exec("ALTER TABLE masters RENAME TO broken_masters"));
+        ReportsPage page;page.show();auto* tabs=page.findChild<QTabWidget*>();
+        auto* stats=page.findChild<QLabel*>("reportsStatsLabel");QVERIFY(tabs && stats);
+        int payroll=-1;for(int i=0;i<tabs->count();++i)if(tabs->tabText(i)==QString::fromUtf8("Зарплата"))payroll=i;
+        QVERIFY(payroll>=0);tabs->setCurrentIndex(payroll);
+        auto* table=tabs->widget(payroll)->findChild<QTableView*>();QVERIFY(table);
+        QTRY_VERIFY_WITH_TIMEOUT(stats->text().contains(QString::fromUtf8("Помилка читання зарплати")),10000);
+        QCOMPARE(table->model()->rowCount(),0);
+        auto* pdf=page.findChild<QPushButton*>("reportsPdfButton");QVERIFY(pdf);QVERIFY(!pdf->isEnabled());
+        QVERIFY(q.exec("ALTER TABLE broken_masters RENAME TO masters"));
+        page.refresh();
+        QTRY_VERIFY_WITH_TIMEOUT(!stats->text().contains(QString::fromUtf8("Помилка читання зарплати")) && table->model()->rowCount()==2,10000);
+        QVERIFY(pdf->isEnabled());
+    }
     void expenseFormDistinguishesEmptyPeriodFromReadFailure() {
         const auto before = QSqlDatabase::connectionNames();
         const auto read = [](const QString& path) {

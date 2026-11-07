@@ -27,7 +27,7 @@ QString normalizeOilGradeForReport(QString text);
 bool oilGradeLessThan(const QString& a, const QString& b);
 bool isMotorOilName(QString name);
 QVariant reportsWorkerSetting(QSqlDatabase& db, const QString& key, const QVariant& def = QVariant(), QString* error = nullptr);
-QList<MasterRow> loadMastersForPeriodForReports(QSqlDatabase& db, const QString& fromDateIso, const QString& toDateIso);
+QList<MasterRow> loadMastersForPeriodForReports(QSqlDatabase& db, const QString& fromDateIso, const QString& toDateIso, QString* error);
 QString makeReportsWorkerConnectionName(const QString& suffix);
 QString payrollMasterNameKey(QString value);
 
@@ -46,9 +46,9 @@ struct AdminSalaryTotals {
 
 QList<MasterRow> orderedPersonnelForReports(const QList<MasterRow>& personnel);
 double adminSalaryBaseForSource(const AdminSalaryTotals& totals, const QString& source);
-PayrollPercentResolver makePayrollPercentResolverForReports(QSqlDatabase& db);
-QMap<QString, QString> loadAdminSalarySourcesForReports(QSqlDatabase& db);
-double periodExpensesTotalForReports(QSqlDatabase& db, const QString& df, const QString& dt);
-AdminSalaryTotals collectAdminSalaryTotalsForReports(QSqlDatabase& db, const QString& df, const QString& dt);
+PayrollPercentResolver makePayrollPercentResolverForReports(QSqlDatabase& db, QString* error);
+QMap<QString, QString> loadAdminSalarySourcesForReports(QSqlDatabase& db, QString* error);
+double periodExpensesTotalForReports(QSqlDatabase& db, const QString& df, const QString& dt, QString* error);
+AdminSalaryTotals collectAdminSalaryTotalsForReports(QSqlDatabase& db, const QString& df, const QString& dt, QString* error);
 
 } // namespace ReportsDataLoader::LocalSupport

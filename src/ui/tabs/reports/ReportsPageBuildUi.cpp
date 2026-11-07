@@ -180,6 +180,7 @@ void ReportsPage::buildUi()
 
 
     m_pdfButton = new QPushButton(QString::fromUtf8("PDF"), this);
+    m_pdfButton->setObjectName("reportsPdfButton");
     m_pdfButton->setMinimumWidth(AdaptiveUi::px(m_pdfButton, 92));
     m_pdfButton->setMinimumHeight(AdaptiveUi::px(m_pdfButton, 34));
 

@@ -622,27 +622,25 @@ PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, c
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connName);
         db.setDatabaseName(dbPath);
-        if (!db.open()) {
-            snapshot.stats = { QString::fromUtf8("Помилка відкриття БД для зарплати") };
+        db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
+        if (!db.open() || !db.transaction()) {
+            snapshot.error=db.lastError().text();
         } else {
-            QSqlQuery payrollAdjustmentsSchema(db);
-            payrollAdjustmentsSchema.exec(QStringLiteral(
-                "CREATE TABLE IF NOT EXISTS payroll_order_adjustments ("
-                "master_id TEXT NOT NULL,"
-                "order_number INTEGER NOT NULL,"
-                "absent INTEGER NOT NULL DEFAULT 0,"
-                "deleted INTEGER NOT NULL DEFAULT 0,"
-                "updated_at TEXT NOT NULL DEFAULT '',"
-                "PRIMARY KEY(master_id, order_number))"));
-            const auto masters = orderedPersonnelForReports(loadMastersForPeriodForReports(db, df, dt));
-            const PayrollPercentResolver payrollResolver = makePayrollPercentResolverForReports(db);
-            const auto adminSources = loadAdminSalarySourcesForReports(db);
-            const AdminSalaryTotals adminTotals = collectAdminSalaryTotalsForReports(db, df, dt);
+            const auto read=[&] {
+            const auto masters = orderedPersonnelForReports(loadMastersForPeriodForReports(db, df, dt,&snapshot.error));
+            if(!snapshot.error.isEmpty())return;
+            const PayrollPercentResolver payrollResolver = makePayrollPercentResolverForReports(db,&snapshot.error);
+            if(!snapshot.error.isEmpty())return;
+            const auto adminSources = loadAdminSalarySourcesForReports(db,&snapshot.error);
+            if(!snapshot.error.isEmpty())return;
+            const AdminSalaryTotals adminTotals = collectAdminSalaryTotalsForReports(db, df, dt,&snapshot.error);
 
+            if(!snapshot.error.isEmpty())return;
             int activeMasterCount = 0;
             for (const auto& m : masters) if (m.role == QStringLiteral("master")) ++activeMasterCount;
-            const double sharedExpensesPerMaster = activeMasterCount > 0 ? periodExpensesTotalForReports(db, df, dt) / activeMasterCount : 0.0;
+            const double sharedExpensesPerMaster = activeMasterCount > 0 ? periodExpensesTotalForReports(db, df, dt,&snapshot.error) / activeMasterCount : 0.0;
 
+            if(!snapshot.error.isEmpty())return;
             double total = 0.0;
             for (const auto& m : masters) {
                 PayrollSnapshotRow row;
@@ -687,7 +685,8 @@ PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, c
                     q.addBindValue(m.id);
                     q.addBindValue(df);
                     q.addBindValue(dt);
-                    if (q.exec()) {
+                    if (!q.exec()){snapshot.error=q.lastError().text();return;}
+                    {
                         while (q.next()) {
                             ordersCount += 1;
                             const double shareRaw = q.value(1).toDouble();
@@ -697,6 +696,7 @@ PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, c
                             baseSum += qMax(0.0, FormatUtils::roundMoneyValue(shareRaw * (1.0 - discountPct / 100.0)));
                         }
                     }
+                    if(q.lastError().isValid()){snapshot.error=q.lastError().text();return;}
                     accrued = FormatUtils::roundMoneyValue(baseSum * percent / 100.0);
                     accrued = qMax(0.0, accrued - sharedExpensesPerMaster);
                     if (!(m.active || ordersCount > 0 || baseSum > 0.0)) continue;
@@ -715,8 +715,12 @@ PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, c
                 QString::fromUtf8("Співробітників:  %1").arg(snapshot.rows.size()),
                 QString::fromUtf8("Нараховано:  %1  грн.").arg(money0(total))
             };
+            };read();
+            if(snapshot.error.isEmpty() && !db.commit())snapshot.error=db.lastError().text();
+            if(!snapshot.error.isEmpty())db.rollback();
         }
     }
+    if(!snapshot.error.isEmpty()){snapshot.rows.clear();snapshot.stats={QString::fromUtf8("Помилка читання зарплати: ")+snapshot.error};}
     SqliteConnectionUtils::safeCloseAndRemoveDatabase(connName);
     return snapshot;
 }

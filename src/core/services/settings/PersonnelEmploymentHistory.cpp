@@ -68,9 +68,10 @@ QJsonObject load(QSqlDatabase db,const QString& id,QString* error) {
     }
     return obj;
 }
-bool overlaps(QSqlDatabase db,const QString& id,const QDate& from,const QDate& to) {
+bool overlaps(QSqlDatabase db,const QString& id,const QDate& from,const QDate& to,QString* diagnostic) {
     QString error;const auto history=load(db,id,&error);
-    if(!error.isEmpty()){qWarning()<<error;return false;}
+    if(diagnostic)*diagnostic=error;
+    if(!error.isEmpty()){if(!diagnostic)qWarning()<<error;return false;}
     for(const auto value:history["periods"].toArray()) {
         const auto p=value.toObject();const auto start=date(p["from"].toString()),end=date(p["to"].toString());
         if((!start.isValid() || start<=to) && (!end.isValid() || end>=from))return true;

@@ -258,6 +258,8 @@ void ReportsPage::exportElectricityPdf()
 
 void ReportsPage::refreshPayroll()
 {
+    m_tabKeys.remove(static_cast<int>(ReportTab::Payroll));
+    if(m_pdfButton)m_pdfButton->setEnabled(false);
     const QString df = m_from->date().toString("yyyy-MM-dd");
     const QString dt = m_to->date().toString("yyyy-MM-dd");
     const QString key = ReportsAsyncSupport::buildTabKey(static_cast<int>(ReportTab::Payroll), m_from->date(), m_to->date());
@@ -275,7 +277,8 @@ void ReportsPage::refreshPayroll()
         if (generation != m_asyncRefreshGeneration) return;
         if (activeTab() != ReportTab::Payroll) return;
         applyPayrollSnapshot(snapshot);
-        m_tabKeys[static_cast<int>(ReportTab::Payroll)] = key;
+        if(snapshot.error.isEmpty())m_tabKeys[static_cast<int>(ReportTab::Payroll)] = key;
+        else m_tabKeys.remove(static_cast<int>(ReportTab::Payroll));
         applyCachedTabUi(ReportTab::Payroll);
     });
 }
@@ -439,6 +442,8 @@ void ReportsPage::exportExpensesPdf()
 }
 void ReportsPage::exportPayrollPdf()
 {
+    const auto key=ReportsAsyncSupport::buildTabKey(static_cast<int>(ReportTab::Payroll),m_from->date(),m_to->date());
+    if(m_tabKeys.value(static_cast<int>(ReportTab::Payroll))!=key)return;
     const QDate fromDate = m_from->date();
     const QDate toDate = m_to->date();
     runPdfExportTask(QString::fromUtf8("Формування PDF звіту по зарплаті..."), [fromDate, toDate]() {

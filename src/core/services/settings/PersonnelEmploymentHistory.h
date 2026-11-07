@@ -10,7 +10,7 @@ bool edit(const MasterRow& expected, const QString& name, const QString& role, Q
 bool setActive(const QString& id, bool active, const QString& effectiveDate, QString* error, const QString& previousEnd = {});
 
 QJsonObject load(QSqlDatabase db, const QString& id, QString* error = nullptr);
-bool overlaps(QSqlDatabase db, const QString& id, const QDate& from, const QDate& to);
+bool overlaps(QSqlDatabase db, const QString& id, const QDate& from, const QDate& to, QString* error = nullptr);
 bool edit(QSqlDatabase db, const MasterRow& expected, const QString& name, const QString& role, QString* error);
 bool setActive(QSqlDatabase db, const QString& id, bool active, const QString& effectiveDate, QString* error, const QString& previousEnd = {});
 }
