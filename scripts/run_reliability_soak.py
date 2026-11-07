@@ -2,6 +2,8 @@
 Run --pilot first. This is a partial UI matrix, never a full end-to-end certification.
 """
 import argparse, ctypes, hashlib, json, os, shutil, subprocess, time
+from ctypes import wintypes
+from uuid import uuid4
 from datetime import datetime, timezone
 from pathlib import Path
 from run_qt_test import diagnostic_error
@@ -19,7 +21,7 @@ CASES=[
  ('supplierReconciliationDialogSavesEditedAmount','supplier_debt','UI reconciliation'),
  ('historyReopenPreservesPaymentsAndInstalledParts','order','service reopen + independent DB assertions; not UI'),
  ('financialReturnsRefundAndCredit','returns','service refund/credit + DB assertions; not UI'),
- ('spareBatchMixedInvoiceIsAtomic','invoice','service mixed invoice import and repeat; not UI'),
+ ('spareBatchMixedInvoiceIsAtomic','invoice','real CSV read and review in the stock form, mixed batch commit, rollback and repeat'),
  ('paymentPersistsAfterReopen','supplier_payment','service payment/reopen DB; not application restart'),
 ]
 
@@ -31,6 +33,18 @@ def sha(path):
     with path.open('rb') as f:
         for block in iter(lambda:f.read(1024*1024),b''):h.update(block)
     return h.hexdigest()
+
+def create_test_desktop():
+    user32 = ctypes.WinDLL('user32', use_last_error=True)
+    user32.CreateDesktopW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, ctypes.c_void_p,
+                                      wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p]
+    user32.CreateDesktopW.restype = wintypes.HANDLE
+    name = 'Safety-Soak-' + uuid4().hex
+    # QtTest connects its GUI thread before QApplication creates windows.
+    handle = user32.CreateDesktopW(name, None, None, 0, 0x00c7, None)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    return name, handle
 
 class Memory(ctypes.Structure):
     _fields_=[('cb',ctypes.c_ulong),('faults',ctypes.c_ulong)]+[(n,ctypes.c_size_t) for n in
@@ -64,6 +78,7 @@ def main():
     fd=os.open(lock,os.O_CREAT|os.O_EXCL|os.O_WRONLY);os.write(fd,str(os.getpid()).encode());os.close(fd)
     state={'phase':'preparing','prepared_at':stamp(),'target_active_minutes':args.minutes,
            'pilot':args.pilot,'complete_acceptance':False,'active_seconds':0,'cases':0,'failures':0,'cycles':0}
+    desktop_handle = None
     try:
         out.mkdir()
         runtime=base/'runtime';runtime.mkdir(exist_ok=True)
@@ -85,8 +100,11 @@ def main():
         env['PATH']=str(runtime)+';'+env['PATH']
         # windeployqt commonly stores platform plugins beside the exe.
         if not (runtime/'plugins/platforms').exists():env['QT_PLUGIN_PATH']=str(runtime)
+        desktop_name, desktop_handle = create_test_desktop()
+        env['CS_TEST_NATIVE_DESKTOP'] = desktop_name
         write(out/'matrix.json',[dict(case=c,module=m,scope=s) for c,m,s in CASES])
         write(out/'environment.json',{'runtime':str(runtime),'profile':str(profile),'temp':str(temp),
+            'native_desktop': desktop_name,
             'settings':'QSettings IniFormat under temporary fixture directory',
             'network':'Qt application HTTP proxy 127.0.0.1:9; no live opt-ins',
             'test_exe_sha256':sha(exe),'production_exe_sha256':sha(ROOT/'dist/CarServicePointG.exe')})
@@ -97,7 +115,8 @@ def main():
                 ordinal=state['cases']+1;log=out/f'{ordinal:06d}-{case}.txt'
                 begin=time.monotonic();peak=0
                 with (out/f'{ordinal:06d}-console.txt').open('wb') as stream:
-                    child=subprocess.Popen([str(exe),case,'-o',str(log)+',txt'],cwd=cwd,env=env,stdout=stream,stderr=stream)
+                    child=subprocess.Popen([str(exe),case,'-o',str(log)+',txt'],cwd=cwd,env=env,
+                                           stdout=stream,stderr=stream,close_fds=True)
                     while child.poll() is None and time.monotonic()-begin<60:
                         sample=memory(child.pid)
                         if sample:peak=max(peak,sample['private_bytes'])
@@ -106,7 +125,7 @@ def main():
                     if timeout:child.kill() # owned test child only; never the desktop application
                     code=child.wait()
                 elapsed=time.monotonic()-begin;text=log.read_bytes().decode('utf-8',errors='replace') if log.exists() else ''
-                isolated='ISOLATION_VERIFIED' in text
+                isolated='ISOLATION_VERIFIED' in text and 'NATIVE_DESKTOP_VERIFIED' in text and desktop_name in text
                 record=dict(index=ordinal,cycle=cycle+1,case=case,module=module,scope=scope,at=stamp(),
                     seconds=elapsed,exit=code,timeout=timeout,isolated=isolated,peak_private_bytes=peak)
                 with (out/'operations.jsonl').open('a',encoding='utf-8') as stream:stream.write(json.dumps(record)+'\n')
@@ -128,5 +147,8 @@ def main():
     except BaseException as exc:
         state.update(phase='interrupted',finished_at=stamp(),error=str(exc));write(out/'status.json',state)
         raise
-    finally:lock.unlink(missing_ok=True)
+    finally:
+        if desktop_handle:
+            ctypes.windll.user32.CloseDesktop(wintypes.HANDLE(desktop_handle))
+        lock.unlink(missing_ok=True)
 if __name__=='__main__':main()

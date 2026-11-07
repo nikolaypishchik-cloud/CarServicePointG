@@ -239,6 +239,18 @@ class PurchasePaymentTests final : public QObject {
         if(!state.prepare("SELECT 1 FROM workspace_order_state s JOIN work_orders w ON w.number=s.order_number AND w.order_uid=s.order_uid WHERE s.order_number=?"))return false;
         state.addBindValue(number);return state.exec() && state.next();
     }
+public:
+    static void initMain() {
+#ifdef Q_OS_WIN
+        const QString name=qEnvironmentVariable("CS_TEST_NATIVE_DESKTOP");
+        if(name.isEmpty())return;
+        if(!name.startsWith("Safety-Soak-"))qFatal("Invalid name for an isolated QtTest desktop");
+        const auto desktop=OpenDesktopW(reinterpret_cast<LPCWSTR>(name.utf16()),0,FALSE,
+            DESKTOP_READOBJECTS|DESKTOP_WRITEOBJECTS|DESKTOP_CREATEMENU|DESKTOP_CREATEWINDOW|DESKTOP_ENUMERATE);
+        if(!desktop || !SetThreadDesktop(desktop))qFatal("Cannot connect QtTest to the isolated Windows desktop");
+        // The assigned desktop handle remains open until this short-lived test process exits.
+#endif
+    }
 public slots:
     void capturePdfUrl(const QUrl& url) { openedPdf=url; }
 private slots:
@@ -6453,6 +6465,17 @@ private slots:
         QCOMPARE(PerformanceAudit::runAudit(db,qEnvironmentVariable("CS_PERF_OUTPUT")),0);
     }
     void initTestCase() {
+#ifdef Q_OS_WIN
+        const QString expectedDesktop=qEnvironmentVariable("CS_TEST_NATIVE_DESKTOP");
+        if(!expectedDesktop.isEmpty()) {
+            wchar_t actual[128]{};
+            DWORD needed=0;
+            const auto desktop=GetThreadDesktop(GetCurrentThreadId());
+            QVERIFY(GetUserObjectInformationW(desktop,UOI_NAME,actual,sizeof(actual),&needed));
+            QCOMPARE(QString::fromWCharArray(actual),expectedDesktop);
+            qInfo()<<"NATIVE_DESKTOP_VERIFIED"<<expectedDesktop;
+        }
+#endif
         if(qEnvironmentVariable("CS_FINANCIAL_AUDIT")=="1")
             QNetworkProxy::setApplicationProxy(QNetworkProxy(QNetworkProxy::HttpProxy,QStringLiteral("127.0.0.1"),9));
         for(const auto& name:{"segoeui.ttf","times.ttf"}) {
@@ -8139,15 +8162,16 @@ private slots:
         {
             WorkshopInventoryPage receiving;receiving.show();receiving.refresh();
             bool importAvailable=false;
+            QString reviewError;
             QTimer reviewAutomation;
-            connect(&reviewAutomation,&QTimer::timeout,&receiving,[]{
+            connect(&reviewAutomation,&QTimer::timeout,&receiving,[&]{
                 auto* preview=QApplication::activeModalWidget();if(!preview||preview->objectName()!="invoiceReviewDialog")return;
                 auto* number=preview->findChild<QLineEdit*>("reviewInvoiceNumber");if(number->text().isEmpty())number->setText("TEST-123");
                 auto* table=preview->findChild<QTableView*>("invoiceReviewTable");for(int r=0;r<table->model()->rowCount();++r)if(table->model()->index(r,3).data().toString().isEmpty())table->model()->setData(table->model()->index(r,3),"Test Supplier");
                 preview->findChild<QPushButton*>("reviewImport")->click();
-                if(preview->isVisible()&&!preview->property("reviewDiagnosticWritten").toBool()){
-                    preview->setProperty("reviewDiagnosticWritten",true);
-                    for(auto* label:preview->findChildren<QLabel*>())if(label->isVisible())qInfo()<<"REVIEW_DIAGNOSTIC"<<label->text();
+                if(preview->isVisible()){
+                    for(auto* label:preview->findChildren<QLabel*>())if(label->isVisible())reviewError+=label->text()+' ';
+                    qobject_cast<QDialog*>(preview)->reject();
                 }
             });reviewAutomation.start(25);
             QTimer::singleShot(50,&receiving,[&] {
@@ -8183,36 +8207,45 @@ private slots:
                     importAvailable=importAvailable && job;
                     if(job) {
                         auto* progress=static_cast<InvoiceImportProgressDialog*>(dialog->findChild<QDialog*>("invoiceImportProgressDialog"));
-                        InvoiceImport::ImportJobRequest request; request.filePath="test-injected-invoice.pdf"; progress->start(request);
-                        InvoiceImport::ImportJobResult result; result.status=InvoiceImport::ImportJobStatus::Succeeded;
-                        result.filePath=storedInvoice; result.data.documentDate="2026-10-03";
-                        InvoiceImport::ImportedPartDraft draft; draft.name="Brake disc"; draft.oemNumber="OEM-123";draft.qtyText="2";draft.priceText="250";
-                        result.data.parsedPartDrafts.append(draft);
-                        // This fixture supplies a parsed invoice. Let the missing-file
-                        // request finish first so its queued error cannot race the fixture.
-                        QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(),5000);
-                        job->finished(result);
+                        QVERIFY(progress);
+                        InvoiceImport::ImportJobRequest request;
+                        request.filePath=dir.filePath("TEST-123-03.10.2026.csv");
+                        QFile source(request.filePath);
+                        const QByteArray header=QStringLiteral("Видаткова накладна № TEST-123 від 03.10.2026\n"
+                            "Постачальник;Test Supplier\nКод товару;Найменування;Кількість;Ціна без ПДВ;Ціна, грн з ПДВ;Сума з ПДВ\n"
+                            "OEM-123;Brake disc;2;208,33;250,00;500,00\n").toUtf8();
+                        QVERIFY(source.open(QIODevice::WriteOnly));QCOMPARE(source.write(header),qint64(header.size()));source.close();
+                        QSignalSpy parsed(job,&InvoiceImport::ImportJob::finished);
+                        progress->start(request);
+                        QTRY_COMPARE_WITH_TIMEOUT(parsed.count(),1,15000);
+                        const auto result=qvariant_cast<InvoiceImport::ImportJobResult>(parsed.takeFirst().at(0));
+                        QVERIFY2(result.ok(),qPrintable(result.error.message));
+                        QCOMPARE(result.data.parsedPartDrafts.size(),1);
+                        const auto draft=result.data.parsedPartDrafts.first();
+                        QCOMPARE(draft.name,QString("Brake Disc"));QCOMPARE(draft.oemNumber,QString("OEM-123"));
                         QTRY_COMPARE_WITH_TIMEOUT(dialog->findChild<QLineEdit*>("sparePartName")->text(),draft.name,5000);
                         importAvailable=importAvailable
                             && dialog->findChild<QLineEdit*>("sparePartName")->text()==draft.name
                             && dialog->findChild<QLineEdit*>("sparePartArticle")->text()==draft.oemNumber
                             && dialog->findChild<QDateEdit*>("spareOrderedDate")->date()==QDate(2026,10,3);
-                        draft.name="Oil filter"; draft.oemNumber="OEM-456";draft.orderedAt="02.10.26";
-                        result.data.parsedPartDrafts.append(draft);
+                        QVERIFY(source.open(QIODevice::WriteOnly|QIODevice::Append));
+                        const QByteArray extraLine="OEM-456;Oil filter;2;208,33;250,00;500,00\n";
+                        QCOMPARE(source.write(extraLine),qint64(extraLine.size()));source.close();
                         progress->start(request);
-                        QTRY_VERIFY_WITH_TIMEOUT(!job->isRunning(),5000);
-                        job->finished(result);
+                        QTRY_COMPARE_WITH_TIMEOUT(parsed.count(),1,15000);
+                        const auto second=qvariant_cast<InvoiceImport::ImportJobResult>(parsed.takeFirst().at(0));
+                        QVERIFY2(second.ok(),qPrintable(second.error.message));QCOMPARE(second.data.parsedPartDrafts.size(),2);
                         auto* rows=dialog->findChild<QTableWidget*>("spareAdditionalParts");
                         QVERIFY(rows);
                         QTRY_COMPARE_WITH_TIMEOUT(rows->rowCount(),1,5000);
                         importAvailable=importAvailable
-                            && dialog->findChild<QLineEdit*>("sparePartName")->text()=="Brake disc"
-                            && rows && rows->rowCount()==1 && rows->item(0,0)->text()==draft.name
-                            && rows->item(0,1)->text()==draft.oemNumber
+                            && dialog->findChild<QLineEdit*>("sparePartName")->text()=="Brake Disc"
+                            && rows && rows->rowCount()==1 && rows->item(0,0)->text()=="Oil Filter"
+                            && rows->item(0,1)->text()=="OEM-456"
                             && qobject_cast<QComboBox*>(rows->cellWidget(0,4))->findData(1)>=0;
                         dialog->findChild<QPushButton*>("spareReviewParts")->click();
-                        QCOMPARE(dialog->findChild<QLineEdit*>("sparePartName")->text(),QString("Brake disc"));
-                        QCOMPARE(rows->rowCount(),1);QCOMPARE(rows->item(0,0)->text(),QString("Oil filter"));
+                        QCOMPARE(dialog->findChild<QLineEdit*>("sparePartName")->text(),QString("Brake Disc"));
+                        QCOMPARE(rows->rowCount(),1);QCOMPARE(rows->item(0,0)->text(),QString("Oil Filter"));
                     }
                     dialog->resize(1000,800);
                     const QString captures=qEnvironmentVariable("CS_TEST_SCREENSHOTS");
@@ -8220,7 +8253,8 @@ private slots:
                     dialog->reject();
                 }
             });
-            receiving.findChild<QPushButton*>("inventoryAddSpare")->click(); QVERIFY(importAvailable);
+            receiving.findChild<QPushButton*>("inventoryAddSpare")->click();
+            QVERIFY2(reviewError.isEmpty(),qPrintable(reviewError));QVERIFY(importAvailable);
             auto* table=receiving.findChild<QTableView*>("workshopSpareTable");QVERIFY(table);
             bool accepted=false;
             QTimer::singleShot(50,&receiving,[&] {
