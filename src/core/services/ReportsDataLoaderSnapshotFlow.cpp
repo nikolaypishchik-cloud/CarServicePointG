@@ -557,6 +557,7 @@ OutsourceSnapshot buildOutsourceSnapshot(const QString& dbPath, const QString& d
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connName);
         db.setDatabaseName(dbPath);
+        db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
         if (!db.open()) {
             snapshot.stats = { QString::fromUtf8("Помилка відкриття БД для аутсорсу") };
         } else {
@@ -573,7 +574,8 @@ OutsourceSnapshot buildOutsourceSnapshot(const QString& dbPath, const QString& d
             int count = 0;
             double repair = 0.0;
             double client = 0.0;
-            if (q.exec()) {
+            const bool executed = q.exec();
+            if (executed) {
                 while (q.next()) {
                     const QDate eff = ReportsDateUtils::effectiveDate(q.value(1).toString());
                     if (!eff.isValid() || eff < from || eff > to) continue;
@@ -597,7 +599,10 @@ OutsourceSnapshot buildOutsourceSnapshot(const QString& dbPath, const QString& d
                 }
             }
 
-            snapshot.stats = {
+            if (!executed || q.lastError().isValid()) {
+                snapshot.rows.clear();
+                snapshot.stats = {QStringLiteral("Помилка читання звіту про аутсорс: ") + q.lastError().text()};
+            } else snapshot.stats = {
                 QString::fromUtf8("Відправлено на ремонт:  %1  од.").arg(count),
                 QString::fromUtf8("На суму:  %1  грн.").arg(money0(repair)),
                 QString::fromUtf8("Маржа:  %1  грн.").arg(money0(client - repair))
@@ -769,11 +774,12 @@ TotalExpensesSnapshot buildTotalExpensesSnapshot(const QString& dbPath, const QS
     {
         QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connName);
         db.setDatabaseName(dbPath);
+        db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
         const QDate from = DateFormats::parseDate(df);
         const QDate to = DateFormats::parseDate(dt);
         if (!from.isValid() || !to.isValid() || from > to) {
             snapshot.error = QString::fromUtf8("Початкова дата має бути не пізніше кінцевої.");
-        } else if (!db.open()) {
+        } else if (!db.open() || !db.transaction()) {
             snapshot.error = db.lastError().text();
         } else {
             QSqlQuery q(db);
@@ -809,8 +815,18 @@ TotalExpensesSnapshot buildTotalExpensesSnapshot(const QString& dbPath, const QS
                     snapshot.rows.append(row);
                 }
             }
+            if (q.lastError().isValid()) snapshot.error = q.lastError().text();
             // Old databases remain readable before their first schema upgrade.
-            if (db.tables().contains("additional_expenses")) {
+            QSqlQuery presence(db);
+            bool hasAdditional = false;
+            if (snapshot.error.isEmpty()) {
+                if (presence.exec("SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='additional_expenses' COLLATE NOCASE)") && presence.next())
+                    hasAdditional = presence.value(0).toBool();
+                else
+                    snapshot.error = presence.lastError().text();
+                presence.finish();
+            }
+            if (hasAdditional) {
                 q.prepare("SELECT id,spent_on,category,description,amount_cents FROM additional_expenses "
                           "WHERE (CASE WHEN substr(trim(spent_on),3,1)='.' AND substr(trim(spent_on),6,1)='.' THEN CASE WHEN substr(trim(spent_on),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(spent_on),7,4) ELSE '20'||substr(trim(spent_on),7,2) END||'-'||substr(trim(spent_on),4,2)||'-'||substr(trim(spent_on),1,2) ELSE spent_on END)>=? AND (CASE WHEN substr(trim(spent_on),3,1)='.' AND substr(trim(spent_on),6,1)='.' THEN CASE WHEN substr(trim(spent_on),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(spent_on),7,4) ELSE '20'||substr(trim(spent_on),7,2) END||'-'||substr(trim(spent_on),4,2)||'-'||substr(trim(spent_on),1,2) ELSE spent_on END)<=? ORDER BY (CASE WHEN substr(trim(spent_on),3,1)='.' AND substr(trim(spent_on),6,1)='.' THEN CASE WHEN substr(trim(spent_on),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(spent_on),7,4) ELSE '20'||substr(trim(spent_on),7,2) END||'-'||substr(trim(spent_on),4,2)||'-'||substr(trim(spent_on),1,2) ELSE spent_on END) DESC,id DESC");
                 q.addBindValue(df);
@@ -831,17 +847,22 @@ TotalExpensesSnapshot buildTotalExpensesSnapshot(const QString& dbPath, const QS
                         snapshot.novaPoshtaCents += cents;
                     snapshot.rows.append(row);
                 }
+                if (q.lastError().isValid()) snapshot.error = q.lastError().text();
             }
             std::stable_sort(snapshot.rows.begin(), snapshot.rows.end(),
                 [](const TotalExpensesSnapshotRow& a, const TotalExpensesSnapshotRow& b) {
                     return a.sortDate > b.sortDate;
                 });
+            q.finish();
+            if (snapshot.error.isEmpty() && !db.commit()) snapshot.error = db.lastError().text();
+            if (!snapshot.error.isEmpty()) db.rollback();
         }
         db.close();
     }
     SqliteConnectionUtils::safeCloseAndRemoveDatabase(connName);
     if (!snapshot.error.isEmpty()) {
         snapshot.rows.clear();
+        snapshot.periodicCents = snapshot.additionalCents = snapshot.novaPoshtaCents = 0;
         snapshot.stats = {QString::fromUtf8("Не вдалося завантажити витрати"), snapshot.error};
         return snapshot;
     }

@@ -151,6 +151,7 @@ private slots:
     }
     void unicodeTestRootEnvironmentRoundTrip();
     void periodSnapshotReadFailures();
+    void outsourceSnapshotReadFailures();
     void callerOwnedConnectionScope();
     void reportsFilterUsesExplicitSource();
     void orderListAndPrintData();
@@ -3074,6 +3075,47 @@ void ReportsOrdersTests::periodSnapshotReadFailures()
         QCOMPARE(result.stats.size(), 4);
     }
     QSqlDatabase::removeDatabase(connection);
+    QCOMPARE(QSqlDatabase::connectionNames(), before);
+}
+
+void ReportsOrdersTests::outsourceSnapshotReadFailures()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const auto path = dir.filePath("outsource.sqlite");
+    const auto before = QSqlDatabase::connectionNames();
+    const auto read = [&] {
+        return ReportsDataLoader::buildOutsourceSnapshot(path, "2026-01-01", "2026-12-31");
+    };
+    auto snapshot = read();
+    QVERIFY(!QFile::exists(path));
+    QVERIFY(snapshot.rows.isEmpty());
+    QVERIFY(snapshot.stats.join(" ").contains(QStringLiteral("Помилка")));
+    QCOMPARE(QSqlDatabase::connectionNames(), before);
+    const auto conn = QUuid::createUuid().toString();
+    {
+        auto db = QSqlDatabase::addDatabase("QSQLITE", conn);
+        db.setDatabaseName(path);
+        QVERIFY(db.open());
+        QSqlQuery q(db);
+        QVERIFY(q.exec("CREATE TABLE router_work_orders(number INTEGER, order_number INTEGER)"));
+        snapshot = read();
+        QVERIFY(snapshot.rows.isEmpty());
+        QCOMPARE(snapshot.stats.size(), 1);
+        QVERIFY(snapshot.stats.front().contains(QStringLiteral("Помилка")));
+        QVERIFY(q.exec("CREATE TABLE outsource_jobs(id INTEGER, service_id INTEGER, sent_date TEXT, return_date TEXT, company_name TEXT, order_number INTEGER, part_name TEXT, company_price REAL, client_price REAL)"));
+        snapshot = read();
+        QVERIFY(snapshot.rows.isEmpty());
+        QCOMPARE(snapshot.stats.size(), 3);
+        QVERIFY(q.exec("INSERT INTO router_work_orders VALUES (31,7)"));
+        QVERIFY(q.exec("INSERT INTO outsource_jobs VALUES (1,4,'2026-06-01','','Company',31,'Part',20,35)"));
+        snapshot = read();
+        QCOMPARE(snapshot.rows.size(), 1);
+        QCOMPARE(snapshot.rows.front().internalOrderNumber, 31);
+        QCOMPARE(snapshot.rows.front().orderNumber, QString("7"));
+        QCOMPARE(snapshot.stats.size(), 3);
+    }
+    QSqlDatabase::removeDatabase(conn);
     QCOMPARE(QSqlDatabase::connectionNames(), before);
 }
 

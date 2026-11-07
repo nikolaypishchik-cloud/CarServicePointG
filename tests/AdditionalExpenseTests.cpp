@@ -89,6 +89,39 @@ private slots:
         s = ReportsDataLoader::buildTotalExpensesSnapshot(db.databaseName(), "2026-09-01", "2026-09-30");
         QCOMPARE(s.additionalCents, 1); QCOMPARE(s.periodicCents, 40075);
     }
+    void failedReadCannotCreateDatabaseOrReturnPartialMoney() {
+        const auto before = QSqlDatabase::connectionNames();
+        const auto path = dir.filePath("failed-read.sqlite");
+        auto read = [&] { return ReportsDataLoader::buildTotalExpensesSnapshot(path, "2026-01-01", "2026-12-31"); };
+        QVERIFY(!read().error.isEmpty());
+        QVERIFY(!QFile::exists(path));
+        QSqlQuery copy(db);
+        copy.prepare("VACUUM INTO ?");
+        copy.addBindValue(path);
+        QVERIFY2(copy.exec(), qPrintable(copy.lastError().text()));
+        const auto connection = QUuid::createUuid().toString();
+        {
+            auto fixture = QSqlDatabase::addDatabase("QSQLITE", connection);
+            fixture.setDatabaseName(path);
+            QVERIFY(fixture.open());
+            QSqlQuery q(fixture);
+            QVERIFY(q.exec("DROP TABLE additional_expenses"));
+            QVERIFY(q.exec("INSERT INTO expenses(period_from,period_to,cleaning) VALUES('2026-02-01','2026-02-10',123.45)"));
+            const auto oldSchema = read();
+            QVERIFY2(oldSchema.error.isEmpty(), qPrintable(oldSchema.error));
+            QVERIFY(oldSchema.periodicCents >= 12345);
+            QVERIFY(q.exec("CREATE TABLE additional_expenses(id INTEGER)"));
+            const auto broken = read();
+            QVERIFY(!broken.error.isEmpty());
+            QVERIFY(broken.rows.isEmpty());
+            QCOMPARE(broken.periodicCents, 0);
+            QCOMPARE(broken.additionalCents, 0);
+            QCOMPARE(broken.novaPoshtaCents, 0);
+        }
+        QSqlDatabase::removeDatabase(connection);
+        QCOMPARE(QSqlDatabase::connectionNames(), before);
+    }
+
     void validationPermissionsAndRollback() {
         const QDate date(2026,9,17);
         QVERIFY(!AdditionalExpenseService::add(db, date, "", "Parcel", 5));
