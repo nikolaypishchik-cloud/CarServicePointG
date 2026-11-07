@@ -28,5 +28,6 @@ int nextVisibleOrderNumber(QSqlDatabase activeDb,
                            const std::function<QSqlDatabase()>& registryResolver,
                            const QDate& openedDate);
 bool ensureCanonicalIdentityIndexes(QSqlDatabase database, QString* errorText = nullptr);
+bool reserveIdentityBeforeDeletion(QSqlDatabase database, int internalNumber, QString* errorText);
 
 } // namespace OrderIdentityService

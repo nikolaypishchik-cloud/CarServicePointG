@@ -424,7 +424,9 @@ static bool purgeOrderGraphRowsInOwnedTransaction(QSqlDatabase txDb, int orderNu
         return true;
 }
 
-static bool purgeOrderGraphImpl(QSqlDatabase database, int orderNumber, QString* errorText, bool verifyArchive)
+enum class PurgeReason { ActiveCopy, ArchivedCopy, ConfirmedDeletion };
+
+static bool purgeOrderGraphImpl(QSqlDatabase database, int orderNumber, QString* errorText, PurgeReason reason)
 {
     if (orderNumber <= 0) return true;
 
@@ -441,9 +443,12 @@ static bool purgeOrderGraphImpl(QSqlDatabase database, int orderNumber, QString*
                              QStringLiteral("work_order_parts"), QStringLiteral("work_order_services"), QStringLiteral("work_orders")};
     request.beginErrorFallback = QStringLiteral("Не вдалося розпочати видалення active order graph.");
     request.commitErrorFallback = QStringLiteral("Не вдалося завершити видалення active order graph.");
+    if (reason == PurgeReason::ConfirmedDeletion) request.changedTables.append(QStringLiteral("order_creation_reservations"));
 
     const auto tx = MutationExecutor::execute(database, request, [&](QSqlDatabase& txDb, QString* txError) {
-        return purgeOrderGraphRowsInOwnedTransaction(txDb, orderNumber, txError, verifyArchive);
+        if (reason == PurgeReason::ConfirmedDeletion
+            && !OrderIdentityService::reserveIdentityBeforeDeletion(txDb, orderNumber, txError)) return false;
+        return purgeOrderGraphRowsInOwnedTransaction(txDb, orderNumber, txError, reason == PurgeReason::ArchivedCopy);
     });
     if (!tx.ok) {
         if (errorText) *errorText = tx.errorText;
@@ -457,12 +462,17 @@ static bool purgeOrderGraphImpl(QSqlDatabase database, int orderNumber, QString*
 
 bool purgeActiveOrderGraph(QSqlDatabase database, int orderNumber, QString* errorText)
 {
-    return purgeOrderGraphImpl(database, orderNumber, errorText, false);
+    return purgeOrderGraphImpl(database, orderNumber, errorText, PurgeReason::ActiveCopy);
+}
+
+bool purgeDeletedOrderGraph(QSqlDatabase database, int orderNumber, QString* errorText)
+{
+    return purgeOrderGraphImpl(database, orderNumber, errorText, PurgeReason::ConfirmedDeletion);
 }
 
 bool purgeVerifiedArchivedOrderGraph(QSqlDatabase database, int orderNumber, QString* errorText)
 {
-    return purgeOrderGraphImpl(database, orderNumber, errorText, true);
+    return purgeOrderGraphImpl(database, orderNumber, errorText, PurgeReason::ArchivedCopy);
 }
 
 

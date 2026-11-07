@@ -42,6 +42,16 @@ bool columnExists(QSqlDatabase database, const QString& tableName, const QString
 
 bool execStatement(QSqlDatabase database, const QString& sql, QString* errorText);
 
+bool ensureReservations(QSqlDatabase db, QString* error)
+{
+    return execStatement(db, QStringLiteral("CREATE TABLE IF NOT EXISTS order_creation_reservations ("
+        "request_uid TEXT PRIMARY KEY,order_uid TEXT NOT NULL UNIQUE,"
+        "internal_number INTEGER NOT NULL UNIQUE CHECK(internal_number>0),"
+        "order_year INTEGER NOT NULL CHECK(order_year BETWEEN 1 AND 9999),"
+        "order_number INTEGER NOT NULL CHECK(order_number>0),created_at TEXT NOT NULL,"
+        "UNIQUE(order_year,order_number))"), error);
+}
+
 bool syncChildOrderUidByOrderNumber(QSqlDatabase database, const QString& tableName, QString* errorText,
                                     const QString& parentTable = QStringLiteral("work_orders"))
 {
@@ -315,6 +325,47 @@ int nextVisibleOrderNumber(QSqlDatabase activeDb,
     return qMax(1, maxVisibleNumber + 1);
 }
 
+bool reserveIdentityBeforeDeletion(QSqlDatabase database, int internalNumber, QString* errorText)
+{
+    auto fail = [&](const QString& message) {
+        if (errorText) *errorText = message;
+        return false;
+    };
+    if (!ensureReservations(database, errorText)) return false;
+    QSqlQuery header(database);
+    header.prepare(QStringLiteral("SELECT order_uid,order_year,order_number FROM work_orders WHERE number=?"
+        " AND typeof(order_uid)='text' AND length(trim(order_uid))>0 AND typeof(order_year)='integer'"
+        " AND order_year BETWEEN 1 AND 9999 AND typeof(order_number)='integer' AND order_number BETWEEN 1 AND 2147483647"));
+    header.addBindValue(internalNumber);
+    if (!header.exec()) return fail(header.lastError().text());
+    if (!header.next()) return fail(QStringLiteral("Cannot retire an order without a confirmed historical identity"));
+    const QString uid = header.value(0).toString();
+    const int year = header.value(1).toInt(), number = header.value(2).toInt();
+    header.finish();
+    QSqlQuery saved(database);
+    saved.prepare(QStringLiteral("SELECT internal_number,order_year,order_number FROM order_creation_reservations WHERE order_uid=?"));
+    saved.addBindValue(uid);
+    if (!saved.exec()) return fail(saved.lastError().text());
+    if (saved.next()) {
+        if (saved.value(0).toLongLong() == internalNumber && saved.value(1).toLongLong() == year
+            && saved.value(2).toLongLong() == number) return true;
+        return fail(QStringLiteral("Order identity differs from its original reservation"));
+    }
+    if (saved.lastError().isValid()) return fail(saved.lastError().text());
+    saved.finish();
+    QSqlQuery insert(database);
+    insert.prepare(QStringLiteral("INSERT INTO order_creation_reservations"
+        "(request_uid,order_uid,internal_number,order_year,order_number,created_at) VALUES(?,?,?,?,?,?)"));
+    insert.addBindValue(QStringLiteral("retired:") + uid);
+    insert.addBindValue(uid);
+    insert.addBindValue(internalNumber);
+    insert.addBindValue(year);
+    insert.addBindValue(number);
+    insert.addBindValue(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
+    if (!insert.exec()) return fail(insert.lastError().text());
+    return insert.numRowsAffected() == 1 || fail(QStringLiteral("Order identity reservation was not recorded"));
+}
+
 bool allocateAnnualIdentity(QSqlDatabase database, const QString& requestUid,
     const QDateTime& createdAt, int preferredInternalNumber, Allocation* allocation,
     QString* errorText, const std::function<QSqlDatabase()>& registryResolver)
@@ -348,12 +399,7 @@ bool allocateAnnualIdentity(QSqlDatabase database, const QString& requestUid,
     if (!run(QStringLiteral("CREATE TABLE IF NOT EXISTS annual_order_counters ("
             "order_year INTEGER PRIMARY KEY CHECK(order_year BETWEEN 1 AND 9999),"
             "last_number INTEGER NOT NULL CHECK(last_number BETWEEN 0 AND 2147483647))"))
-        || !run(QStringLiteral("CREATE TABLE IF NOT EXISTS order_creation_reservations ("
-            "request_uid TEXT PRIMARY KEY,order_uid TEXT NOT NULL UNIQUE,"
-            "internal_number INTEGER NOT NULL UNIQUE CHECK(internal_number>0),"
-            "order_year INTEGER NOT NULL CHECK(order_year BETWEEN 1 AND 9999),"
-            "order_number INTEGER NOT NULL CHECK(order_number>0),created_at TEXT NOT NULL,"
-            "UNIQUE(order_year,order_number))"))) return false;
+        || !ensureReservations(database, errorText)) return false;
     // A write statement acquires SQLite's writer reservation before any maxima
     // or replay lookup, including when this year has no counter row yet.
     if (!run(QStringLiteral("UPDATE annual_order_counters SET last_number=last_number WHERE order_year=?"), {year})) return false;

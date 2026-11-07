@@ -168,6 +168,7 @@ private slots:
     void annualAllocationProcessCrash_data();
     void annualAllocationProcessCrash();
     void annualAllocationRollbackAndSources();
+    void deletedHistoricalOrderKeepsIdentity();
     void annualAllocationConcurrency_data();
     void annualAllocationConcurrency();
     void crmBackfillPreservesRecordedOwnerIdentity();
@@ -3948,6 +3949,56 @@ void ReportsOrdersTests::annualAllocationProcessCrash()
     QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),1); q.finish();
     QVERIFY(q.exec("SELECT count(*) FROM annual_order_counters")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(),1); q.finish();
     QVERIFY(q.exec("PRAGMA integrity_check")); QVERIFY(q.next()); QCOMPARE(q.value(0).toString(),QString("ok"));
+}
+
+void ReportsOrdersTests::deletedHistoricalOrderKeepsIdentity()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    const auto oldRoot = qEnvironmentVariable("CS_TEST_DATA_ROOT");
+    const auto oldName = QCoreApplication::applicationName();
+    const bool oldMode = QStandardPaths::isTestModeEnabled();
+    const auto restore = qScopeGuard([&] {
+        Database::close();
+        setIsolatedTestRoot(oldRoot);
+        QCoreApplication::setApplicationName(oldName);
+        QStandardPaths::setTestModeEnabled(oldMode);
+    });
+    QVERIFY(setIsolatedTestRoot(root.path()));
+    QStandardPaths::setTestModeEnabled(true);
+    QCoreApplication::setApplicationName(isolatedSafetyName("Safety-Deleted-History-", root.path()));
+    QString error;
+    QVERIFY2(Database::prepareRuntime(&error), qPrintable(error));
+    QVERIFY2(Database::openPrepared(&error), qPrintable(error));
+    QVERIFY2(Database::runStartupSchemaCheck(&error), qPrintable(error));
+    QVERIFY2(Database::runStartupRegistryRefresh(&error), qPrintable(error));
+    {
+        auto db = Database::db();
+        QVERIFY(Database::ensureSchema());
+        QSqlQuery q(db);
+        QVERIFY2(q.exec("INSERT INTO masters(id,name,role) VALUES('delete-master','Test','master')"), qPrintable(q.lastError().text()));
+        QVERIFY2(q.exec("INSERT INTO work_orders(number,order_uid,order_number,order_year,opened_at,status,"
+                        "plate,plate_norm,car,client,master_id) VALUES(91,'old-order-to-delete',42,2024,"
+                        "'2024-11-01','open','AA1111AA','AA1111AA','Test car','Test client','delete-master')"), qPrintable(q.lastError().text()));
+        QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db, {}, QDate(2024,11,2)), 43);
+        QVERIFY2(Database::hardDeleteOrder(91, &error), qPrintable(error));
+        QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db, {}, QDate(2024,11,2)), 43);
+    }
+    Database::close();
+    QVERIFY2(Database::openPrepared(&error), qPrintable(error));
+    auto db = Database::db();
+    QSqlQuery q(db);
+    QVERIFY(q.exec("SELECT COUNT(*) FROM work_orders WHERE order_uid='old-order-to-delete'"));
+    QVERIFY(q.next());
+    QCOMPARE(q.value(0).toInt(), 0);
+    q.finish();
+    QCOMPARE(OrderIdentityService::nextVisibleOrderNumber(db, {}, QDate(2024,11,2)), 43);
+    OrderIdentityService::Allocation identity;
+    QVERIFY2(OrderIdentityService::allocateAnnualIdentity(db, "new-after-deletion",
+        QDateTime::fromString("2024-11-02T12:00:00Z", Qt::ISODate), 91, &identity, &error), qPrintable(error));
+    QCOMPARE(identity.visibleNumber, 43);
+    QVERIFY(identity.internalNumber > 91);
+    QVERIFY(identity.orderUid != "old-order-to-delete");
 }
 
 void ReportsOrdersTests::annualAllocationRollbackAndSources()

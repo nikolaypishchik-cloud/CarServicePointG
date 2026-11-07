@@ -721,7 +721,7 @@ bool Database::hardDeleteOrder(int orderNumber, QString* errorText)
     const auto blocked=LocalWorkshopBackend::deletionBlockReason(db(),orderUid);
     if(!blocked.isEmpty()){if(errorText)*errorText=blocked;return false;}
 
-    if (!purgeActiveOrderGraph(db(), orderNumber, errorText)) return false;
+    if (!purgeDeletedOrderGraph(db(), orderNumber, errorText)) return false;
     if (!removeOrderFromRegistry(orderNumber, errorText)) return false;
 
     QString logError;
