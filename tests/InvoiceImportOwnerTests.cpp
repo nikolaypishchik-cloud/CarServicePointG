@@ -56,6 +56,26 @@ int main(int argc,char** argv)
     check(!verifyReceipt(db,"[1]",{"archive"},digest,&error),"foreign owner blocked");
     check(!verifyReceipt(db,"[1,1]",{"old","old"},digest,&error),"duplicate receipt blocked");
     check(!verifyReceipt(db,"[1]",{"old","old"},digest,&error),"row loss blocked");
+    sql("WITH RECURSIVE n(i) AS (VALUES(2) UNION ALL SELECT i+1 FROM n WHERE i<405) "
+        "INSERT INTO work_order_parts SELECT i,99,'old','batch-'||i FROM n");
+    sql("INSERT INTO work_order_part_attachments SELECT id,(SELECT file_path FROM work_order_part_attachments WHERE part_id=1) "
+        "FROM work_order_parts WHERE id>1");
+    QJsonArray many;
+    QList<QString> manyOwners;
+    for(int id=405;id>=1;--id){many.append(id);manyOwners.append("old");}
+    const auto manifest=QJsonDocument(many).toJson(QJsonDocument::Compact);
+    check(verifyReceipt(db,manifest,manyOwners,digest,&error),"two SQL batches in reversed receipt order");
+    sql("INSERT INTO work_order_part_attachments SELECT * FROM work_order_part_attachments WHERE part_id=2");
+    check(!verifyReceipt(db,manifest,manyOwners,digest,&error),"multiple links in the last batch rejected");
+    sql("DELETE FROM work_order_part_attachments WHERE part_id=2");
+    check(!verifyReceipt(db,manifest,manyOwners,digest,&error),"missing link in the last batch rejected");
+    sql("INSERT INTO work_order_part_attachments SELECT 2,file_path FROM work_order_part_attachments WHERE part_id=1");
+    const auto other=temp.filePath("different.pdf");QFile otherFile(other);
+    check(otherFile.open(QIODevice::WriteOnly),"open second path");otherFile.write("different bytes");otherFile.close();
+    QSqlQuery link(db);link.prepare("UPDATE work_order_part_attachments SET file_path=? WHERE part_id=2");link.addBindValue(other);
+    check(link.exec(),"link second path");check(!verifyReceipt(db,manifest,manyOwners,digest,&error),"every distinct path checked");
+    check(otherFile.open(QIODevice::WriteOnly|QIODevice::Truncate),"repair second path");otherFile.write("synthetic invoice bytes");otherFile.close();
+    check(verifyReceipt(db,manifest,manyOwners,digest,&error),"repaired second path is freshly verified");
     sql("UPDATE work_order_parts SET order_uid='archive'");
     check(!verifyReceipt(db,"[1]",{"old"},digest,&error),"child owner blocked");
     sql("UPDATE work_order_parts SET order_uid='old'");

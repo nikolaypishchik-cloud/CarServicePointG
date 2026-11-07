@@ -5,12 +5,14 @@
 #include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QUuid>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QStringList>
 
 namespace InvoiceImportOwnerSupport {
 inline bool fail(QString* error, const QString& text)
@@ -120,24 +122,40 @@ inline bool verifyReceipt(QSqlDatabase db, const QByteArray& json, const QList<Q
     const auto saved=QJsonDocument::fromJson(json);
     if (!saved.isArray() || saved.array().size()!=owners.size() || owners.isEmpty() || digest.isEmpty())
         return fail(error,QString::fromUtf8("Не вдалося перевірити попередній імпорт. Повторне додавання заблоковано."));
-    QSet<int> ids;
+    QHash<int,QString> expected;
+    QList<int> ids;
     const auto entries=saved.array();
-    for (int i=0;i<entries.size();++i) {
+    for (qsizetype i=0;i<entries.size();++i) {
         const int id=entries.at(i).toInt();
-        if (id<=0 || ids.contains(id)) return fail(error,QString::fromUtf8("Пошкоджена квитанція імпорту."));
-        ids.insert(id);
-        QSqlQuery q(db);
-        q.prepare(QStringLiteral("SELECT p.order_uid,w.order_uid,a.file_path,p.part_uid "
-            "FROM work_order_parts p JOIN work_orders w ON w.number=p.order_number "
-            "JOIN work_order_part_attachments a ON a.part_id=p.id WHERE p.id=?"));
-        q.addBindValue(id);
-        if (!q.exec()) return fail(error,q.lastError().text());
-        if (!q.next() || q.value(0).toString()!=owners.at(i) || q.value(1).toString()!=owners.at(i)
-            || q.value(3).toString().isEmpty()
-            || fileDigest(q.value(2).toString())!=digest)
-            return fail(error,QString::fromUtf8("Власник або вкладення попереднього імпорту змінилися. Повтор заблоковано."));
-        if (q.next() || q.lastError().isValid()) return fail(error,QString::fromUtf8("Неоднозначне вкладення попереднього імпорту."));
+        if (id<=0 || expected.contains(id)) return fail(error,QString::fromUtf8("Пошкоджена квитанція імпорту."));
+        ids.append(id);
+        expected.insert(id,owners.at(i));
     }
+    const QString changed=QStringLiteral("Власник або вкладення попереднього імпорту змінилися. Повтор заблоковано.");
+    QSet<int> seen;
+    QSet<QString> paths;
+    constexpr int batchSize=400;
+    for (qsizetype offset=0;offset<ids.size();offset+=batchSize) {
+        const auto batch=ids.mid(offset,batchSize);
+        QSqlQuery q(db);
+        if (!q.prepare(QStringLiteral("SELECT p.id,p.order_uid,w.order_uid,a.file_path,p.part_uid "
+            "FROM work_order_parts p JOIN work_orders w ON w.number=p.order_number "
+            "JOIN work_order_part_attachments a ON a.part_id=p.id WHERE p.id IN (%1)")
+            .arg(QStringList(batch.size(),QStringLiteral("?")).join(',')))) return fail(error,q.lastError().text());
+        for (int id : batch) q.addBindValue(id);
+        if (!q.exec()) return fail(error,q.lastError().text());
+        while (q.next()) {
+            const int id=q.value(0).toInt();
+            if (seen.contains(id)) return fail(error,QStringLiteral("Неоднозначне вкладення попереднього імпорту."));
+            if (expected.value(id)!=q.value(1).toString() || expected.value(id)!=q.value(2).toString()
+                || q.value(4).toString().isEmpty()) return fail(error,changed);
+            seen.insert(id);
+            paths.insert(q.value(3).toString());
+        }
+        if (q.lastError().isValid()) return fail(error,q.lastError().text());
+    }
+    if (seen.size()!=ids.size()) return fail(error,changed);
+    for (const auto& path : paths) if (fileDigest(path)!=digest) return fail(error,changed);
     return true;
 }
 } // namespace InvoiceImportOwnerSupport

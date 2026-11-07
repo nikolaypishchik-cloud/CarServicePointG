@@ -92,13 +92,24 @@ static void logInvoiceRowStage(const QString& traceId, const QString& stage, con
 
 static bool bindOwners(QList<CurrentOrdersImportServiceRow>& rows, QString* error)
 {
+    QHash<int,QList<OrderSearchHit>> candidatesByNumber;
+    QSet<QPair<int,QString>> verified;
     for (auto& row : rows) {
-        const auto hits=CurrentOrdersInvoiceImportService::findOrderCandidates(row.orderNumberText.toInt(),error);
-        if (error && !error->isEmpty()) return false;
+        const int visible=row.orderNumberText.toInt();
+        auto it=candidatesByNumber.constFind(visible);
+        if (it==candidatesByNumber.cend()) {
+            const auto candidates=CurrentOrdersInvoiceImportService::findOrderCandidates(visible,error);
+            if (error && !error->isEmpty()) return false;
+            it=candidatesByNumber.insert(visible,candidates);
+        }
+        const auto& hits=it.value();
         row.orderUid=InvoiceImportOwnerSupport::select(hits,row.orderUid,error);
         if (row.orderUid.isEmpty()) return false;
+        const auto key=qMakePair(visible,row.orderUid);
+        if (verified.contains(key)) continue;
         for (const auto& hit:hits) if (hit.orderUid==row.orderUid
                 && !InvoiceImportOwnerSupport::validateStoredOwner(Database::db(),hit,error)) return false;
+        verified.insert(key);
     }
     return true;
 }
