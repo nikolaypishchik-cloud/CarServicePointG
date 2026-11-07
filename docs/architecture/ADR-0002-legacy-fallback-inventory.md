@@ -544,3 +544,4 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `tests/MigrationRepeatJournalTests.cpp` | test-only | Exercises LegacyImportJournal on an isolated duplicate import. |
 | `docs/reliability/DBY_T166_REPEAT.md` | active | Records commands and expected behavior for repeated legacy import. |
 | `tests/MigrationRetainedStoresTests.cpp` | test-only | Exercises preservation of previous encrypted archive, registry and legacy store files in an isolated fixture. |
+| `docs/reliability/DBY_T171_PUBLICATION.md` | active | Records the migration-service rollback marker and the crash/retry fixtures used for publication validation. |
