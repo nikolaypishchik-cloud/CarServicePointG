@@ -1287,11 +1287,11 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     }
     if(retainedStores) {
         Database::close();
-        const QMap<QString,QPair<QString,QString>> slots={
+        const QMap<QString,QPair<QString,QString>> storePaths={
             {"archive",{AppRuntime::archiveDbFilePath(),AppRuntime::sealedArchiveDbFilePath()}},
             {"legacy",{AppRuntime::legacyDbFilePath(),AppRuntime::sealedLegacyDbFilePath()}},
             {"registry",{AppRuntime::registryDbFilePath(),AppRuntime::sealedRegistryDbFilePath()}}};
-        for(auto it=slots.cbegin();it!=slots.cend();++it) {
+        for(auto it=storePaths.cbegin();it!=storePaths.cend();++it) {
             const auto path=it.value().first;
             if(!QFileInfo::exists(path))QVERIFY(QFile::copy(AppRuntime::activeDbFilePath(),path));
             const auto connection="retention-fixture-"+it.key();
