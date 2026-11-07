@@ -1,0 +1,14 @@
+QWidget[cs_role="surface"] {
+    background: transparent;
+    border: none;
+}
+
+QLabel[cs_role="muted"] {
+    color: rgba(223, 232, 239, 0.84);
+}
+
+QFrame[cs_role="card"] {
+    background: rgba(30, 38, 48, 0.88);
+    border: 1px solid rgba(120, 140, 160, 0.35);
+    border-radius: 16px;
+}

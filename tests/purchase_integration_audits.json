@@ -1,0 +1,219 @@
+{
+  "schema": 1,
+  "approval": "User approved separating isolated acceptance and external audits on 2026-10-30; retain all scenarios",
+  "audits": [
+    {
+      "scenario": "elitCabinetPaymentsWorkingCopyAudit",
+      "required_environment": [
+        "CS_ECAT_PAYMENT_FIXTURE",
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "elitMissingInvoicesWorkingCopyAudit",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "statisticsPartsMovementWorkingCopyAudit",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [
+        "CS_TEST_SCREENSHOTS"
+      ],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "statisticsCurrentRosterWorkingCopyAudit",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "periodReportIncludesDismissedWorkingCopyAudit",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "debtAnalysisResponsiveWorkingCopyAudit",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [
+        "CS_TEST_SCREENSHOTS"
+      ],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "personnelPostsWorkingCopyAudit",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [
+        "CS_TEST_SCREENSHOTS",
+        "CS_UI_AUDIT_LIGHT"
+      ],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "reportInvoiceBackgroundWorkingCopyAudit",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [
+        "CS_TEST_SCREENSHOTS",
+        "CS_UI_AUDIT_LIGHT"
+      ],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "reportTabSwitchLayoutWorkingCopyAudit",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [
+        "CS_TEST_SCREENSHOTS",
+        "CS_UI_AUDIT_LIGHT"
+      ],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "workshopPostWorkingCopyAudit",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [
+        "CS_TEST_SCREENSHOTS",
+        "CS_UI_AUDIT_LIGHT"
+      ],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "debtAndStatisticsWorkingCopyAudit",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [
+        "CS_ELIT_CLICK_PDF_AUDIT",
+        "CS_TEST_SCREENSHOTS"
+      ],
+      "uses_native_credentials": true,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "elitStartupWorkingCopyAudit",
+      "required_environment": [
+        "CS_ELIT_STARTUP_AUDIT",
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [],
+      "uses_native_credentials": true,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "elitLiveReadOnly",
+      "required_environment": [
+        "CS_ELIT_LIVE_READ"
+      ],
+      "optional_environment": [
+        "CS_ELIT_LIVE_DETAILS"
+      ],
+      "uses_native_credentials": true,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "elitCabinetLivePdfCopy",
+      "required_environment": [
+        "CS_ELIT_PDF_LIVE_READ",
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [
+        "CS_ELIT_PDF_ALL"
+      ],
+      "uses_native_credentials": true,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "elitApprovedDocumentWorkingCopy",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [
+        "CS_TEST_DATA_ROOT"
+      ],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "elitWorkingCopyAllocationAudit",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [
+        "CS_ELIT_PDF_AUDIT_SOURCE"
+      ],
+      "uses_native_credentials": true,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "fullOpeningWorkingCopy",
+      "required_environment": [
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "suppliedSpareInvoiceImports",
+      "required_environment": [
+        "CS_SPARE_INVOICE_TEST_FILES"
+      ],
+      "optional_environment": [
+        "CS_TEST_SCREENSHOTS"
+      ],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "supplierStagingWorkingCopyAudit",
+      "required_environment": [
+        "CS_SUPPLIER_AUDIT_SOURCE"
+      ],
+      "optional_environment": [],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    },
+    {
+      "scenario": "performanceAuditWorkingCopy",
+      "required_environment": [
+        "CS_PERF_OUTPUT",
+        "CS_TAB_AUDIT_COPY"
+      ],
+      "optional_environment": [],
+      "uses_native_credentials": false,
+      "reason": "Historical disposable data / explicitly authorized external integration audit"
+    }
+  ]
+}

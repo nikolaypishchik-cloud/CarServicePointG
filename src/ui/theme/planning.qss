@@ -1,0 +1,14 @@
+QWidget[planning_role="panel"] {
+    background: rgba(30, 37, 47, 0.78);
+    border: 1px solid rgba(120, 140, 160, 0.28);
+    border-radius: 14px;
+}
+
+QLabel[planning_role="caption"] {
+    color: rgba(238, 243, 250, 0.92);
+    font-weight: 700;
+}
+
+QLabel[planning_role="hint"] {
+    color: rgba(183, 210, 255, 0.92);
+}

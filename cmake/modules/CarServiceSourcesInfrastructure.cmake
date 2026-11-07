@@ -1,0 +1,62 @@
+# P2 architecture: source boundary for the infrastructure layer.
+# Keep layer ownership here; the root CMakeLists.txt must remain orchestration-only.
+
+set(CS_INFRASTRUCTURE_SOURCES
+    src/infrastructure/db/sqlite/Db.cpp
+    src/infrastructure/db/sqlite/DbFacadeSupport.cpp
+    src/infrastructure/db/sqlite/DbBootstrap.cpp
+    src/infrastructure/db/sqlite/DbSettingsRepository.cpp
+    src/infrastructure/db/sqlite/DbRuntimePreflight.cpp
+    src/infrastructure/db/sqlite/DbArchiveRoutingSupport.cpp
+    src/infrastructure/db/sqlite/DbArchiveHydrationSupport.cpp
+    src/infrastructure/db/sqlite/DbArchiveSourceSchemaSupport.cpp
+    src/infrastructure/db/sqlite/DbArchiveRouterCacheImportSupport.cpp
+    src/infrastructure/db/sqlite/DbImportSupport.cpp
+    src/infrastructure/db/sqlite/DbDiagnostics.cpp
+    src/infrastructure/db/sqlite/DbSettingsCacheSupport.cpp
+    src/infrastructure/db/sqlite/DbSettingsSqlSupport.cpp
+    src/infrastructure/db/sqlite/DbSourceFingerprintSupport.cpp
+    src/infrastructure/db/sqlite/DbWorkspaceOrderStateSupport.cpp
+    src/infrastructure/db/sqlite/DbCanonicalRewriteSupport.cpp
+    src/infrastructure/db/sqlite/DbCanonicalRewriteExecutionSupport.cpp
+    src/infrastructure/db/sqlite/DbCanonicalRewriteFinalizeSupport.cpp
+    src/infrastructure/db/sqlite/DbCanonicalRewritePrimaryImportSupport.cpp
+    src/infrastructure/db/sqlite/DbCanonicalRewriteAncillaryImportSupport.cpp
+    src/infrastructure/db/sqlite/DbThreadConnectionSupport.cpp
+    src/infrastructure/db/sqlite/DbContext.cpp
+    src/infrastructure/db/sqlite/TransactionRunner.cpp
+    src/infrastructure/db/sqlite/RuntimeDbPreflightValidator.cpp
+    src/infrastructure/db/sqlite/OrderArchiveShardSqlSupport.cpp
+    src/infrastructure/db/sqlite/LegacyCanonicalImportNormalization.cpp
+    src/infrastructure/db/sqlite/LegacyCanonicalAncillaryImportSupport.cpp
+    src/infrastructure/security/EncryptedStorage.cpp
+    src/infrastructure/audit/MutationAuditTrail.cpp
+    src/infrastructure/audit/BackupRecoveryAuditTrail.cpp
+    src/infrastructure/db/sqlite/ScopedConnectionManager.cpp
+    src/infrastructure/db/sqlite/DbSchemaAuditSupport.cpp
+    src/infrastructure/db/sqlite/DbArchiveRoutingMemberFlow.cpp
+    src/infrastructure/db/sqlite/DbArchiveRoutingStageSupport.cpp
+    src/infrastructure/db/sqlite/DbBootstrapEnsureSchema.cpp
+    src/infrastructure/db/sqlite/DbImportCatalogFromOrders.cpp
+    src/infrastructure/db/sqlite/DbImportEnsureCatalogImportSchema.cpp
+    src/infrastructure/security/EncryptedStorageLocalSupport.cpp
+    src/infrastructure/security/EncryptedStorageRuntime.cpp
+)
+
+set(CS_INFRASTRUCTURE_HEADERS
+    src/infrastructure/db/sqlite/Db.h
+    src/infrastructure/db/sqlite/DbSettingsCacheSupport.h
+    src/infrastructure/db/sqlite/DbSettingsSqlSupport.h
+    src/infrastructure/db/sqlite/DbSourceFingerprintSupport.h
+    src/infrastructure/db/sqlite/DbWorkspaceOrderStateSupport.h
+    src/infrastructure/db/sqlite/DbCanonicalRewriteExecutionSupport.h
+    src/infrastructure/db/sqlite/DbThreadConnectionSupport.h
+    src/infrastructure/db/sqlite/RuntimeDbPreflightValidator.h
+    src/infrastructure/db/sqlite/OrderArchiveShardSqlSupport.h
+    src/infrastructure/db/sqlite/DbArchiveInternals.h
+    src/infrastructure/db/sqlite/LegacyCanonicalImportNormalization.h
+    src/infrastructure/db/sqlite/LegacyCanonicalAncillaryImportSupport.h
+    src/infrastructure/db/sqlite/DbSchemaAuditSupport.h
+    src/infrastructure/security/EncryptedStorage.h
+    src/infrastructure/security/EncryptedStorageLocalSupport.h
+)

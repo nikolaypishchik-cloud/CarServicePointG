@@ -1,0 +1,14 @@
+src/core/services/ReportsDataLoaderLocalSupport.cpp
+src/core/services/ReportsDataLoaderLocalSupport.h
+src/core/services/ReportsPdfSupportLocalSupport.cpp
+src/core/services/ReportsPdfSupportLocalSupport.h
+src/infrastructure/db/sqlite/DbArchiveRoutingLocalSupport.h
+src/infrastructure/db/sqlite/DbCatalogImportLocalSupport.h
+src/infrastructure/db/sqlite/DbImportOrderStateLocalSupport.h
+src/infrastructure/security/EncryptedStorageLocalSupport.cpp
+src/infrastructure/security/EncryptedStorageLocalSupport.h
+src/ui/tabs/orders/CurrentOrdersPageLocalSupport.cpp
+src/ui/tabs/orders/CurrentOrdersPageLocalSupport.h
+src/ui/tabs/orders/WorkPartsMissingMethods.cpp
+src/ui/tabs/settings/SettingsPageLocalSupport.cpp
+src/ui/tabs/settings/SettingsPageLocalSupport.h

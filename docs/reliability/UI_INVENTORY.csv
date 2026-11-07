@@ -1,0 +1,22 @@
+﻿Module,Source,Operations/buttons audit,UI acceptance
+OnlineBookingPage,src/ui/tabs/booking/OnlineBookingPage.cpp,TODO,NOT_RUN
+CatalogPage,src/ui/tabs/catalog/CatalogPage.cpp,TODO,NOT_RUN
+CloudSyncPage,src/ui/tabs/cloudsync/CloudSyncPage.cpp,TODO,NOT_RUN
+CrmPage,src/ui/tabs/crm/CrmPage.cpp,TODO,NOT_RUN
+HistoryPage,src/ui/tabs/history/HistoryPage.cpp,TODO,NOT_RUN
+VehicleIntakePage,src/ui/tabs/intake/VehicleIntakePage.cpp,TODO,NOT_RUN
+WorkshopInventoryPage,src/ui/tabs/inventory/WorkshopInventoryPage.cpp,TODO,NOT_RUN
+MastersPage,src/ui/tabs/masters/MastersPage.cpp,TODO,NOT_RUN
+BayOccupancyPage,src/ui/tabs/orders/BayOccupancyPage.cpp,TODO,NOT_RUN
+CurrentOrdersPage,src/ui/tabs/orders/CurrentOrdersPage.cpp,TODO,NOT_RUN
+PartsPage,src/ui/tabs/parts/PartsPage.cpp,TODO,NOT_RUN
+InvoicesPage,src/ui/tabs/reports/InvoicesPage.cpp,TODO,NOT_RUN
+PurchaseDebtsPage,src/ui/tabs/reports/PurchaseDebtsPage.cpp,TODO,NOT_RUN
+ReportsPage,src/ui/tabs/reports/ReportsPage.cpp,TODO,NOT_RUN
+PlanningPage,src/ui/tabs/schedule/PlanningPage.cpp,TODO,NOT_RUN
+AccessControlPage,src/ui/tabs/settings/AccessControlPage.cpp,TODO,NOT_RUN
+InvoiceRecognitionSettingsPage,src/ui/tabs/settings/InvoiceRecognitionSettingsPage.cpp,TODO,NOT_RUN
+PhoneSyncSettingsPage,src/ui/tabs/settings/PhoneSyncSettingsPage.cpp,TODO,NOT_RUN
+SettingsPage,src/ui/tabs/settings/SettingsPage.cpp,TODO,NOT_RUN
+SupplierConnectionPage,src/ui/tabs/settings/SupplierConnectionPage.cpp,TODO,NOT_RUN
+StatsPage,src/ui/tabs/statistics/StatsPage.cpp,TODO,NOT_RUN

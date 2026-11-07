@@ -1,0 +1,27 @@
+#pragma once
+
+#include <QString>
+
+namespace CarService::AppVersion {
+
+inline QString updateSignerThumbprint()
+{
+    return QStringLiteral("@CS_UPDATE_SIGNER_THUMBPRINT@");
+}
+
+inline QString versionString()
+{
+    return QStringLiteral("@PROJECT_VERSION@");
+}
+
+inline QString githubOwner()
+{
+    return QStringLiteral("@CS_GITHUB_OWNER@");
+}
+
+inline QString githubRepo()
+{
+    return QStringLiteral("@CS_GITHUB_REPO@");
+}
+
+} // namespace CarService::AppVersion
