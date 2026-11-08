@@ -4504,12 +4504,19 @@ void ReportsOrdersTests::annualWorkspaceCreationIsPersistent()
     auto* visibleNumber=form.findChild<QSpinBox*>("orderVisibleNumber"); QVERIFY(visibleNumber);
     QVERIFY(visibleNumber->isReadOnly()); QCOMPARE(visibleNumber->buttonSymbols(),QAbstractSpinBox::NoButtons);
     QCOMPARE(visibleNumber->value(),2); QVERIFY(visibleNumber->maximum()>=10000000);
+    auto* post=form.findChild<QComboBox*>("newOrderPost"); QVERIFY(post); QCOMPARE(post->currentData().toInt(),0);
+    if (const auto output=qEnvironmentVariable("CS_NEW_ORDER_FORM_OUTPUT"); !output.isEmpty()) {
+        form.show(); QTest::qWait(100); QVERIFY(form.grab().save(output));
+    }
+    post->setCurrentIndex(post->findData(2));
     const auto draft=form.serializeDraftState();
+    QCOMPARE(draft.value("preferredPost").toInt(),2);
     const auto requestUid=draft["creationRequestUid"].toString(); QVERIFY(!requestUid.isEmpty());
     QCOMPARE(form.serializeDraftState()["creationRequestUid"].toString(),requestUid);
     OrderDialog recovered(nullptr,-1); QVERIFY(recovered.serializeDraftState()["creationRequestUid"].toString()!=requestUid);
     QVERIFY2(recovered.restoreDraftState(draft,&error),qPrintable(error));
     QCOMPARE(recovered.serializeDraftState()["creationRequestUid"].toString(),requestUid);
+    QCOMPARE(recovered.serializeDraftState()["preferredPost"].toInt(),2);
 }
 
 void ReportsOrdersTests::profileRegistryLifecycle_data()

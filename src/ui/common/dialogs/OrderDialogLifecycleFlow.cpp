@@ -787,7 +787,8 @@ OrderWorkspaceInput OrderDialog::buildWorkspaceInput(const QString& status, doub
 
 QString OrderDialog::currentStateSignature() const
 {
-    return OrderDialogStateSignature::build(buildStateSnapshot());
+    const auto signature = OrderDialogStateSignature::build(buildStateSnapshot());
+    return m_newOrderPost ? signature + QStringLiteral("|post=") + m_newOrderPost->currentData().toString() : signature;
 }
 
 bool OrderDialog::hasUnsavedChanges() const
@@ -877,6 +878,7 @@ QJsonObject OrderDialog::serializeDraftState() const
         {QStringLiteral("discount"), m_discount ? m_discount->value() : 0.0},
         {QStringLiteral("discount_mode"), m_discountMode->currentData().toString()}
     };
+    if (m_newOrderPost) payload.insert(QStringLiteral("preferredPost"), m_newOrderPost->currentData().toInt());
     if (m_workPartsPage && m_workPartsPage->hasPendingEdits()) {
         payload.insert(QStringLiteral("workParts"), m_workPartsPage->serializeDraftState());
     }
@@ -887,6 +889,7 @@ bool OrderDialog::restoreDraftState(const QJsonObject& payload, QString* errorTe
 {
     const auto requestUid = payload.value(QStringLiteral("creationRequestUid")).toString().trimmed();
     if (!requestUid.isEmpty()) m_creationRequestUid = requestUid;
+    if (m_newOrderPost) m_newOrderPost->setCurrentIndex(qMax(0,m_newOrderPost->findData(payload.value("preferredPost").toInt())));
     if (m_num) m_num->setValue(payload.value(QStringLiteral("visibleOrderNumber")).toInt(m_num->value()));
     if (m_openedDate) {
         const QDate d = DateFormats::parseDate(payload.value(QStringLiteral("openedDate")).toString());

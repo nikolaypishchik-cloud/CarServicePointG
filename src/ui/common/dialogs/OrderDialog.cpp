@@ -768,13 +768,14 @@ OrderDialog::OrderDialog(QWidget* parent, int orderNumber)
         resize(1480, 860);
         setMinimumSize(1220, 720);
     }
-    setStyleSheet(dialogMetallicStyle());
-
+    setStyleSheet(dialogMetallicStyle() + (m_isNewOrder ? QStringLiteral(
+        "QDialog#orderDialog { background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #273642,stop:1 #0e1922); }"
+        "QTabWidget::pane {border:0;background:transparent;}") : QString()));
     buildUi();
     BackupPerformanceGuard::hold(AppContext::instance().backupManager(), m_isNewOrder ? 2500 : 4000);
     if (auto* crash = AppContext::instance().crashRecoveryManager()) { crash->registerParticipant(this); }
     if (windowTitle().isEmpty()) {
-        setWindowTitle(m_isNewOrder ? QString::fromUtf8("Новий наряд (додати авто)") : QString::fromUtf8("Редагування наряду"));
+        setWindowTitle(m_isNewOrder ? QString::fromUtf8("Новий наряд") : QString::fromUtf8("Редагування наряду"));
     }
     Q_UNUSED(parent);
     loadMasters();
@@ -1088,6 +1089,10 @@ void OrderDialog::accept()
             return;
         }
         refreshTotals();
+        if (m_newOrderPost && m_newOrderPost->currentData().toInt() > 0) {
+            const auto uid = OrderDialogReadQueryService::canonicalOrderUidForInternalNumber(m_orderNumber);
+            if (!uid.isEmpty()) BayOccupancyPage::open(this, uid, m_newOrderPost->currentData().toInt());
+        }
         OrderDialogSubmitSupport::scheduleOpenCreatedOrderEditor(parentWidget(), m_orderNumber);
     }
 

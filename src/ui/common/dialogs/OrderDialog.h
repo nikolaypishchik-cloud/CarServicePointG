@@ -145,6 +145,7 @@ private:
     QLineEdit* m_client = nullptr;
     QLineEdit* m_phone = nullptr;
     QComboBox* m_master = nullptr;
+    QComboBox* m_newOrderPost = nullptr;
     QDoubleSpinBox* m_discount = nullptr;
     QComboBox* m_discountMode = nullptr;
 
