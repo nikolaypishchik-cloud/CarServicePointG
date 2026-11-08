@@ -31,9 +31,13 @@
 #include <QMetaObject>
 #include <QPlainTextEdit>
 #include <QPointer>
+#include <QPainter>
+#include <QStyle>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
+#include <QStackedWidget>
+#include <QIntValidator>
 #include <QScrollBar>
 #include <QSignalBlocker>
 #include <QSizePolicy>
@@ -82,6 +86,20 @@ struct IntakeTableGuard {
     int scroll = 0;
 };
 
+QIcon intakeIcon(ushort symbol)
+{
+    QPixmap image(48,48);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::TextAntialiasing);
+    QFont font("Segoe MDL2 Assets");
+    font.setPixelSize(36);
+    painter.setFont(font);
+    painter.setPen(QColor("#76dce5"));
+    painter.drawText(image.rect(),Qt::AlignCenter,QString(QChar(symbol)));
+    return QIcon(image);
+}
+
 void applyIntakeActionButtonStyle(QPushButton* button)
 {
     if (!button) return;
@@ -105,7 +123,7 @@ void applyIntakeInputStyle(QWidget* widget)
         "QLineEdit,QDateEdit,QDateTimeEdit,QPlainTextEdit,QComboBox{background:#ffffff;color:#05070a;"
         "placeholder-text-color:#1f2937;border:1px solid #aab4c0;border-radius:6px;"
         "padding:6px 8px;selection-background-color:#2b5d95;selection-color:#ffffff;}"
-        "QLineEdit:focus,QDateEdit:focus,QDateTimeEdit:focus,QPlainTextEdit:focus,QComboBox:focus{border:2px solid #7ea4f4;padding:5px 7px;}"
+        "QLineEdit:focus,QDateEdit:focus,QDateTimeEdit:focus,QPlainTextEdit:focus,QComboBox:focus{border:2px solid #58c5d5;padding:5px 7px;}"
         "QComboBox QAbstractItemView{background:#ffffff;color:#05070a;selection-background-color:#d8e6ff;selection-color:#05070a;}"
         "QComboBox QLineEdit{background:#ffffff;color:#05070a;border:none;padding:0px;}"));
 }
@@ -134,30 +152,27 @@ QString tableStyleSheet()
 QString pageStyleSheet()
 {
     return QStringLiteral(
-        "VehicleIntakePage,QScrollArea,QWidget#intakeForm{background:#222831;color:#f3f6fb;}"
-        "QGroupBox{color:#f3f6fb;border:1px solid rgba(255,255,255,0.22);border-radius:8px;"
-        "margin-top:14px;padding:14px 10px 10px 10px;font-weight:800;}"
+        "VehicleIntakePage,QScrollArea,QWidget#intakeForm{background:#182331;color:#f3f6fb;}"
+        "QGroupBox{color:#f3f6fb;background:#1c2938;border:1px solid #586b7c;border-radius:9px;"
+        "margin-top:9px;padding:8px 8px 6px 8px;font-weight:700;}"
         "QGroupBox::title{subcontrol-origin:margin;left:12px;padding:0 6px;}"
         "QLabel{color:#f3f6fb;}QRadioButton{color:#ffffff;spacing:8px;min-height:24px;}"
         "QRadioButton::indicator{width:16px;height:16px;background:#ffffff;border:2px solid #ffffff;border-radius:8px;}"
         "QRadioButton::indicator:checked{background:#176bff;border:2px solid #ffffff;}");
 }
 
-QLineEdit* addLine(QFormLayout* form, const QString& label, QWidget* owner)
+QLineEdit* editableChoice(QGridLayout* grid, int row, int column, const QString& label,
+                          const QStringList& choices)
 {
-    auto* edit = new QLineEdit(owner);
-    applyIntakeInputStyle(edit);
-    form->addRow(label, edit);
-    return edit;
-}
-
-QPlainTextEdit* addText(QFormLayout* form, const QString& label, QWidget* owner, int minHeight = 76)
-{
-    auto* edit = new QPlainTextEdit(owner);
-    edit->setMinimumHeight(minHeight);
-    applyIntakeInputStyle(edit);
-    form->addRow(label, edit);
-    return edit;
+    auto* combo = new QComboBox;
+    combo->setEditable(true);
+    combo->setInsertPolicy(QComboBox::NoInsert);
+    combo->addItems(choices);
+    combo->setCurrentIndex(-1);
+    applyIntakeInputStyle(combo);
+    grid->addWidget(new QLabel(label),row,column);
+    grid->addWidget(combo,row,column+1);
+    return combo->lineEdit();
 }
 
 QJsonObject objectValue(const QJsonObject& parent, const QString& key)
@@ -202,42 +217,37 @@ void VehicleIntakePage::buildUi()
     root->setContentsMargins(12, 12, 12, 12);
     root->setSpacing(10);
 
-    auto* scroll = new QScrollArea(this);
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    auto* formHost = new QWidget(scroll);
-    formHost->setObjectName(QStringLiteral("intakeForm"));
+    auto* heading = new QHBoxLayout;
+    auto* title = new QLabel(this);
+    title->setStyleSheet("font:700 23px 'Segoe UI';color:#f5f8fc;");
+    auto* stepLabel = new QLabel(this);
+    stepLabel->setStyleSheet("color:white;border:1px solid #67d6df;border-radius:12px;padding:3px 13px;font-weight:700;");
+    auto* badge = new QLabel(this);
+    badge->setPixmap(intakeIcon(0xe8fd).pixmap(28,28));
+    heading->addWidget(badge);
+    heading->addWidget(title,1);
+    heading->addWidget(stepLabel);
+    root->addLayout(heading);
+    auto* divider = new QFrame(this);
+    divider->setFixedHeight(2);
+    divider->setStyleSheet("background:#67d6df;");
+    root->addWidget(divider);
+    m_steps = new QStackedWidget(this);
+    root->addWidget(m_steps,1);
+    auto addPage = [&] {
+        auto* scroll = new QScrollArea(m_steps);
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        auto* host = new QWidget;
+        host->setObjectName("intakeForm");
+        scroll->setWidget(host);
+        m_steps->addWidget(scroll);
+        return host;
+    };
+    auto* formHost = addPage();
     auto* main = new QVBoxLayout(formHost);
-    main->setSpacing(10);
-
-    auto* actions = new QHBoxLayout();
-    actions->setContentsMargins(0, 0, 0, 0);
-    actions->setSpacing(8);
-    auto* clear = new QPushButton(QString::fromUtf8("Новий акт"), formHost);
-    auto* save = new QPushButton(QString::fromUtf8("Зберегти акт"), formHost);
-    auto* photo = new QPushButton(QString::fromUtf8("Додати фото"), formHost);
-    auto* signature = new QPushButton(QString::fromUtf8("Додати підпис"), formHost);
-    auto* pdf = new QPushButton(QString::fromUtf8("Зберегти і створити PDF"), formHost);
-    auto* blank = new QPushButton(QString::fromUtf8("Друк пустого акта"), formHost);
-    for (auto* b : {clear, save, photo, signature, pdf, blank}) {
-        applyIntakeActionButtonStyle(b);
-        b->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
-    }
-    connect(clear, &QPushButton::clicked, this, &VehicleIntakePage::clearForm);
-    connect(save, &QPushButton::clicked, this, &VehicleIntakePage::saveDraft);
-    connect(photo, &QPushButton::clicked, this, &VehicleIntakePage::addPhotoForSelected);
-    connect(signature, &QPushButton::clicked, this, &VehicleIntakePage::pickSignatureForSelected);
-    connect(pdf, &QPushButton::clicked, this, &VehicleIntakePage::generatePdfForSelected);
-    connect(blank, &QPushButton::clicked, this, &VehicleIntakePage::printBlankAct);
-    actions->addWidget(clear);
-    actions->addWidget(save);
-    actions->addWidget(photo);
-    actions->addWidget(signature);
-    actions->addWidget(pdf);
-    actions->addWidget(blank);
-    actions->addStretch(1);
-    main->addLayout(actions);
-
+    main->setContentsMargins(2,0,2,4);
+    main->setSpacing(6);
     auto* header = new QGroupBox(QString::fromUtf8("Дані акту"), formHost);
     auto* headerGrid = new QGridLayout(header);
     m_intakeUid = new QLineEdit(header);
@@ -253,20 +263,28 @@ void VehicleIntakePage::buildUi()
     for (QWidget* w : {static_cast<QWidget*>(m_actNumber), static_cast<QWidget*>(m_actDate), static_cast<QWidget*>(m_order)}) {
         applyIntakeInputStyle(w);
     }
-    headerGrid->addWidget(new QLabel(QString::fromUtf8("Номер акту"), header), 0, 0);
+    headerGrid->addWidget(new QLabel(QString::fromUtf8("Номер акту *"), header), 0, 0);
     headerGrid->addWidget(m_actNumber, 0, 1);
-    headerGrid->addWidget(new QLabel(QString::fromUtf8("Дата акту"), header), 0, 2);
+    headerGrid->addWidget(new QLabel(QString::fromUtf8("Дата акту *"), header), 0, 2);
     headerGrid->addWidget(m_actDate, 0, 3);
-    headerGrid->addWidget(new QLabel(QString::fromUtf8("№ замовлення-наряду"), header), 1, 0);
+    headerGrid->addWidget(new QLabel(QString::fromUtf8("№ замовлення-наряду *"), header), 1, 0);
     headerGrid->addWidget(m_order, 1, 1, 1, 2);
     headerGrid->addWidget(autofill, 1, 3);
     main->addWidget(header);
 
     auto* clientBox = new QGroupBox(QString::fromUtf8("Дані клієнта"), formHost);
-    auto* clientForm = new QFormLayout(clientBox);
-    m_client = addLine(clientForm, QString::fromUtf8("Клієнт"), clientBox);
-    m_phone = addLine(clientForm, QString::fromUtf8("Телефон"), clientBox);
-    m_clientUid = addLine(clientForm, QStringLiteral("client_uid"), clientBox);
+    auto* clientForm = new QGridLayout(clientBox);
+    m_client = new QLineEdit(clientBox);
+    m_phone = new QLineEdit(clientBox);
+    m_clientUid = new QLineEdit(clientBox);
+    m_clientUid->hide();
+    for (auto* edit : {m_client,m_phone}) applyIntakeInputStyle(edit);
+    clientForm->addWidget(new QLabel(tr("Клієнт *")),0,0);
+    clientForm->addWidget(m_client,0,1);
+    clientForm->addWidget(new QLabel(tr("Телефон *")),0,2);
+    clientForm->addWidget(m_phone,0,3);
+    clientForm->setColumnStretch(1,2);
+    clientForm->setColumnStretch(3,1);
     main->addWidget(clientBox);
 
     auto* carBox = new QGroupBox(QString::fromUtf8("Дані авто"), formHost);
@@ -278,22 +296,26 @@ void VehicleIntakePage::buildUi()
         carGrid->addWidget(edit, row, col * 2 + 1);
         return edit;
     };
-    m_vehicle = addGridLine(QString::fromUtf8("Марка / модель"), 0, 0);
+    m_vehicle = addGridLine(QString::fromUtf8("Марка / модель *"), 0, 0);
     m_plate = addGridLine(QString::fromUtf8("Державний номер"), 0, 1);
     m_vin = addGridLine(QStringLiteral("VIN"), 1, 0);
-    m_year = addGridLine(QString::fromUtf8("Рік випуску"), 1, 1);
-    m_engine = addGridLine(QString::fromUtf8("Тип двигуна"), 2, 0);
-    m_gearbox = addGridLine(QString::fromUtf8("КПП"), 2, 1);
-    m_mileage = addGridLine(QString::fromUtf8("Пробіг, км"), 3, 0);
-    m_fuel = addGridLine(QString::fromUtf8("Рівень пального"), 3, 1);
+    QStringList years;
+    for(int year=QDate::currentDate().year()+1;year>=1950;--year) years.append(QString::number(year));
+    m_year = editableChoice(carGrid,1,2,tr("Рік випуску"),years);
+    m_engine = editableChoice(carGrid,2,0,tr("Тип двигуна"),{tr("Бензин"),tr("Дизель"),tr("Гібрид"),tr("Електро")});
+    m_gearbox = editableChoice(carGrid,2,2,tr("КПП"),{tr("Механічна"),tr("Автоматична"),tr("Робот"),tr("Варіатор")});
+    m_mileage = addGridLine(tr("Пробіг, км"),3,0);
+    m_mileage->setValidator(new QIntValidator(0,2147483647,m_mileage));
+    m_fuel = editableChoice(carGrid,3,2,tr("Рівень пального"),{"0","¼","½","¾",tr("Повний")});
+    carGrid->setColumnStretch(1,1);
+    carGrid->setColumnStretch(3,1);
     m_vehicleUid = new QLineEdit(carBox);
     m_vehicleUid->setVisible(false);
     m_master = new QComboBox(carBox);
     m_master->setEditable(true);
     m_master->setInsertPolicy(QComboBox::NoInsert);
     applyIntakeInputStyle(m_master);
-    carGrid->addWidget(new QLabel(QString::fromUtf8("Майстер"), carBox), 4, 0);
-    carGrid->addWidget(m_master, 4, 1);
+
     m_plateLookupStatus = new QLabel(carBox);
     m_plateLookupStatus->setStyleSheet(QStringLiteral("QLabel{color:#d8e6ff;font-size:11px;font-weight:600;}"));
     carGrid->addWidget(m_plateLookupStatus, 4, 2, 1, 2);
@@ -305,22 +327,32 @@ void VehicleIntakePage::buildUi()
         dt->setDisplayFormat(QStringLiteral("dd.MM.yy HH:mm"));
         applyIntakeInputStyle(dt);
     }
-    carGrid->addWidget(new QLabel(QString::fromUtf8("Дата та час приймання"), carBox), 5, 0);
-    carGrid->addWidget(m_acceptedAt, 5, 1);
-    carGrid->addWidget(new QLabel(QString::fromUtf8("Орієнтована дата видачі"), carBox), 5, 2);
-    carGrid->addWidget(m_plannedReturnAt, 5, 3);
     main->addWidget(carBox);
+    auto* schedule = new QGroupBox(formHost);
+    auto* timeRow = new QHBoxLayout(schedule);
+    timeRow->addWidget(new QLabel(tr("Майстер *"))); timeRow->addWidget(m_master,1);
+    timeRow->addWidget(new QLabel(tr("Дата та час приймання *"))); timeRow->addWidget(m_acceptedAt,1);
+    timeRow->addWidget(new QLabel(tr("Орієнтована дата видачі *"))); timeRow->addWidget(m_plannedReturnAt,1);
+    main->addWidget(schedule);
+    auto* notes = new QHBoxLayout;
+    auto noteField = [&](const QString& caption) {
+        auto* box = new QGroupBox(caption,formHost);
+        auto* layout = new QVBoxLayout(box);
+        auto* edit = new QPlainTextEdit(box);
+        edit->setMinimumHeight(58);
+        applyIntakeInputStyle(edit);
+        layout->addWidget(edit);
+        notes->addWidget(box,1);
+        return edit;
+    };
+    m_complaint = noteField(tr("Заявлена несправність / побажання клієнта"));
+    m_diagnostics = noteField(tr("Погоджені роботи"));
+    main->addLayout(notes,1);
 
-    auto* complaintBox = new QGroupBox(QString::fromUtf8("Заявлена несправність / побажання клієнта"), formHost);
-    auto* complaintForm = new QFormLayout(complaintBox);
-    m_complaint = addText(complaintForm, QString::fromUtf8("Опис зі слів клієнта"), complaintBox, 92);
-    main->addWidget(complaintBox);
-
-    auto* diagnosticsBox = new QGroupBox(QString::fromUtf8("Попередня діагностика / погоджені роботи"), formHost);
-    auto* diagnosticsForm = new QFormLayout(diagnosticsBox);
-    m_diagnostics = addText(diagnosticsForm, QString::fromUtf8("Попередній перелік робіт, примітки, обмеження"), diagnosticsBox, 92);
-    main->addWidget(diagnosticsBox);
-
+    formHost = addPage();
+    main = new QVBoxLayout(formHost);
+    main->setContentsMargins(2,0,2,4);
+    main->setSpacing(6);
     auto* conditionBox = new QGroupBox(QString::fromUtf8("Зовнішній стан авто на момент приймання"), formHost);
     auto* conditionGrid = new QGridLayout(conditionBox);
     const QList<QPair<QString, QString>> zones = {
@@ -340,7 +372,7 @@ void VehicleIntakePage::buildUi()
         group->addButton(issues, 1);
         m_conditionGroups.insert(zone.first, group);
         auto* note = new QPlainTextEdit(conditionBox);
-        note->setMinimumHeight(48);
+        note->setFixedHeight(37);
         note->setPlaceholderText(QString::fromUtf8("Примітка про пошкодження"));
         applyIntakeInputStyle(note);
         m_conditionNotes.insert(zone.first, note);
@@ -380,9 +412,12 @@ void VehicleIntakePage::buildUi()
     }
     m_valuables = new QPlainTextEdit(equipmentBox);
     m_valuables->setMinimumHeight(64);
+    m_valuables->setMaximumHeight(108);
     applyIntakeInputStyle(m_valuables);
-    equipmentGrid->addWidget(new QLabel(QString::fromUtf8("Цінні / особисті речі"), equipmentBox), 5, 0);
-    equipmentGrid->addWidget(m_valuables, 5, 1, 1, 2);
+    equipmentGrid->addWidget(new QLabel(QString::fromUtf8("Цінні / особисті речі"), equipmentBox), 0, 3);
+    equipmentGrid->addWidget(m_valuables, 1, 3, 4, 1);
+    for(int i=0;i<3;++i) equipmentGrid->setColumnStretch(i,1);
+    equipmentGrid->setColumnStretch(3,2);
     main->addWidget(equipmentBox);
 
     auto* permissionsBox = new QGroupBox(QString::fromUtf8("Дозволи та умови приймання"), formHost);
@@ -403,10 +438,7 @@ void VehicleIntakePage::buildUi()
         permissionsGrid->addWidget(cb, permIndex / 2, permIndex % 2);
         ++permIndex;
     }
-    m_contactMethod = new QLineEdit(permissionsBox);
-    applyIntakeInputStyle(m_contactMethod);
-    permissionsGrid->addWidget(new QLabel(QString::fromUtf8("Спосіб зв'язку для погодження робіт"), permissionsBox), 3, 0);
-    permissionsGrid->addWidget(m_contactMethod, 3, 1);
+    m_contactMethod = editableChoice(permissionsGrid,1,2,tr("Спосіб зв’язку"),{tr("Телефон"),"Viber","Telegram",tr("Електронна пошта")});
     main->addWidget(permissionsBox);
 
     m_signatureTransferToggle = new QPushButton(formHost);
@@ -430,14 +462,99 @@ void VehicleIntakePage::buildUi()
     main->addWidget(m_signatureTransferBox);
     setSignatureSectionExpanded(false);
 
-    scroll->setWidget(formHost);
-    root->addWidget(scroll, 3);
+    auto addButton = [this](QLayout* layout,const QString& label) {
+        auto* button = new QPushButton(label,this);
+        applyIntakeActionButtonStyle(button);
+        layout->addWidget(button);
+        return button;
+    };
+    auto* media = new QHBoxLayout;
+    main->insertLayout(main->indexOf(m_signatureTransferToggle),media);
+    auto mediaButton = [&](const QString& heading,const QString& action,ushort icon) {
+        auto* box = new QGroupBox(heading,formHost);
+        auto* layout = new QHBoxLayout(box);
+        auto* button = addButton(layout,action);
+        button->setIcon(intakeIcon(icon));
+        media->addWidget(box,1);
+        return button;
+    };
+    auto* photo = mediaButton(tr("Фото"),tr("Додати фото"),0xe722);
+    auto* signature = mediaButton(tr("Підпис"),tr("Додати підпис"),0xe70f);
+    connect(photo,&QPushButton::clicked,this,&VehicleIntakePage::addPhotoForSelected);
+    connect(signature,&QPushButton::clicked,this,&VehicleIntakePage::pickSignatureForSelected);
+    main->addStretch(1);
 
+    auto* footer = new QStackedWidget(this);
+    footer->setStyleSheet("QStackedWidget,QWidget#intakeFooter {background:#182331;border:0;}");
+    root->addWidget(footer);
+    auto footerRow = [&] {
+        auto* host = new QWidget(footer);
+        host->setObjectName("intakeFooter");
+        footer->addWidget(host);
+        auto* row = new QHBoxLayout(host);
+        row->setContentsMargins(0,3,0,3);
+        return row;
+    };
+    auto* first = footerRow();
+    first->addStretch();
+    auto* cancel = addButton(first,tr("Скасувати"));
+    auto* next = addButton(first,tr("Прийняти та продовжити"));
+    first->addStretch();
+    auto* second = footerRow();
+    auto* back = addButton(second,tr("Назад"));
+    auto* save = addButton(second,tr("Зберегти"));
+    auto* pdf = addButton(second,tr("Зберегти в PDF"));
+    auto* blank = addButton(second,tr("Друк порожнього акту"));
+    auto* finish = addButton(second,tr("Завершити приймання"));
+    cancel->setIcon(intakeIcon(0xe711));
+    next->setIcon(style()->standardIcon(QStyle::SP_ArrowRight));
+    back->setIcon(intakeIcon(0xe72b));
+    save->setIcon(intakeIcon(0xe74e));
+    pdf->setIcon(intakeIcon(0xea90));
+    blank->setIcon(intakeIcon(0xe749));
+    finish->setIcon(style()->standardIcon(QStyle::SP_DialogApplyButton));
+    autofill->setIcon(intakeIcon(0xe71b));
+    for(auto* primary:{next,finish})
+        primary->setStyleSheet("QPushButton{color:#08251c;background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #beffda,stop:1 #65dd9b);border:1px solid #8effbf;border-radius:8px;padding:7px 16px;font-weight:700;}");
+    connect(cancel,&QPushButton::clicked,this,[this]{clearForm();m_table->setCurrentCell(-1,-1);m_steps->setCurrentIndex(0);});
+    m_order->setObjectName("intakeOrder");
+    m_phone->setObjectName("intakePhone");
+    m_master->setObjectName("intakeMaster");
+    m_steps->setObjectName("intakeSteps");
+    next->setObjectName("intakeContinue");
+    back->setObjectName("intakeBack");
+    connect(next,&QPushButton::clicked,this,[this] {
+        for(auto* field : {m_actNumber,m_order,m_client,m_phone,m_vehicle,m_master->lineEdit()}) {
+            if(field->text().trimmed().isEmpty()) {
+                QMessageBox::information(this,tr("Приймання авто"),tr("Заповніть поле, позначене зірочкою."));
+                field->setFocus();
+                return;
+            }
+        }
+        if(saveDraft()) m_steps->setCurrentIndex(1);
+    });
+    connect(back,&QPushButton::clicked,this,[this]{m_steps->setCurrentIndex(0);});
+    connect(save,&QPushButton::clicked,this,&VehicleIntakePage::saveDraft);
+    connect(pdf,&QPushButton::clicked,this,&VehicleIntakePage::generatePdfForSelected);
+    connect(blank,&QPushButton::clicked,this,&VehicleIntakePage::printBlankAct);
+    connect(finish,&QPushButton::clicked,this,[this]{if(saveDraft()){clearForm();m_table->setCurrentCell(-1,-1);m_steps->setCurrentIndex(0);}});
+    auto displayStep = [title,stepLabel,footer](int index) {
+        title->setText(index ? tr("Приймання авто — огляд та передача") : tr("Приймання авто — дані акту"));
+        stepLabel->setText(tr("Крок %1 із 2").arg(index+1));
+        footer->setCurrentIndex(index);
+    };
+    connect(m_steps,&QStackedWidget::currentChanged,this,displayStep);
+    displayStep(0);
     m_actsTableToggle = new QPushButton(this);
     m_actsTableToggle->setCheckable(true);
     applyIntakeActionButtonStyle(m_actsTableToggle);
     connect(m_actsTableToggle, &QPushButton::toggled, this, &VehicleIntakePage::setActsTableExpanded);
-    root->addWidget(m_actsTableToggle);
+    auto* records = new QHBoxLayout;
+    auto* newAct = addButton(records,tr("Новий акт"));
+    connect(newAct,&QPushButton::clicked,cancel,&QPushButton::click);
+    records->addWidget(m_actsTableToggle);
+    records->addStretch(1);
+    root->addLayout(records);
 
     m_actsTableEmptyLabel = new QLabel(QString::fromUtf8("Актів ще немає"), this);
     m_actsTableEmptyLabel->setAlignment(Qt::AlignCenter);
@@ -686,7 +803,7 @@ void VehicleIntakePage::refresh()
     }
     setActsTableExpanded(m_actsTableToggle && m_actsTableToggle->isChecked());
     m_refreshInProgress = false;
-    if (!selectedAfterRefresh.isEmpty()) loadSelectedIntake();
+    if (!selectedAfterRefresh.isEmpty() && selectedAfterRefresh != m_intakeUid->text()) loadSelectedIntake();
     if (m_refreshPending) {
         m_refreshPending = false;
         refresh();
@@ -909,17 +1026,18 @@ void VehicleIntakePage::autofillFromOrder()
     if (m_receiverName->text().trimmed().isEmpty()) m_receiverName->setText(masterText());
 }
 
-void VehicleIntakePage::saveDraft()
+bool VehicleIntakePage::saveDraft()
 {
     QVariantMap p = collectPayload();
     QString uid, err;
     if (!VehicleIntakeService::saveIntake(p, &uid, &err)) {
         QMessageBox::warning(this, QString::fromUtf8("Помилка"), err);
-        return;
+        return false;
     }
     m_intakeUid->setText(uid);
     refresh();
     emit requestRefreshAll();
+    return true;
 }
 
 void VehicleIntakePage::addPhotoForSelected()

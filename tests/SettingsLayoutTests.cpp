@@ -6,6 +6,8 @@
 #include "core/services/settings/PersonnelEmploymentHistory.h"
 #include "core/services/settings/PersonnelSettingsService.h"
 #include "ui/tabs/intake/VehicleIntakePage.h"
+#include <QStackedWidget>
+#include <QPushButton>
 #include "core/crm/VehicleIntakeService.h"
 #include <QtTest/QtTest>
 #include <QTemporaryDir>
@@ -170,6 +172,23 @@ private slots:
         page.refresh(); QCOMPARE(table->rowCount(),1);
         QVERIFY(VehicleIntakeService::loadIntake(uid,&record,&error));
         QCOMPARE(record.mileage,QString("123456"));
+        q.prepare("UPDATE vehicle_intake SET pdf_path=? WHERE intake_uid=?");
+        q.addBindValue("test-act.pdf");q.addBindValue(uid);QVERIFY(q.exec());
+        page.resize(1320,850); page.show(); table->selectRow(0);
+        auto* steps=page.findChild<QStackedWidget*>("intakeSteps"); QVERIFY(steps);
+        page.findChild<QLineEdit*>("intakeOrder")->setText("TEST-ORDER");
+        page.findChild<QLineEdit*>("intakePhone")->setText("0501234567");
+        page.findChild<QComboBox*>("intakeMaster")->setEditText("Test master");
+        const auto output=qEnvironmentVariable("CS_INTAKE_SCREENSHOTS");
+        if(!output.isEmpty()) QVERIFY(page.grab().save(output+"/intake-1.png"));
+        page.findChild<QPushButton*>("intakeContinue")->click(); QCOMPARE(steps->currentIndex(),1);
+        if(!output.isEmpty()) QVERIFY(page.grab().save(output+"/intake-2.png"));
+        page.refresh(); QCOMPARE(steps->currentIndex(),1);
+        page.findChild<QPushButton*>("intakeBack")->click(); QCOMPARE(steps->currentIndex(),0);
+        QCOMPARE(page.findChild<QLineEdit*>("intakePhone")->text(),QString("0501234567"));
+        QCOMPARE(table->rowCount(),1);
+        QVERIFY2(VehicleIntakeService::loadIntake(uid,&record,&error),qPrintable(error));
+        QCOMPARE(record.pdfPath,QString("test-act.pdf"));
     }
     void personnelApplicationBoundaryPreservesHistory() {
         ActivityAuditService::setCurrentActor({"qa-owner","Owner","owner","personnel-test"});

@@ -667,7 +667,7 @@ bool saveIntakeDirect(QSqlDatabase db, const QVariantMap& p, const QString& pref
     q.prepare(QStringLiteral(
         "INSERT INTO vehicle_intake(intake_uid,order_uid,client_uid,vehicle_uid,mileage,fuel_level,exterior_state,interior_state,checklist_json,customer_signature_path,pdf_path,act_number,act_date,accepted_at,sync_status,updated_at) "
         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now')) "
-        "ON CONFLICT(intake_uid) DO UPDATE SET order_uid=excluded.order_uid, client_uid=excluded.client_uid, vehicle_uid=excluded.vehicle_uid, mileage=excluded.mileage, fuel_level=excluded.fuel_level, exterior_state=excluded.exterior_state, interior_state=excluded.interior_state, checklist_json=excluded.checklist_json, customer_signature_path=excluded.customer_signature_path, pdf_path=excluded.pdf_path, act_number=excluded.act_number, act_date=excluded.act_date, accepted_at=excluded.accepted_at, sync_status='pending', updated_at=datetime('now')"));
+        "ON CONFLICT(intake_uid) DO UPDATE SET order_uid=excluded.order_uid, client_uid=excluded.client_uid, vehicle_uid=excluded.vehicle_uid, mileage=excluded.mileage, fuel_level=excluded.fuel_level, exterior_state=excluded.exterior_state, interior_state=excluded.interior_state, checklist_json=excluded.checklist_json, customer_signature_path=excluded.customer_signature_path, pdf_path=CASE WHEN ? THEN excluded.pdf_path ELSE vehicle_intake.pdf_path END, act_number=excluded.act_number, act_date=excluded.act_date, accepted_at=excluded.accepted_at, sync_status='pending', updated_at=datetime('now')"));
     q.addBindValue(uid);
     q.addBindValue(v(p, QStringLiteral("order_uid")));
     q.addBindValue(v(p, QStringLiteral("client_uid")));
@@ -683,6 +683,7 @@ bool saveIntakeDirect(QSqlDatabase db, const QVariantMap& p, const QString& pref
     q.addBindValue(jstr(act, QStringLiteral("act_date")));
     q.addBindValue(jstr(act, QStringLiteral("accepted_at")));
     q.addBindValue(QStringLiteral("pending"));
+    q.addBindValue(p.contains(QStringLiteral("pdf_path")));
     if (!execPrepared(q, errorText)) return false;
     if (outUid) *outUid = uid;
     return true;

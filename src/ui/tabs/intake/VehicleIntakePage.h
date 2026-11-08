@@ -2,6 +2,7 @@
 #include <QWidget>
 #include <QHash>
 #include <QVariantMap>
+class QStackedWidget;
 class QTableWidget;
 class QLineEdit;
 class QCheckBox;
@@ -24,7 +25,8 @@ signals:
     void requestRefreshAll();
 private:
     void buildUi();
-    void saveDraft();
+    bool saveDraft();
+    QStackedWidget* m_steps = nullptr;
     void addPhotoForSelected();
     void pickSignatureForSelected();
     void generatePdfForSelected();
