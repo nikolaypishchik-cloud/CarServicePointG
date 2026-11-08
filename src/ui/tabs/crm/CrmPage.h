@@ -59,6 +59,8 @@ private:
     QLabel* m_summary = nullptr;
     QLabel* m_detail = nullptr;
     QLabel* m_debt = nullptr;
+    QLabel* m_paymentNotice = nullptr;
+    QPushButton* m_showOrders = nullptr;
     QWidget* m_clientCard = nullptr;
     QTabWidget* m_sections = nullptr;
     QLineEdit* m_search = nullptr;

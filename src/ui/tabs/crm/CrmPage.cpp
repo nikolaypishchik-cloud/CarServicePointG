@@ -444,10 +444,10 @@ QPushButton* makeVehicleCard(const QString& vehicleUid,
     row->setContentsMargins(14, 12, 14, 12);
     row->setSpacing(14);
 
-    const QPixmap vehiclePreview = VehiclePreviewProvider::preview(brand, model, displayName, year, color, QSize(120, 70));
+    const QPixmap vehiclePreview = VehiclePreviewProvider::preview(brand, model, displayName, year, color, QSize(170, 108));
     if (!vehiclePreview.isNull()) {
         auto* preview = new QLabel(card);
-        preview->setFixedSize(120, 70);
+        preview->setFixedSize(170, 108);
         preview->setAlignment(Qt::AlignCenter);
         preview->setPixmap(vehiclePreview);
         preview->setStyleSheet(QStringLiteral("background:transparent;border:none;"));
@@ -538,34 +538,37 @@ CrmPage::CrmPage(QWidget* parent)
     m_createAppointment = new QPushButton(QString::fromUtf8("Записати на ремонт"), this);
     applyCrmActionButtonStyle(m_createOrder);
     applyCrmActionButtonStyle(m_createAppointment);
-    header->addWidget(m_createOrder);
-    header->addWidget(m_createAppointment);
+
     root->addLayout(header);
 
     auto* searchLine = new QHBoxLayout();
-    auto* searchLabel = new QLabel(QString::fromUtf8("Пошук:"), this);
-    searchLabel->setStyleSheet(QStringLiteral("font-weight:700; color:#f7fbff;"));
+
     m_search = new QLineEdit(this);
     m_search->setPlaceholderText(QString::fromUtf8("ПІБ, телефон, номер авто, VIN, марка/модель"));
-    m_search->setStyleSheet(QStringLiteral("QLineEdit{background:#ffffff; color:#111822; border-radius:9px; padding:7px 10px;}"));
+    m_search->setStyleSheet(QStringLiteral("QLineEdit{background:#21272e;color:white;border:1px solid #56616b;border-radius:9px;padding:9px 12px;placeholder-text-color:#bac4cd;}QLineEdit:focus{border-color:#67d7de;}"));
     auto* refreshButton = new QPushButton(QString::fromUtf8("Оновити CRM"), this);
     applyCrmActionButtonStyle(refreshButton);
-    searchLine->addWidget(searchLabel);
+    m_search->setAccessibleName(tr("Пошук клієнтів та авто"));
     searchLine->addWidget(m_search, 1);
     searchLine->addWidget(refreshButton);
+    searchLine->addWidget(m_createOrder);
+    searchLine->addWidget(m_createAppointment);
     root->addLayout(searchLine);
 
     auto* body = new QHBoxLayout();
     body->setSpacing(12);
 
-    auto* left = new QVBoxLayout();
+    const QString panelStyle = QStringLiteral("QWidget#crmPanel{background:#181e24;border:1px solid #45505c;border-radius:10px;color:#f7fbff;}");
+    auto* clientsPanel = new QWidget(this);
+    clientsPanel->setObjectName("crmPanel"); clientsPanel->setStyleSheet(panelStyle);
+    auto* left = new QVBoxLayout(clientsPanel);
     auto* clientsTitle = new QLabel(QString::fromUtf8("Клієнти"), this);
     clientsTitle->setStyleSheet(QStringLiteral("font-size:12pt; font-weight:800; color:#f7fbff;"));
     left->addWidget(clientsTitle);
     m_clients = new QTableWidget(this);
     prepareClientCardsTable(m_clients);
     left->addWidget(m_clients, 1);
-    body->addLayout(left, 2);
+    body->addWidget(clientsPanel, 23);
 
     auto* right = new QVBoxLayout();
     right->setSpacing(0);
@@ -574,8 +577,8 @@ CrmPage::CrmPage(QWidget* parent)
     m_clientCard->setAttribute(Qt::WA_StyledBackground, true);
     m_clientCard->setStyleSheet(QStringLiteral(
         "QWidget#crmClientCard{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-        "stop:0 rgba(255,255,255,0.14),stop:0.055 rgba(255,255,255,0.24),"
-        "stop:0.12 rgba(102,115,132,0.82),stop:0.42 rgba(42,51,62,0.96),"
+        "stop:0 #252c34,stop:0.055 #242b31,"
+        "stop:0.12 #21282e,stop:0.42 #1e242b,"
         "stop:1 rgba(18,23,29,0.98));border:1px solid rgba(255,255,255,0.22);"
         "border-radius:16px;color:#f7fbff;}"
         "QTabWidget::pane{border:1px solid rgba(255,255,255,0.12);border-radius:12px;"
@@ -607,9 +610,23 @@ CrmPage::CrmPage(QWidget* parent)
     m_debt->setStyleSheet(QStringLiteral(
         "QLabel{background:rgba(8,11,15,0.28);color:#ffffff;border:1px solid rgba(255,255,255,0.10);"
         "border-radius:12px;padding:10px;font-weight:800;}"));
-    cardLayout->addWidget(m_debt);
+    m_paymentNotice = new QLabel(m_clientCard);
+    m_paymentNotice->setWordWrap(true);
+    m_paymentNotice->setStyleSheet("color:#f3d477;background:#302c22;border:1px solid #9b8342;border-radius:7px;padding:9px;");
+    m_paymentNotice->hide();
+    cardLayout->addWidget(m_paymentNotice);
+    auto* finances = new QWidget(this);
+    finances->setObjectName("crmPanel"); finances->setStyleSheet(panelStyle);
+    auto* financialLayout = new QVBoxLayout(finances);
+    auto* financeTitle = makeCardSectionTitle(tr("Фінансовий огляд"),finances);
+    financialLayout->addWidget(financeTitle);
+    m_debt->setAlignment(Qt::AlignTop|Qt::AlignLeft);
+    m_debt->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+    financialLayout->addWidget(m_debt);
+    financialLayout->addStretch(1);
 
     m_sections = new QTabWidget(this);
+    m_sections->setTabPosition(QTabWidget::South);
     m_sections->setDocumentMode(true);
 
     auto* vehiclesTab = new QWidget(this);
@@ -680,10 +697,16 @@ CrmPage::CrmPage(QWidget* parent)
     tasksBlock->addLayout(taskActions);
     m_sections->addTab(tasksTab, QString::fromUtf8("Задачі"));
 
-    cardLayout->addWidget(m_sections, 1);
+    m_showOrders = new QPushButton(m_clientCard);
+    m_showOrders->hide();
+    applyCrmActionButtonStyle(m_showOrders);
+    connect(m_showOrders,&QPushButton::clicked,this,[this,historyTab]{m_sections->setCurrentWidget(historyTab);});
+    cardLayout->addWidget(m_sections,1);
+    cardLayout->addWidget(m_showOrders);
     right->addWidget(m_clientCard, 1);
 
-    body->addLayout(right, 4);
+    body->addLayout(right, 52);
+    body->addWidget(finances,25);
     root->addLayout(body, 1);
 
     m_searchDebounce = new QTimer(this);
@@ -1042,7 +1065,9 @@ void CrmPage::loadClientDetails(const QString& clientUid)
             "<div style='font-size:17pt;font-weight:900;color:#ffffff;'>Оберіть клієнта, щоб переглянути картку</div>"
             "<div style='margin-top:6px;color:#9fb0c4;'>Контакти, статистика, автомобілі та історія з'являться після вибору клієнта зі списку.</div>"));
     }
-    if (m_debt) m_debt->setText(QString());
+    m_paymentNotice->hide();
+    m_showOrders->hide();
+    if (m_debt) m_debt->clear();
     clearVehicleCards();
     TableFillGuard historyGuard(m_history);
     TableFillGuard eventsGuard(m_events);
@@ -1109,14 +1134,21 @@ void CrmPage::loadClientDetails(const QString& clientUid)
         if (!financial.ok()) {
             m_debt->setText(QStringLiteral("Не вдалося обчислити фінанси: %1").arg(financial.error.toHtmlEscaped()));
         } else {
-            m_debt->setText(QStringLiteral(
-                "Нарядів: %1 · Вартість нарядів: %2 · Отримано за журналом: %3<br>"
-                "<a href='debt' style='color:#ffdd99;'>Розрахунковий залишок: %4</a> · Переплата за журналом: %5<br>"
-                "Історичні клієнтські оплати не обліковувалися. Залишки потребують звірки; оплати постачальникам не враховуються.%6")
-                .arg(QString::number(financial.orders.size()), CrmFinancialService::money(financial.totalCents),
-                     CrmFinancialService::money(financial.receivedCents), CrmFinancialService::money(financial.outstandingCents),
-                     CrmFinancialService::money(financial.overpaidCents),
-                     financial.ledgerAvailable ? QString() : QStringLiteral(" Журнал клієнтських оплат відсутній.")));
+            const auto row = [](const QString& label,const QString& value) {
+                return QStringLiteral("<tr><td>%1</td><td align='right'><b>%2</b></td></tr>").arg(label,value);
+            };
+            const QString count = QString::number(financial.orders.size());
+            m_debt->setText("<table width='100%' cellpadding='5'>" +
+                row(tr("Кількість нарядів"),count) +
+                row(tr("Вартість нарядів"),CrmFinancialService::money(financial.totalCents)) +
+                row(tr("Отримано за журналом"),CrmFinancialService::money(financial.receivedCents)) +
+                row(tr("Розрахунковий залишок"),QStringLiteral("<a href='debt' style='color:#71dce4'>%1</a>").arg(CrmFinancialService::money(financial.outstandingCents))) +
+                row(tr("Переплата за журналом"),CrmFinancialService::money(financial.overpaidCents)) + "</table>");
+            m_paymentNotice->setText(tr("Історичні клієнтські оплати не обліковувалися. Залишок потребує звірки; оплати постачальникам не враховуються.") +
+                (financial.ledgerAvailable ? QString() : tr(" Журнал клієнтських оплат відсутній.")));
+            m_paymentNotice->show();
+            m_showOrders->setText(tr("Наряди: %1     Переглянути історію →").arg(count));
+            m_showOrders->show();
         }
     }
 

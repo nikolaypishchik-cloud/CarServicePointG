@@ -460,6 +460,10 @@ private slots:
         QVERIFY(addNote);
         clients->setCurrentCell(alpha, 0);
         QVERIFY(addNote->isEnabled());
+        if (const auto path=qEnvironmentVariable("CS_CRM_LAYOUT_IMAGE"); !path.isEmpty()) {
+            page.resize(1420,800);page.show();QTest::qWait(50);
+            QVERIFY(page.grab().save(path));
+        }
         // Simulate a missing client after the list was loaded, without touching
         // production paths or weakening the application's read checks.
         QVERIFY(q.exec("DELETE FROM crm_clients WHERE client_uid='selection-b'"));
