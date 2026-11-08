@@ -762,14 +762,14 @@ OrderDialog::OrderDialog(QWidget* parent, int orderNumber)
 
     setObjectName(QStringLiteral("orderDialog"));
     if (m_isNewOrder) {
-        resize(1180, 706);
-        setMinimumSize(980, 690);
+        resize(944, 565);
+        setMinimumSize(800, 500);
     } else {
         resize(1480, 860);
         setMinimumSize(1220, 720);
     }
     setStyleSheet(dialogMetallicStyle() + (m_isNewOrder ? QStringLiteral(
-        "QDialog#orderDialog { background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #273642,stop:1 #0e1922); }"
+        "QDialog#orderDialog { background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #39464d,stop:0.8 #414c51,stop:1 #26333b); }"
         "QTabWidget::pane {border:0;background:transparent;}") : QString()));
     buildUi();
     BackupPerformanceGuard::hold(AppContext::instance().backupManager(), m_isNewOrder ? 2500 : 4000);
@@ -812,8 +812,9 @@ OrderDialog::OrderDialog(QWidget* parent, int orderNumber)
         if (!self) return;
         if (self->m_isNewOrder) {
             AdaptiveUi::fitTopLevelWindow(self,
-                                          QSize(1180, 706),
-                                          QSize(900, 620));
+                                          self->size(),
+                                          self->minimumSize());
+            self->centerOnScreen();
         } else {
             AdaptiveUi::fillTopLevelWindow(self, QSize(1080, 680));
         }

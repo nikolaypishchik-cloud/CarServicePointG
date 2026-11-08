@@ -1047,8 +1047,8 @@ bool OrderDialog::eventFilter(QObject* watched, QEvent* event)
 void OrderDialog::centerOnScreen()
 {
     QScreen* screen = nullptr;
-    if (parentWidget() && parentWidget()->windowHandle() && parentWidget()->windowHandle()->screen()) {
-        screen = parentWidget()->windowHandle()->screen();
+    if (parentWidget() && parentWidget()->window()->windowHandle()) {
+        screen = parentWidget()->window()->windowHandle()->screen();
     }
     if (!screen && windowHandle() && windowHandle()->screen()) {
         screen = windowHandle()->screen();

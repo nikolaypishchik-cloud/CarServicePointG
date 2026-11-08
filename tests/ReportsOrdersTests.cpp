@@ -1,3 +1,4 @@
+#include <QScreen>
 #include "ui/tabs/history/HistoryPage.h"
 #include <QLineEdit>
 #include "ui/common/dialogs/HistoricalVersionsDialog.h"
@@ -4506,7 +4507,11 @@ void ReportsOrdersTests::annualWorkspaceCreationIsPersistent()
     QCOMPARE(visibleNumber->value(),2); QVERIFY(visibleNumber->maximum()>=10000000);
     auto* post=form.findChild<QComboBox*>("newOrderPost"); QVERIFY(post); QCOMPARE(post->currentData().toInt(),0);
     if (const auto output=qEnvironmentVariable("CS_NEW_ORDER_FORM_OUTPUT"); !output.isEmpty()) {
-        form.show(); QTest::qWait(100); QVERIFY(form.grab().save(output));
+        form.show(); QTest::qWait(100);
+        QCOMPARE(form.size(), QSize(944, 565));
+        const QPoint offset = form.frameGeometry().center() - form.screen()->availableGeometry().center();
+        QVERIFY(qAbs(offset.x()) <= 1 && qAbs(offset.y()) <= 1);
+        QVERIFY(form.grab().save(output));
     }
     post->setCurrentIndex(post->findData(2));
     const auto draft=form.serializeDraftState();

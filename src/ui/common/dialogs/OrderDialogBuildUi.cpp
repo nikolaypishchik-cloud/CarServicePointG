@@ -10,18 +10,18 @@ QGridLayout* newOrderSection(QBoxLayout* column, const QString& title)
 {
     auto* panel = new QFrame;
     panel->setObjectName("newOrderSection");
-    panel->setStyleSheet("QFrame#newOrderSection {background:#1b2934;border:1px solid #507383;border-radius:10px;}");
+    panel->setStyleSheet("QFrame#newOrderSection {background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #354148,stop:1 #434d51);border:1px solid #819da6;border-radius:10px;}");
     auto* layout = new QVBoxLayout(panel);
-    layout->setContentsMargins(1,1,1,12);
+    layout->setContentsMargins(1,1,1,8);
     auto* heading = new QLabel(QStringLiteral("<span style='color:#70d9ed;font-size:22px'><i>/</i></span>&nbsp; ") + title, panel);
-    heading->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #263945,stop:1 #0c1821);"
-                           "color:white;font:600 18px 'Segoe UI';padding:7px 12px;border-bottom:1px solid #4f7281;"
+    heading->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #3d4d54,stop:1 #28373e);"
+                           "color:white;font:600 18px 'Segoe UI';padding:4px 10px;border-bottom:1px solid #829da5;"
                            "border-top-left-radius:9px;border-top-right-radius:9px;");
     layout->addWidget(heading);
     auto* rows = new QGridLayout;
-    rows->setContentsMargins(14,6,14,0);
+    rows->setContentsMargins(10,4,10,0);
     rows->setHorizontalSpacing(10);
-    rows->setVerticalSpacing(7);
+    rows->setVerticalSpacing(4);
     rows->setColumnStretch(1,1);
     layout->addLayout(rows,1);
     column->addWidget(panel);
@@ -61,8 +61,8 @@ void OrderDialog::buildUi()
     QGridLayout* vehicle = nullptr;
     if (m_isNewOrder) {
         auto* columns = new QHBoxLayout(formPane);
-        columns->setContentsMargins(18,18,18,16);
-        columns->setSpacing(16);
+        columns->setContentsMargins(14,12,14,10);
+        columns->setSpacing(12);
         auto* left = new QVBoxLayout;
         left->setSpacing(10);
         auto* right = new QVBoxLayout;
@@ -378,14 +378,14 @@ void OrderDialog::buildUi()
         engineLay->setStretch(0,2);
         engineLay->setStretch(1,1);
         const QString field = QStringLiteral("QLineEdit,QComboBox,QAbstractSpinBox {"
-            "background:#fbfcfd;color:#17232c;border:1px solid #bccad1;border-radius:6px;"
+            "background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #d5d7d9,stop:0.5 #eeeeef,stop:1 #d9dbdd);color:#101518;border:1px solid #abb2b6;border-radius:6px;"
             "padding:4px 8px;font:600 14px 'Segoe UI';selection-background-color:#226578;}"
             "QLineEdit:focus,QComboBox:focus,QAbstractSpinBox:focus {border:1px solid #50bace;}"
             "QAbstractSpinBox QLineEdit,QComboBox QLineEdit {border:0;padding:0;background:transparent;}");
         for (auto* control : formPane->findChildren<QWidget*>()) {
             if (qobject_cast<QComboBox*>(control) || qobject_cast<QAbstractSpinBox*>(control)
                 || (qobject_cast<QLineEdit*>(control) && !qobject_cast<QAbstractSpinBox*>(control->parentWidget()))) {
-                control->setMinimumHeight(32);
+                control->setMinimumHeight(28);
                 control->setStyleSheet(field);
                 if(auto* line=qobject_cast<QLineEdit*>(control)) {
                     auto palette=line->palette();
@@ -436,14 +436,14 @@ void OrderDialog::buildUi()
     m_btnOk->setStyleSheet(volumetricButtonStyle());
     m_btnCancel->setStyleSheet(volumetricButtonStyle());
     if (m_isNewOrder) {
-        buttonsRow->setContentsMargins(18,12,18,16);
+        buttonsRow->setContentsMargins(14,6,14,10);
         m_btnOk->setText(tr("Створити наряд"));
         const QString button = QStringLiteral("QPushButton {color:white;font:600 16px 'Segoe UI';"
             "padding:7px 22px;border-radius:8px;border:1px solid %1;background:"
             "qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 %2,stop:1 #101c24);}"
             "QPushButton:hover {background:#284654;}");
-        m_btnOk->setStyleSheet(button.arg("#62c2d3","#325764"));
-        m_btnCancel->setStyleSheet(button.arg("#71808a","#36414b"));
+        m_btnOk->setStyleSheet(button.arg("#8bc4d2","#53717c"));
+        m_btnCancel->setStyleSheet(button.arg("#182024","#a0a7aa"));
         buttonsRow->addWidget(m_btnCancel);
         buttonsRow->addWidget(m_btnOk);
     } else {
