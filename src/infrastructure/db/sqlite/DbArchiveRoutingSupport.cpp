@@ -1,7 +1,7 @@
 #include "infrastructure/db/sqlite/Db.h"
 #include <QScopeGuard>
 #include "core/services/OrderSearchIndex.h"
-#include "core/io/SafeFileOps.h"
+#include <QTemporaryDir>
 #include "infrastructure/db/sqlite/ScopedConnectionManager.h"
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
 #include "infrastructure/db/sqlite/DbArchiveInternals.h"
@@ -77,10 +77,27 @@ bool ensureLegacyArchiveSnapshot()
     }
 
     if (QFileInfo(sourcePath).absoluteFilePath() == QFileInfo(archivePath).absoluteFilePath()) return true;
-    QDir().mkpath(QFileInfo(archivePath).absolutePath());
-    SafeFileOps::safeRemoveFile(archivePath, {QFileInfo(archivePath).absolutePath()}, {}, {QStringLiteral(".db")});
-    if (!QFile::copy(sourcePath, archivePath)) {
-        qWarning() << "Legacy archive copy failed:" << sourcePath << "->" << archivePath;
+    const QDir parent = QFileInfo(archivePath).absoluteDir();
+    if (!parent.mkpath(QStringLiteral("."))) return false;
+    QTemporaryDir stage(parent.filePath(QStringLiteral(".archive-snapshot-XXXXXX")));
+    if (!stage.isValid()) return false;
+    const QString snapshot = stage.filePath(QStringLiteral("archive.db"));
+    QString error;
+    ScopedSqliteConnection source(sourcePath, QStringLiteral("archive_snapshot"), &error, true);
+    if (!source.isOpen()) {
+        qWarning() << "Archive source open failed:" << error;
+        return false;
+    }
+    // Read the committed SQLite view, including pages still in the source WAL.
+    QSqlQuery copy(source.db());
+    copy.prepare(QStringLiteral("VACUUM INTO ?"));
+    copy.addBindValue(snapshot);
+    if (!copy.exec()) {
+        qWarning() << "Archive snapshot failed:" << copy.lastError().text();
+        return false;
+    }
+    if (!QFile::rename(snapshot, archivePath)) {
+        qWarning() << "Archive publication failed:" << archivePath;
         return false;
     }
     AppRuntime::protectPathAtRest(archivePath);
