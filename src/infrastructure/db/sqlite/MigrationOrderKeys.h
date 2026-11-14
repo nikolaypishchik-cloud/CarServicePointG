@@ -2,6 +2,7 @@
 
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
 #include "infrastructure/db/sqlite/SqliteSchemaInspection.h"
+#include "infrastructure/db/sqlite/MigrationRowOverlap.h"
 #include <QFile>
 #include <QMap>
 #include <QScopeGuard>
@@ -33,7 +34,10 @@ inline bool plan(QSqlDatabase workspace,const QString& attached,Map* mapping,QSt
     if (!q.exec("SELECT MAX(number) FROM ("+reserved+" UNION ALL SELECT number FROM "+orders+")") || !q.next())
         return fail(error,q.lastError().text());
     qint64 high=q.value(0).toLongLong();
-    if (!q.exec("SELECT s.number FROM "+orders+" s JOIN ("+reserved+") t ON t.number=s.number ORDER BY s.number"))
+    const auto identicalOrder = MigrationRowOverlap::exactRowPredicate(workspace, attached, "work_orders", "order_uid");
+    if (!q.exec("SELECT s.number FROM "+orders+" s JOIN ("+reserved+") t ON t.number=s.number "
+                "WHERE NOT EXISTS(SELECT 1 FROM main.work_orders d WHERE d.number=s.number AND "
+                +identicalOrder+") ORDER BY s.number"))
         return fail(error,q.lastError().text());
     while (q.next()) {
         if (high>=std::numeric_limits<int>::max()) return fail(error,"No free internal order number");
@@ -50,7 +54,14 @@ inline bool plan(QSqlDatabase workspace,const QString& attached,Map* mapping,QSt
         if (!q.exec("SELECT MAX(id) FROM (SELECT id FROM "+source+" UNION ALL SELECT id FROM "+target+")") || !q.next())
             return fail(error,q.lastError().text());
         qint64 next=q.value(0).toLongLong();
-        if (!q.exec("SELECT s.id FROM "+source+" s JOIN "+target+" t ON t.id=s.id ORDER BY s.id"))
+        const auto sourceTable = sqlQuoteIdent(attached)+"."+sqlQuoteIdent(table);
+        const auto uid = table=="work_order_parts" ? QStringLiteral("part_uid") : QStringLiteral("service_uid");
+        // A changed parent key or service key also changes the child graph.
+        const auto identicalChild = mapping->isEmpty() && mapping->children.isEmpty()
+            ? MigrationRowOverlap::exactRowPredicate(workspace, attached, table, uid) : QStringLiteral("0");
+        const auto key = "s."+keyColumn;
+        if (!q.exec("SELECT "+key+" FROM "+sourceTable+" s JOIN "+target+" d ON d.id="+key+
+                    " WHERE NOT ("+identicalChild+") ORDER BY "+key))
             return fail(error,q.lastError().text());
         while(q.next()) {
             const auto id=q.value(0).toLongLong();

@@ -254,6 +254,7 @@ private slots:
     void migrationPublicationCrashRecovery_data();
     void migrationPublicationCrashRecovery();
     void migrationReservesArchivedOrderKeys();
+    void migrationReusesVerifiedSettings();
     void migrationServiceRoundTrip_data();
     void workspaceSchemaPreparationRollback();
     void migrationServiceRoundTrip();
@@ -1364,6 +1365,44 @@ void ReportsOrdersTests::migrationPublicationCrashRecovery()
     QCOMPARE(result.importedOrderCount,1);QCOMPARE(result.importedServiceCount,1);QCOMPARE(result.importedPartCount,1);
     QVERIFY2(MigrationRestoreJournal::pending(&pending,&error),qPrintable(error));QVERIFY(pending.isEmpty());
     QSqlQuery q(Database::db());QVERIFY(q.exec("SELECT COUNT(*) FROM work_orders"));QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),2);
+}
+
+void ReportsOrdersTests::migrationReusesVerifiedSettings()
+{
+    const auto name = QUuid::createUuid().toString();
+    auto db = QSqlDatabase::addDatabase("QSQLITE", name);
+    const auto close = qScopeGuard([&]{ db.close(); db = {}; QSqlDatabase::removeDatabase(name); });
+    db.setDatabaseName(":memory:");
+    QVERIFY(db.open());
+    QSqlQuery q(db);
+    for (const auto& sql : QStringList{
+            "ATTACH DATABASE ':memory:' AS legacy_rewrite",
+            "CREATE TABLE main.settings(key TEXT PRIMARY KEY,value TEXT)",
+            "CREATE TABLE legacy_rewrite.settings(key TEXT PRIMARY KEY,value TEXT)",
+            "CREATE TABLE profile_file_relocations(table_name TEXT,column_name TEXT,source_key TEXT,original_path TEXT,target_path TEXT)",
+            "INSERT INTO main.settings VALUES('plain','same'),('settings.int.directories.pdf_dir','new/pdf')",
+            "INSERT INTO legacy_rewrite.settings VALUES('plain','same'),('settings.int.directories.pdf_dir','old/pdf'),('new-setting','imported')",
+            "INSERT INTO profile_file_relocations VALUES('settings','value','settings.int.directories.pdf_dir','old/pdf','new/pdf')"}) {
+        QVERIFY2(q.exec(sql), qPrintable(q.lastError().text()));
+    }
+    CanonicalRewriteSourceSchema schema;
+    schema.settings = {"key", "value"};
+    QString error;
+    for (int pass = 0; pass < 2; ++pass) {
+        QVERIFY2(importCanonicalRewriteAncillaryTables(db, schema, &error), qPrintable(error));
+        QVERIFY(q.exec("SELECT COUNT(*),SUM(value='new/pdf'),SUM(value='imported') FROM settings"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 3);
+        QCOMPARE(q.value(1).toInt(), 1);
+        QCOMPARE(q.value(2).toInt(), 1);
+        q.finish();
+    }
+    QVERIFY(q.exec("UPDATE profile_file_relocations SET original_path='unrelated/pdf'"));
+    QVERIFY(!importCanonicalRewriteAncillaryTables(db, schema, &error));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(q.exec("SELECT value FROM settings WHERE key='settings.int.directories.pdf_dir'"));
+    QVERIFY(q.next());
+    QCOMPARE(q.value(0).toString(), QStringLiteral("new/pdf"));
 }
 
 void ReportsOrdersTests::migrationReservesArchivedOrderKeys()

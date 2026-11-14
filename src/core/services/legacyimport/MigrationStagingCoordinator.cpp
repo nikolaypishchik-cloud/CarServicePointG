@@ -167,7 +167,7 @@ bool prepareWorkspace(const QString& path, const QString& source, const QString&
     if (!db.transaction()) return NativeSnapshotMetadata::fail(error, db.lastError().text());
     auto rollback = qScopeGuard([&]{ if (db.isOpen()) db.rollback(); });
     if ((!copied && !clearCanonicalRewriteWorkspaceTargets(db,error))
-        || !MigrationDestinationBaseline::capture(db,identity,error)
+        || !MigrationDestinationBaseline::capture(db,identity,sourceSchema,error)
         || !importCanonicalRewritePrimaryTables(db,schema,error)
         || !importCanonicalRewriteAncillaryTables(db,schema,error)
         || !MigrationOrderKeys::store(db,identity,keys,error)

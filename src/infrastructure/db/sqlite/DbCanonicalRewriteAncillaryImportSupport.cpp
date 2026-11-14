@@ -3,6 +3,7 @@
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
 #include "core/services/legacyimport/LegacyOrderChildMapper.h"
 
+#include "infrastructure/db/sqlite/MigrationRowOverlap.h"
 #include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -24,6 +25,7 @@ bool importCanonicalRewriteAncillaryTables(QSqlDatabase database,
                                            const CanonicalRewriteSourceSchema& legacySchema,
                                            QString* errorText)
 {
+    const QString sourceSchema = QStringLiteral("legacy_rewrite");
     const QSet<QString>& srcServiceMasters = legacySchema.serviceMasters;
     const QSet<QString>& srcSettings = legacySchema.settings;
     const QSet<QString>& srcExpenses = legacySchema.expenses;
@@ -59,7 +61,7 @@ bool importCanonicalRewriteAncillaryTables(QSqlDatabase database,
         add(dstServiceMasters, insertCols, selectExprs, QStringLiteral("role"), QStringLiteral("CASE WHEN TRIM(COALESCE(%1,''))='' THEN 'master' ELSE TRIM(COALESCE(%1,'')) END").arg(firstAvailableExpr(srcServiceMasters, {QStringLiteral("role")}, QStringLiteral("'master'"))));
         add(dstServiceMasters, insertCols, selectExprs, QStringLiteral("master_name_closed"), safeText(srcServiceMasters, {QStringLiteral("master_name_closed")}));
         if (!insertCols.isEmpty() && !execLabeledSql(database,
-                QStringLiteral("INSERT INTO service_masters(%1) SELECT %2 FROM legacy_rewrite.service_masters WHERE service_id IN (SELECT id FROM work_order_services)").arg(insertCols.join(','), selectExprs.join(',')),
+                QStringLiteral("INSERT INTO service_masters(%1) SELECT %2 FROM %3.service_masters WHERE service_id IN (SELECT id FROM work_order_services)").arg(insertCols.join(','), selectExprs.join(','), sqlQuoteIdent(sourceSchema)) + QStringLiteral(" AND NOT ") + MigrationRowOverlap::match(database, sourceSchema, "service_masters", "service_masters"),
                 QStringLiteral("import service_masters"), errorText)) {
             return false;
         }
@@ -85,7 +87,7 @@ bool importCanonicalRewriteAncillaryTables(QSqlDatabase database,
         add(dstOutsource, insertCols, selectExprs, QStringLiteral("created_at"), safeText(srcOutsource, {QStringLiteral("created_at")}, QStringLiteral("datetime('now')")));
         add(dstOutsource, insertCols, selectExprs, QStringLiteral("service_id"), QStringLiteral("CASE WHEN COALESCE(%1,0)<=0 THEN NULL ELSE %1 END").arg(firstAvailableExpr(srcOutsource, {QStringLiteral("service_id")}, QStringLiteral("NULL"))));
         if (!insertCols.isEmpty() && !execLabeledSql(database,
-                QStringLiteral("INSERT INTO outsource_repairs(%1) SELECT %2 FROM legacy_rewrite.outsource_repairs AS source_outsource WHERE %3 IN (SELECT number FROM work_orders)").arg(insertCols.join(','), selectExprs.join(','), outsourceOrderExpr),
+                QStringLiteral("INSERT INTO outsource_repairs(%1) SELECT %2 FROM %4.outsource_repairs AS source_outsource WHERE %3 IN (SELECT number FROM work_orders)").arg(insertCols.join(','), selectExprs.join(','), outsourceOrderExpr, sqlQuoteIdent(sourceSchema)) + QStringLiteral(" AND NOT ") + MigrationRowOverlap::match(database, sourceSchema, "outsource_repairs", "source_outsource"),
                 QStringLiteral("import outsource_repairs"), errorText)) {
             return false;
         }
@@ -111,7 +113,7 @@ bool importCanonicalRewriteAncillaryTables(QSqlDatabase database,
         add(dstCatalog, insertCols, selectExprs, QStringLiteral("supplier"), nonNullTextExpr(firstAvailableExpr(srcCatalog, {QStringLiteral("supplier"), QStringLiteral("vendor")}, QStringLiteral("''"))));
         add(dstCatalog, insertCols, selectExprs, QStringLiteral("note"), nonNullTextExpr(firstAvailableExpr(srcCatalog, {QStringLiteral("note"), QStringLiteral("node_tags"), QStringLiteral("comment")}, QStringLiteral("''"))));
         if (!insertCols.isEmpty() && !execLabeledSql(database,
-                QStringLiteral("INSERT INTO parts_catalog(%1) SELECT %2 FROM legacy_rewrite.parts_catalog").arg(insertCols.join(','), selectExprs.join(',')),
+                QStringLiteral("INSERT INTO parts_catalog(%1) SELECT %2 FROM %3.parts_catalog").arg(insertCols.join(','), selectExprs.join(','), sqlQuoteIdent(sourceSchema)) + QStringLiteral(" WHERE NOT ") + MigrationRowOverlap::match(database, sourceSchema, "parts_catalog", "parts_catalog"),
                 QStringLiteral("import parts_catalog"), errorText)) {
             return false;
         }
@@ -142,7 +144,7 @@ bool importCanonicalRewriteAncillaryTables(QSqlDatabase database,
         add(dstExpenses, insertCols, selectExprs, QStringLiteral("elec_cost"), safeReal(srcExpenses, {QStringLiteral("elec_cost")}));
         add(dstExpenses, insertCols, selectExprs, QStringLiteral("created_at"), safeText(srcExpenses, {QStringLiteral("created_at")}, QStringLiteral("datetime('now')")));
         if (!insertCols.isEmpty() && !execLabeledSql(database,
-                QStringLiteral("INSERT INTO expenses(%1) SELECT %2 FROM legacy_rewrite.expenses").arg(insertCols.join(','), selectExprs.join(',')),
+                QStringLiteral("INSERT INTO expenses(%1) SELECT %2 FROM %3.expenses").arg(insertCols.join(','), selectExprs.join(','), sqlQuoteIdent(sourceSchema)) + QStringLiteral(" WHERE NOT ") + MigrationRowOverlap::match(database, sourceSchema, "expenses", "expenses"),
                 QStringLiteral("import expenses"), errorText)) {
             return false;
         }
@@ -150,16 +152,24 @@ bool importCanonicalRewriteAncillaryTables(QSqlDatabase database,
 
     if (!srcPlanning.isEmpty() && dstPlanning.contains(QStringLiteral("day")) && dstPlanning.contains(QStringLiteral("note"))) {
         if (!execLabeledSql(database,
-                QStringLiteral("INSERT INTO planning_calendar(day, note) SELECT %1, %2 FROM legacy_rewrite.planning_calendar")
-                    .arg(safeText(srcPlanning, {QStringLiteral("day")}), safeText(srcPlanning, {QStringLiteral("note")})),
+                QStringLiteral("INSERT INTO planning_calendar(day, note) SELECT %1, %2 FROM %3.planning_calendar")
+                    .arg(safeText(srcPlanning, {QStringLiteral("day")}), safeText(srcPlanning, {QStringLiteral("note")}), sqlQuoteIdent(sourceSchema)) + QStringLiteral(" WHERE NOT ") + MigrationRowOverlap::match(database, sourceSchema, "planning_calendar", "planning_calendar"),
                 QStringLiteral("import planning_calendar"), errorText)) {
             return false;
         }
     }
 
     if (!srcSettings.isEmpty() && dstSettings.contains(QStringLiteral("key")) && dstSettings.contains(QStringLiteral("value"))) {
+        QString relocated;
+        if (tableExistsInDb(database, QStringLiteral("profile_file_relocations"), QStringLiteral("main"))) {
+            relocated = QStringLiteral(" AND NOT EXISTS (SELECT 1 FROM main.profile_file_relocations r "
+                "JOIN main.settings current ON current.key=r.source_key AND current.value=r.target_path "
+                "WHERE r.table_name='settings' AND r.column_name='value' AND r.source_key=settings.key "
+                "AND r.original_path=settings.value AND r.source_key IN ('settings.int.directories.pdf_dir',"
+                "'settings.int.directories.invoices_dir','settings.int.directories.reports_dir','settings.int.directories.order_photos_dir'))");
+        }
         if (!execLabeledSql(database,
-                QStringLiteral("INSERT INTO settings(\"key\", value) SELECT \"key\", value FROM legacy_rewrite.settings WHERE \"key\" NOT LIKE 'db_canonical_rewrite_%'"),
+                QStringLiteral("INSERT INTO settings(\"key\", value) SELECT \"key\", value FROM %1.settings WHERE \"key\" NOT LIKE 'db_canonical_rewrite_%'").arg(sqlQuoteIdent(sourceSchema)) + QStringLiteral(" AND NOT ") + MigrationRowOverlap::match(database, sourceSchema, "settings", "settings") + relocated,
                 QStringLiteral("import settings"), errorText)) {
             return false;
         }

@@ -31,7 +31,7 @@ QSet<QString> tableColumns(QSqlDatabase db, const QString& schemaName, const QSt
     return cols;
 }
 
-QString firstAvailableExpr(const QSet<QString>& cols, const QStringList& candidates, const QString& fallback)
+QString firstAvailableColumnName(const QSet<QString>& cols, const QStringList& candidates, const QString& fallback)
 {
     for (const QString& candidate : candidates) {
         if (cols.contains(candidate)) {
@@ -108,8 +108,8 @@ void LegacyImportEntityVerifySupport::appendEntityResults(QSqlDatabase db, Legac
 
     const QSet<QString> srcParts = tableColumns(db, QStringLiteral("verify_src"), QStringLiteral("work_order_parts"));
     if (srcParts.size() > 0) {
-        const QString srcPartIdExpr = firstAvailableExpr(srcParts, {QStringLiteral("id")}, QStringLiteral("id"));
-        const QString srcPartOrderExpr = firstAvailableExpr(srcParts,
+        const QString srcPartIdExpr = firstAvailableColumnName(srcParts, {QStringLiteral("id")}, QStringLiteral("id"));
+        const QString srcPartOrderExpr = firstAvailableColumnName(srcParts,
             {QStringLiteral("order_number"), QStringLiteral("work_order"), QStringLiteral("work_order_id"), QStringLiteral("work_order_number")},
             QStringLiteral("order_number"));
         const QString srcPartIdSql = QStringLiteral("s.%1").arg(srcPartIdExpr);

@@ -3,6 +3,7 @@
 #include "infrastructure/db/sqlite/DbFacadeSupport.h"
 #include "core/services/legacyimport/LegacyOrderChildMapper.h"
 
+#include "infrastructure/db/sqlite/MigrationRowOverlap.h"
 #include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -24,6 +25,7 @@ bool importCanonicalRewritePrimaryTables(QSqlDatabase database,
                                          const CanonicalRewriteSourceSchema& legacySchema,
                                          QString* errorText)
 {
+    const QString sourceSchema = QStringLiteral("legacy_rewrite");
     const QSet<QString>& srcMasters = legacySchema.masters;
     const QSet<QString>& srcOrders = legacySchema.orders;
     const QSet<QString>& srcServices = legacySchema.services;
@@ -76,7 +78,7 @@ bool importCanonicalRewritePrimaryTables(QSqlDatabase database,
         add(dstMasters, insertCols, selectExprs, QStringLiteral("active"), safeBoolInt(srcMasters, {QStringLiteral("active")}, 1));
         carryFields(srcMasters,dstMasters,insertCols,selectExprs);
         if (!insertCols.isEmpty() && !execLabeledSql(database,
-                QStringLiteral("INSERT INTO masters(%1) SELECT %2 FROM legacy_rewrite.masters").arg(insertCols.join(','), selectExprs.join(',')),
+                QStringLiteral("INSERT INTO masters(%1) SELECT %2 FROM %3.masters").arg(insertCols.join(','), selectExprs.join(','), sqlQuoteIdent(sourceSchema)) + QStringLiteral(" WHERE NOT ") + MigrationRowOverlap::match(database, sourceSchema, "masters", "masters"),
                 QStringLiteral("import masters"), errorText)) {
             return false;
         }
@@ -137,7 +139,7 @@ bool importCanonicalRewritePrimaryTables(QSqlDatabase database,
         add(dstOrders, insertCols, selectExprs, QStringLiteral("owner_name"), safeText(srcOrders, {QStringLiteral("owner_name"), QStringLiteral("client")}));
         carryFields(srcOrders,dstOrders,insertCols,selectExprs);
         if (!execLabeledSql(database,
-                QStringLiteral("INSERT INTO work_orders(%1) SELECT %2 FROM legacy_rewrite.work_orders WHERE %3 > 0").arg(insertCols.join(','), selectExprs.join(','), numberExpr),
+                QStringLiteral("INSERT INTO work_orders(%1) SELECT %2 FROM %4.work_orders WHERE %3 > 0").arg(insertCols.join(','), selectExprs.join(','), numberExpr, sqlQuoteIdent(sourceSchema)) + QStringLiteral(" AND NOT ") + MigrationRowOverlap::match(database, sourceSchema, "work_orders", "work_orders"),
                 QStringLiteral("import work_orders"), errorText)) {
             return false;
         }
@@ -165,7 +167,7 @@ bool importCanonicalRewritePrimaryTables(QSqlDatabase database,
         add(dstServices, insertCols, selectExprs, QStringLiteral("parent_id"), QStringLiteral("CASE WHEN COALESCE(%1,0)<=0 THEN NULL ELSE %1 END").arg(parentIdExpr));
         carryFields(srcServices,dstServices,insertCols,selectExprs);
         if (!insertCols.isEmpty() && !execLabeledSql(database,
-                QStringLiteral("INSERT INTO work_order_services(%1) SELECT %2 FROM legacy_rewrite.work_order_services AS source_service WHERE %3 IN (SELECT number FROM work_orders)").arg(insertCols.join(','), selectExprs.join(','), serviceOrderExpr),
+                QStringLiteral("INSERT INTO work_order_services(%1) SELECT %2 FROM %4.work_order_services AS source_service WHERE %3 IN (SELECT number FROM work_orders)").arg(insertCols.join(','), selectExprs.join(','), serviceOrderExpr, sqlQuoteIdent(sourceSchema)) + QStringLiteral(" AND NOT ") + MigrationRowOverlap::match(database, sourceSchema, "work_order_services", "source_service"),
                 QStringLiteral("import work_order_services"), errorText)) {
             return false;
         }
@@ -213,7 +215,7 @@ bool importCanonicalRewritePrimaryTables(QSqlDatabase database,
             .arg(firstAvailableExpr(srcParts, {QStringLiteral("pricing_calc_version")}, QStringLiteral("1"))));
         carryFields(srcParts,dstParts,insertCols,selectExprs);
         if (!insertCols.isEmpty() && !execLabeledSql(database,
-                QStringLiteral("INSERT INTO work_order_parts(%1) SELECT %2 FROM legacy_rewrite.work_order_parts AS source_part WHERE %3 IN (SELECT number FROM work_orders)").arg(insertCols.join(','), selectExprs.join(','), orderExpr),
+                QStringLiteral("INSERT INTO work_order_parts(%1) SELECT %2 FROM %4.work_order_parts AS source_part WHERE %3 IN (SELECT number FROM work_orders)").arg(insertCols.join(','), selectExprs.join(','), orderExpr, sqlQuoteIdent(sourceSchema)) + QStringLiteral(" AND NOT ") + MigrationRowOverlap::match(database, sourceSchema, "work_order_parts", "source_part"),
                 QStringLiteral("import work_order_parts"), errorText)) {
             return false;
         }
