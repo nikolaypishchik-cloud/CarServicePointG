@@ -1547,6 +1547,10 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
                 QVERIFY(setup.exec(QString("INSERT INTO work_order_services(id,service_uid,order_uid,order_number,title,qty,price,amount) VALUES(20,'target-service','existing-target-order',%1,'Target work',1,12.50,12.50)").arg(existingKey)));
                 QVERIFY(setup.exec("UPDATE work_order_parts SET id=21,service_id=20 WHERE id=1001"));
             }
+            if (targetState == "populated-repeat-open") {
+                QVERIFY(setup.exec("INSERT INTO work_order_parts_fts(work_order_parts_fts) VALUES('delete-all')"));
+                QVERIFY(!setup.exec("INSERT INTO work_order_parts_fts(work_order_parts_fts,rank) VALUES('integrity-check',1)"));
+            }
             QVERIFY(setup.exec("INSERT INTO settings(key,value) VALUES('migration.target.sentinel','existing setting')"));
         }
         if(targetState=="initialized-closed") Database::close();
@@ -2015,6 +2019,18 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             }
             return stream.status()==QDataStream::Ok;
         };
+        auto verifyPartsSearch = [&]() {
+            QSqlQuery search(owner);
+            QVERIFY2(search.exec("INSERT INTO work_order_parts_fts(work_order_parts_fts,rank) VALUES('integrity-check',1)"),
+                     qPrintable(search.lastError().text()));
+            QVERIFY(search.exec("SELECT p.part_uid FROM work_order_parts_fts "
+                                "JOIN work_order_parts p ON p.id=work_order_parts_fts.rowid "
+                                "WHERE work_order_parts_fts MATCH 'target'"));
+            QVERIFY(search.next());
+            QCOMPARE(search.value(0).toString(), QStringLiteral("existing-target-part"));
+            QVERIFY(!search.next());
+        };
+        verifyPartsSearch();
         QByteArray before,after;QVERIFY2(capture(&before),qPrintable(error));
         QFile history(QDir(AppRuntime::securityDir()).filePath("legacy_import_history.json"));
         QVERIFY(history.open(QIODevice::ReadOnly));const auto historyBefore=history.readAll();history.close();
@@ -2041,6 +2057,7 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
         QVERIFY2(repeatError.contains(QString::fromUtf8("вже було успішно імпортоване")),qPrintable(repeatError));
         QVERIFY(!repeatStages.contains("execute_snapshot"));QVERIFY(!repeatStages.contains("execute_import"));
         QVERIFY(!repeatStages.contains("execute_reopen"));QVERIFY(owner.isOpen());
+        verifyPartsSearch();
         QVERIFY2(capture(&after),qPrintable(error));QCOMPARE(after,before);
         QVERIFY(history.open(QIODevice::ReadOnly));QCOMPARE(history.readAll(),historyBefore);history.close();
         QVERIFY(importLog.open(QIODevice::ReadOnly));QCOMPARE(importLog.readAll(),logBefore);importLog.close();
