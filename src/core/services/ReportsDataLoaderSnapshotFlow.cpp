@@ -288,15 +288,10 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
             QMap<QString, QString> stockUnits;
             for (const auto& material : WorkshopInventoryService::loadMaterials(db,&snapshot.error,false)) stockUnits.insert(material.key, material.unit);
             if(!snapshot.error.isEmpty())return;
-            QSet<int> issuedSpares;
-            QSqlQuery spareQuery(db);
-            if(!spareQuery.exec("SELECT part_id FROM workshop_spare_movements WHERE operation='issue'")){snapshot.error=spareQuery.lastError().text();return;}
-            while(spareQuery.next())issuedSpares.insert(spareQuery.value(0).toInt());
-            if(spareQuery.lastError().isValid()){snapshot.error=spareQuery.lastError().text();return;}
             const QDate from = DateFormats::parseDate(df);
             const QDate to = DateFormats::parseDate(dt);
             QSqlQuery q(db);
-            if(!PartsReportQuery::execute(db,&q,&snapshot.error))return;
+            if(!PartsReportQuery::execute(db,&q,&snapshot.error,true))return;
 
             {
                 while (q.next()) {
@@ -342,7 +337,7 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                     }
                     row.net = recordedPrice ? FormatUtils::roundMoneyValue(row.client - row.purchase)
                         : qMax(0.0, row.client - row.purchase);
-                    row.isOil = PartMarkupPolicyService::isInventoryStore(rawStore) && !issuedSpares.contains(row.rowId)
+                    row.isOil = PartMarkupPolicyService::isInventoryStore(rawStore) && !q.value(22).toBool()
                         && stockUnits.contains(WorkshopInventoryService::normalizedMaterialKey(row.partName));
                     rows.append(row);
                 }

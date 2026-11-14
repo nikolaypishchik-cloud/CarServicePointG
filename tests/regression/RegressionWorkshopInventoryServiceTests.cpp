@@ -141,6 +141,16 @@ int main(int argc, char* argv[])
         || !require(WorkshopInventoryService::loadMaterials(database,&errorText).size()==1,"spare leaked into material choices")) return 1;
     const auto separated=WorkshopInventoryService::buildSnapshot(database,QDate(2026,1,1),QDate::currentDate());
     if(!require(separated.purchases.size()==2,"spare leaked into material ledger")) return 1;
+    if (!execute(database,"SAVEPOINT check_issue_owner")
+        || !execute(database,QStringLiteral("INSERT INTO workshop_spare_movements(spare_id,operation,quantity,moved_on,part_id,order_number) VALUES(%1,'issue',1,'2026-01-03',1,12)").arg(spareId))) return 1;
+    const auto foreignIssue=WorkshopInventoryService::buildSnapshot(database,QDate(2026,1,1),QDate(2026,1,31));
+    if (!require(foreignIssue.errorText.isEmpty(),qPrintable(foreignIssue.errorText))
+        || !require(foreignIssue.consumptions.size()==2,"foreign spare issue suppressed a material consumption")
+        || !execute(database,"UPDATE workshop_spare_movements SET order_number=11 WHERE part_id=1")) return 1;
+    const auto ownedIssue=WorkshopInventoryService::buildSnapshot(database,QDate(2026,1,1),QDate(2026,1,31));
+    if (!require(ownedIssue.errorText.isEmpty(),qPrintable(ownedIssue.errorText))
+        || !require(ownedIssue.consumptions.size()==1,"owned spare issue counted as material")
+        || !execute(database,"ROLLBACK TO check_issue_owner") || !execute(database,"RELEASE check_issue_owner")) return 1;
     // An audit failure must roll back the receipt, purchase, payment and optimistic revision.
     if(!execute(database,"CREATE TRIGGER refuse_spare_receipt BEFORE INSERT ON workshop_spare_movements BEGIN SELECT RAISE(ABORT,'test failure'); END")) return 1;
     if(!require(!WorkshopSpareStockService::receive(database,orders[0],1,QDate::currentDate(),0,&errorText),"failed receipt committed")) return 1;

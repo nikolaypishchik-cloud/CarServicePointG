@@ -88,7 +88,10 @@ QList<OrderDialogPrintPartRow> OrderDialogPrintQueryService::loadPartRows(const 
                 stockPrices.insert(key, {date, id, stock.value(3).toDouble(), stock.value(4)});
         }
     }
-    if (stock.exec("SELECT part_id FROM workshop_spare_movements WHERE operation='issue'"))
+    stock.prepare("SELECT m.part_id FROM workshop_spare_movements m JOIN work_order_parts p "
+                  "ON p.id=m.part_id AND p.order_number=m.order_number WHERE m.operation='issue' AND p.order_uid=?");
+    stock.addBindValue(orderUid);
+    if (stock.exec())
         while (stock.next()) issuedSpares.insert(stock.value(0).toInt());
 
     QSqlQuery q(Database::db());

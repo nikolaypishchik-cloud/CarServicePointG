@@ -443,6 +443,27 @@ private slots:
         PartsQueryService::invalidateCache();
         auto good=read(db.databaseName());QVERIFY2(good.error.isEmpty(),qPrintable(good.error));QCOMPARE(good.rows.size(),2);
         QCOMPARE(good.rows.last().purchase,QString("30"));
+        QVERIFY(q.exec("UPDATE work_order_parts SET store='База' WHERE id=21"));
+        QVERIFY(q.exec("INSERT INTO workshop_inventory_purchases(purchased_on,material_name,material_key,quantity,unit_cost) "
+                       "VALUES('2026-01-01','Synthetic part','synthetic part',1,30)"));
+        QVERIFY(q.exec("INSERT INTO workshop_spare_orders(id,name,brand,model,plate,master_id,master_name,supplier,ordered_on,quantity,unit_cost) "
+                       "VALUES(19,'Synthetic part','','','','m1','','Shop','2026-01-01',1,30)"));
+        QVERIFY(q.exec("INSERT INTO workshop_inventory_purchases(id,purchased_on,material_name,material_key,quantity,unit_cost,stock_kind) "
+                       "VALUES(91,'2026-01-01','Reserved part','reserved part',1,30,'spare')"));
+        QVERIFY(q.exec("INSERT INTO workshop_spare_movements(spare_id,operation,quantity,moved_on,purchase_id) "
+                       "VALUES(19,'receipt',1,'2026-01-01',91)"));
+        QVERIFY(q.exec("INSERT INTO workshop_spare_movements(spare_id,operation,quantity,moved_on,part_id,order_number) "
+                       "VALUES(19,'issue',1,'2026-01-02',21,99)"));
+        const auto foreignIssue=read(db.databaseName());
+        QVERIFY2(foreignIssue.error.isEmpty(),qPrintable(foreignIssue.error));
+        QCOMPARE(foreignIssue.rows.size(),2);
+        QCOMPARE(foreignIssue.rows.last().store,QStringLiteral("Склад СТО"));
+        QVERIFY(q.exec("UPDATE workshop_spare_movements SET order_number=11 WHERE spare_id=19"));
+        const auto ownedIssue=read(db.databaseName());
+        QVERIFY2(ownedIssue.error.isEmpty(),qPrintable(ownedIssue.error));
+        QCOMPARE(ownedIssue.rows.size(),2);
+        QVERIFY(ownedIssue.rows.last().store!=QStringLiteral("Склад СТО"));
+        QVERIFY(q.exec("UPDATE work_order_parts SET store='Shop' WHERE id=21"));
         QVERIFY(q.exec("CREATE TABLE other_report_header AS SELECT * FROM work_orders WHERE number=11"));
         QVERIFY(q.exec("UPDATE other_report_header SET order_uid='different-order',order_year=2025,car='Other owner'"));
         QVERIFY(q.exec("DROP VIEW router_work_orders"));

@@ -6508,11 +6508,17 @@ void ReportsOrdersTests::partsPdfLayout()
         QCOMPARE(part.clientPrice,450.25); QCOMPARE(part.clientAmount,900.50);
         int partId=0;
         QVERIFY2(PartRepository::insert(db,7,part,&partId,&error),qPrintable(error));
+        QVERIFY(q.exec("CREATE TEMP TABLE workshop_spare_movements(part_id INTEGER,order_number INTEGER,operation TEXT)"));
+        q.prepare("INSERT INTO temp.workshop_spare_movements VALUES(?,99,'issue')");
+        q.addBindValue(partId); QVERIFY(q.exec());
         const auto printRows=OrderDialogPrintQueryService::loadPartRows("pdf-order");
         QCOMPARE(printRows.last().price,450.25); QCOMPARE(printRows.last().amount,900.50);
         QCOMPARE(printRows.last().purchasePrice,300.01);
         QVERIFY(printRows.last().stockMaterial);
         QVERIFY(!printRows.first().stockMaterial);
+        QVERIFY(q.exec("UPDATE temp.workshop_spare_movements SET order_number=7"));
+        QVERIFY(!OrderDialogPrintQueryService::loadPartRows("pdf-order").last().stockMaterial);
+        QVERIFY(q.exec("DROP TABLE temp.workshop_spare_movements"));
         QVERIFY(WorkshopInventoryService::setClientPrice(db,purchaseId,500,&error));
         QCOMPARE(OrderDialogPrintQueryService::loadPartRows("pdf-order").last().price,450.25);
         q.prepare("UPDATE work_order_parts SET purchase_price=999,purchase_amount=1998 WHERE id=?");

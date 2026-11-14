@@ -530,8 +530,21 @@ WorkshopInventorySnapshot buildSnapshot(QSqlDatabase database, const QDate& from
         "FROM %1 p LEFT JOIN %2 o ON o.number=p.order_number "
         "WHERE TRIM(COALESCE(p.name,''))<>''")
         .arg(partsSource, ordersSource, hasStore ? QStringLiteral("COALESCE(p.store,'')") : QStringLiteral("''"));
-    if (tableOrViewExists(database, QStringLiteral("workshop_spare_movements")))
-        consumptionSql += QStringLiteral(" AND NOT EXISTS (SELECT 1 FROM workshop_spare_movements sm WHERE sm.operation='issue' AND sm.part_id=p.id)");
+    if (tableOrViewExists(database, QStringLiteral("workshop_spare_movements"))) {
+        QString ownerMatch;
+        for (const auto& column : {QStringLiteral("order_uid"), QStringLiteral("part_uid")}) {
+            const bool routed = database.record(partsSource).contains(column);
+            const bool active = database.record(QStringLiteral("work_order_parts")).contains(column);
+            if (routed || active) {
+                const QString routedUid = routed ? QStringLiteral("COALESCE(p.%1,'')").arg(column) : QStringLiteral("''");
+                const QString activeUid = active ? QStringLiteral("COALESCE(wp.%1,'')").arg(column) : QStringLiteral("''");
+                ownerMatch += QStringLiteral(" AND %1=%2").arg(routedUid, activeUid);
+            }
+        }
+        consumptionSql += QStringLiteral(" AND NOT EXISTS (SELECT 1 FROM workshop_spare_movements sm "
+            "JOIN work_order_parts wp ON wp.id=sm.part_id AND wp.order_number=sm.order_number "
+            "WHERE sm.operation='issue' AND wp.id=p.id AND wp.order_number=p.order_number%1)").arg(ownerMatch);
+    }
     if (!consumptionQuery.exec(consumptionSql)) {
         snapshot.errorText = consumptionQuery.lastError().text();
         return snapshot;
