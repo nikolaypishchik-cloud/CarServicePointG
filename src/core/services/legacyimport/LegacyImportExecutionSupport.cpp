@@ -441,7 +441,17 @@ bool LegacyImportExecutionSupport::runExecute(const QString& sourcePath,
 
     CatalogImportReport autoCatalogReport;
     QString autoCatalogError;
-    if (sourceEntityCount(auditReport, QStringLiteral("work_order_parts")) > 0) {
+    // An imported or pre-existing catalog is authoritative. Derive a catalog
+    // from order history only when there are no catalog records to preserve.
+    QSqlQuery catalogPresent(Database::db());
+    if (!catalogPresent.exec("SELECT EXISTS(SELECT 1 FROM main.parts_catalog)") || !catalogPresent.next()) {
+        const QString detail = catalogPresent.lastError().text();
+        catalogPresent.finish();
+        return failAndRestore(QStringLiteral("catalog_auto_import"), detail, snapshot);
+    }
+    const bool populateCatalog = !catalogPresent.value(0).toBool();
+    catalogPresent.finish();
+    if (populateCatalog && sourceEntityCount(auditReport, QStringLiteral("work_order_parts")) > 0) {
         if (Database::importCatalogFromOrders(&autoCatalogReport, &autoCatalogError)) {
             MigrationRunJournal::info(
                 runContext,

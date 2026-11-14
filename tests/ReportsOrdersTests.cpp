@@ -1580,11 +1580,19 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             "INSERT INTO work_orders VALUES(7,'migration-service-order',2024,3,'2024-06-15','closed',0,0,1)",
             "INSERT INTO masters VALUES(1,'Safety Master')"
         }) QVERIFY2(q.exec(sql),qPrintable(q.lastError().text()));
+        if (targetState=="populated-key-collision") {
+            QVERIFY(q.exec("CREATE TABLE parts_catalog(id INTEGER PRIMARY KEY,part_number TEXT,name TEXT,price REAL)"));
+            QVERIFY(q.exec("INSERT INTO parts_catalog VALUES(901,'SYN-PART','Original catalog name',91.25)"));
+        }
         if (keyedSource || targetState=="populated-conflicting-parent") {
             QVERIFY(q.exec("ALTER TABLE work_order_services ADD COLUMN service_uid TEXT"));
             QVERIFY(q.exec("ALTER TABLE work_order_parts ADD COLUMN service_id INTEGER"));
             QVERIFY(q.exec("INSERT INTO work_order_services VALUES(20,7,'migration-service-order',1,0,0,'Source work','source-service-uid')"));
             QVERIFY(q.exec("INSERT INTO work_order_parts VALUES(21,7,'migration-service-order','source-part-uid','Source part',20)"));
+            if (targetState=="populated-key-collision") {
+                QVERIFY(q.exec("ALTER TABLE work_order_parts ADD COLUMN part_number TEXT"));
+                QVERIFY(q.exec("UPDATE work_order_parts SET part_number='SYN-PART' WHERE id=21"));
+            }
             if (targetState=="populated-conflicting-parent") {
                 QVERIFY(q.exec("ALTER TABLE work_order_parts ADD COLUMN work_order INTEGER"));
                 QVERIFY(q.exec("UPDATE work_order_parts SET work_order=77"));
@@ -1920,6 +1928,14 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
         return;
     }
     QVERIFY2(ok,qPrintable(error+" | stages="+stages.join(',')));
+    if (targetState=="populated-key-collision") {
+        QSqlQuery catalog(Database::db());
+        QVERIFY(catalog.exec("SELECT part_number,name,price FROM parts_catalog WHERE id=901"));
+        QVERIFY(catalog.next());
+        QCOMPARE(catalog.value(0).toString(), QString("SYN-PART"));
+        QCOMPARE(catalog.value(1).toString(), QString("Original catalog name"));
+        QCOMPARE(catalog.value(2).toDouble(), 91.25);
+    }
     if(legacyRouting) {
         const QString connection="legacy-materialized-evidence";
         {auto check=QSqlDatabase::addDatabase("QSQLITE",connection);check.setDatabaseName(AppRuntime::activeDbFilePath());check.setConnectOptions("QSQLITE_OPEN_READONLY");QVERIFY(check.open());QSqlQuery evidence(check);
