@@ -1,4 +1,5 @@
 #include "core/util/DateFormats.h"
+#include "core/repository/RepositoryWriteBoundary.h"
 #include "core/services/AccessControlService.h"
 #include "core/services/ActivityAuditService.h"
 #include "infrastructure/db/sqlite/Db.h"
@@ -260,6 +261,8 @@ bool ensureSchema(QSqlDatabase database, QString* errorText)
         return false;
     }
 
+    RepositoryWriteBoundary seed(database, errorText);
+    if (!seed.started()) return false;
     QSqlQuery query(database);
     if (!query.exec(QStringLiteral(
             "CREATE TABLE IF NOT EXISTS access_roles ("
@@ -363,7 +366,7 @@ bool ensureSchema(QSqlDatabase database, QString* errorText)
         setError(errorText, normalize.lastError().text());
         return false;
     }
-    return true;
+    return seed.finish();
 }
 
 QVector<AccessPermissionDefinition> permissionDefinitions()

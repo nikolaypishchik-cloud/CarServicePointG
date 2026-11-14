@@ -6,6 +6,10 @@
 #include <QUuid>
 
 #include "core/crm/CrmClientService.h"
+#include "core/services/AccessControlService.h"
+#include "infrastructure/db/sqlite/DbBootstrapEnsureSchema.h"
+#include "infrastructure/db/sqlite/DbFacadeSupport.h"
+#include "infrastructure/db/sqlite/ScopedConnectionManager.h"
 #include "TestSourceAssertions.h"
 
 namespace {
@@ -44,12 +48,62 @@ class OrderWorkspaceServiceTests final : public QObject {
 private slots:
     void criticalRegressionGuardsRemainWired();
     void crmBackfillCreatesLocalClientVehicleOnce();
+    void lateRouterDdlFailurePreservesExistingViews();
+    void failedPermissionSeedPreservesCallerTransaction();
 };
 
 void OrderWorkspaceServiceTests::criticalRegressionGuardsRemainWired()
 {
     cs::tests::requireAnyContains("src/core/services/OrderWorkspaceService.cpp", {"workspace", "order_uid"});
     cs::tests::requireAnyContains("src/core/services/OrderStoragePolicyService.cpp", {"OrderStoragePolicyService", "1000"});
+}
+
+void OrderWorkspaceServiceTests::lateRouterDdlFailurePreservesExistingViews()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    QString error;
+    ScopedSqliteConnection connection(root.filePath("router.db"), "router-rollback", &error);
+    QVERIFY2(connection.isOpen(), qPrintable(error));
+    auto db = connection.db();
+    QVERIFY(ensureWorkspaceSchema(db));
+    QVERIFY(rebuildRouterViews(db));
+    execOk(db, "DROP VIEW router_work_orders");
+    execOk(db, "CREATE VIEW router_work_orders AS SELECT * FROM work_orders WHERE 0");
+    const auto original = scalarText(db, "SELECT sql FROM sqlite_schema WHERE name='router_work_orders'");
+    execOk(db, "DROP VIEW router_open_orders");
+    execOk(db, "CREATE TABLE router_open_orders(marker INTEGER)");
+
+    QVERIFY(!rebuildRouterViews(db));
+    QCOMPARE(scalarText(db, "SELECT sql FROM sqlite_schema WHERE name='router_work_orders'"), original);
+    execOk(db, "DROP TABLE router_open_orders");
+    QVERIFY(rebuildRouterViews(db));
+    QVERIFY(scalarText(db, "SELECT sql FROM sqlite_schema WHERE name='router_work_orders'") != original);
+}
+
+void OrderWorkspaceServiceTests::failedPermissionSeedPreservesCallerTransaction()
+{
+    QTemporaryDir root;
+    QVERIFY(root.isValid());
+    QString error;
+    ScopedSqliteConnection connection(root.filePath("roles.db"), "roles-rollback", &error);
+    QVERIFY2(connection.isOpen(), qPrintable(error));
+    auto db = connection.db();
+    execOk(db, "CREATE TABLE caller_marker(id INTEGER PRIMARY KEY)");
+    QVERIFY(db.transaction());
+    execOk(db, "INSERT INTO caller_marker VALUES(1)");
+    // The final role normalization requires staff_accounts after grants have been seeded.
+    QVERIFY(!AccessControlService::ensureSchema(db, &error));
+    QVERIFY(error.contains("staff_accounts"));
+    QCOMPARE(scalarInt(db, "SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE 'access_role%'"), 0);
+    QCOMPARE(scalarInt(db, "SELECT COUNT(*) FROM caller_marker"), 1);
+
+    execOk(db, "CREATE TABLE staff_accounts(id TEXT PRIMARY KEY,role TEXT)");
+    QVERIFY2(AccessControlService::ensureSchema(db, &error), qPrintable(error));
+    QVERIFY(scalarInt(db, "SELECT COUNT(*) FROM access_role_permissions") > 0);
+    QVERIFY(db.rollback());
+    QCOMPARE(scalarInt(db, "SELECT COUNT(*) FROM caller_marker"), 0);
+    QCOMPARE(scalarInt(db, "SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE 'access_role%'"), 0);
 }
 
 void OrderWorkspaceServiceTests::crmBackfillCreatesLocalClientVehicleOnce()
