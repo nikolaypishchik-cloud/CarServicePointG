@@ -35,7 +35,8 @@ PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, con
         db.setDatabaseName(dbPath);
         db.setConnectOptions(QStringLiteral("QSQLITE_OPEN_READONLY"));
         if (!db.open()) {
-            snapshot.stats = { QString::fromUtf8("Помилка відкриття БД для звіту") };
+            snapshot.error = QString::fromUtf8("Помилка відкриття БД для звіту");
+            snapshot.stats = {snapshot.error};
         } else {
             QSqlQuery q(db);
             q.prepare(
@@ -77,7 +78,8 @@ PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, con
 
             if (!executed || q.lastError().isValid()) {
                 snapshot.rows.clear();
-                snapshot.stats = {QString::fromUtf8("Помилка читання звіту: ") + q.lastError().text()};
+                snapshot.error = QString::fromUtf8("Помилка читання звіту: ") + q.lastError().text();
+                snapshot.stats = {snapshot.error};
             } else snapshot.stats = {
                 QString::fromUtf8("Нарядів:  %1").arg(count),
                 QString::fromUtf8("Роботи:  %1  грн.").arg(money0(works)),

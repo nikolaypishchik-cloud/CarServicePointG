@@ -103,6 +103,11 @@ bool tryGetPeriod(const QString& key, PeriodSnapshot* out)
 void storePeriod(const QString& key, const PeriodSnapshot& snapshot)
 {
     QMutexLocker lock(&cacheMutex());
+    if (!snapshot.error.isEmpty()) {
+        cacheState().period.remove(key);
+        cacheState().periodOrder.removeAll(key);
+        return;
+    }
     storeImpl(cacheState().period, cacheState().periodOrder, key, snapshot);
 }
 
@@ -115,6 +120,11 @@ bool tryGetOrders(const QString& key, OrdersSnapshot* out)
 void storeOrders(const QString& key, const OrdersSnapshot& snapshot)
 {
     QMutexLocker lock(&cacheMutex());
+    if (!snapshot.clientPaymentError.isEmpty()) {
+        cacheState().orders.remove(key);
+        cacheState().ordersOrder.removeAll(key);
+        return;
+    }
     storeImpl(cacheState().orders, cacheState().ordersOrder, key, snapshot);
 }
 

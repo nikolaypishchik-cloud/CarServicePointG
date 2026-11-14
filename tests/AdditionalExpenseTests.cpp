@@ -480,6 +480,34 @@ private slots:
         const auto stable=PayrollReadFixture::bytes(db.databaseName());QVERIFY(!original.isEmpty());
         QVERIFY(read(db.databaseName()).error.isEmpty());QCOMPARE(PayrollReadFixture::bytes(db.databaseName()),stable);
     }
+    void periodAndOrdersRetryOnTabReturn()
+    {
+        QVERIFY(ensureWorkspaceSchema(db));
+        QVERIFY(ensureRouterCacheSchema(db));
+        QVERIFY(rebuildRouterViews(db));
+        QSqlQuery query(db);
+        QVERIFY2(query.exec("DROP VIEW router_work_orders"), qPrintable(query.lastError().text()));
+
+        ReportsPage page;
+        page.show();
+        auto* tabs = page.findChild<QTabWidget*>();
+        auto* stats = page.findChild<QLabel*>("reportsStatsLabel");
+        QVERIFY(tabs && stats);
+        tabs->setCurrentIndex(0);
+        page.refresh();
+        QTRY_VERIFY_WITH_TIMEOUT(stats->text().contains(QStringLiteral("Помилка читання звіту")), 10000);
+        tabs->setCurrentIndex(1);
+        QTRY_VERIFY_WITH_TIMEOUT(stats->text().contains(QStringLiteral("Не вдалося завантажити наряди")), 10000);
+
+        QVERIFY(rebuildRouterViews(db));
+        tabs->setCurrentIndex(0);
+        QTRY_VERIFY_WITH_TIMEOUT(stats->text().contains(QStringLiteral("Роботи:")), 10000);
+        QVERIFY(!stats->text().contains(QStringLiteral("Помилка")));
+        tabs->setCurrentIndex(1);
+        QTRY_VERIFY_WITH_TIMEOUT(stats->text().contains(QStringLiteral("Закупка:")), 10000);
+        QVERIFY(!stats->text().contains(QStringLiteral("Не вдалося")));
+    }
+
     void partsUiRecoversAfterReadFailure() {
         QString error;QVERIFY(ensureWorkspaceSchema(db));QVERIFY(ensureRouterCacheSchema(db));QVERIFY(rebuildRouterViews(db));QVERIFY(WorkshopSpareStockService::ensureSchema(db,&error));
         QSqlQuery q(db);QVERIFY(q.exec("ALTER TABLE work_order_part_attachments RENAME TO parts_broken"));

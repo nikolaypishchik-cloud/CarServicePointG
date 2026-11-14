@@ -19,6 +19,7 @@ struct PeriodSnapshotRow {
 struct PeriodSnapshot {
     QList<PeriodSnapshotRow> rows;
     QStringList stats;
+    QString error;
 };
 
 struct OrdersSnapshotRow {

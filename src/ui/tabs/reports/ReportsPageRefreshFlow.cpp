@@ -442,7 +442,8 @@ void ReportsPage::refreshPeriod()
         if (generation != m_asyncRefreshGeneration) return;
         if (activeTab() != ReportTab::Period) return;
         applyPeriodSnapshot(snapshot);
-        m_tabKeys[static_cast<int>(ReportTab::Period)] = key;
+        if (snapshot.error.isEmpty()) m_tabKeys[static_cast<int>(ReportTab::Period)] = key;
+        else m_tabKeys.remove(static_cast<int>(ReportTab::Period));
         applyCachedTabUi(ReportTab::Period);
     });
 }
@@ -486,7 +487,8 @@ void ReportsPage::refreshOrders()
         if (generation != m_asyncRefreshGeneration) return;
         if (activeTab() != ReportTab::Orders) return;
         applyOrdersSnapshot(snapshot);
-        m_tabKeys[static_cast<int>(ReportTab::Orders)] = key;
+        if (snapshot.clientPaymentError.isEmpty()) m_tabKeys[static_cast<int>(ReportTab::Orders)] = key;
+        else m_tabKeys.remove(static_cast<int>(ReportTab::Orders));
         applyCachedTabUi(ReportTab::Orders);
     }, filter);
 }

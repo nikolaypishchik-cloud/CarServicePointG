@@ -91,7 +91,7 @@ inline int runAudit(QSqlDatabase db, const QString& output) {
     }
     rec.run("parts.all","service",[&]{QString e;auto r=PartsQueryService::loadRows(db,{},from,to,&e);return checked(r.size(),e);},reset);
     auto snap=[](int n,const QStringList& stats){QString e;for(const auto& s:stats)if(s.contains(QString::fromUtf8("Не вдалося")))e="snapshot_error";return checked(n,e);};
-    rec.run("reports.period","service",[&]{auto r=ReportsDataLoader::buildPeriodSnapshot(dbPath,df,dt);return snap(r.rows.size(),r.stats);},reset);
+    rec.run("reports.period","service",[&]{const auto r=ReportsDataLoader::buildPeriodSnapshot(dbPath,df,dt);return checked(r.rows.size(),r.error);},reset);
     rec.run("reports.orders","service",[&]{
         const auto r=ReportsDataLoader::buildOrdersSnapshot(dbPath,df,dt);
         return r.clientPaymentError.isEmpty() ? snap(r.rows.size(),r.stats) : checked(r.rows.size(),r.clientPaymentError);
