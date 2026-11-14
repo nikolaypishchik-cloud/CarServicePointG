@@ -191,7 +191,7 @@ bool rewriteLegacyToCanonicalWorkspaceIfNeeded(QSqlDatabase database, QString* e
         };
     if (prepared) {
         if (!recordCanonicalRewriteCorrespondence(database,originalIdentity,attachedSource,legacySchema,txError,keys)
-            || !finalizeCanonicalRewriteImportedWorkspace(database,fingerprint,sourcePath,txError)) return false;
+            || !finalizeCanonicalRewriteImportedWorkspace(database,fingerprint,sourcePath,txError,true)) return false;
         QSqlQuery finish(database);
         if (!finish.exec("UPDATE migration_prepared_source SET finalized=1 WHERE singleton=1 AND finalized=0") || finish.numRowsAffected()!=1)
             return fail(QStringLiteral("Cannot finalize prepared migration: %1").arg(finish.lastError().text()));

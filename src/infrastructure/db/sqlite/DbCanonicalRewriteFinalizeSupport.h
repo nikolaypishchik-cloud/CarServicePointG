@@ -12,4 +12,4 @@ bool restoreCanonicalRewriteWorkspaceSettings(QSqlDatabase database,
 bool finalizeCanonicalRewriteImportedWorkspace(QSqlDatabase database,
                                               const QString& fingerprint,
                                               const QString& sourcePath,
-                                              QString* errorText = nullptr);
+                                              QString* errorText = nullptr, bool preservePlanningKeys = false);

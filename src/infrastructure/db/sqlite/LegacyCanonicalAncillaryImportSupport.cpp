@@ -169,7 +169,7 @@ bool ensureAncillarySchema(QSqlDatabase db, QString* errorText)
 }
 }
 
-bool LegacyCanonicalAncillaryImportSupport::finalizeImportedAncillaryData(QSqlDatabase database, QString* errorText)
+bool LegacyCanonicalAncillaryImportSupport::finalizeImportedAncillaryData(QSqlDatabase database, QString* errorText, bool preservePlanningKeys)
 {
     if (!database.isValid()) {
         if (errorText) *errorText = QStringLiteral("Ancillary normalization DB is invalid");
@@ -241,7 +241,7 @@ bool LegacyCanonicalAncillaryImportSupport::finalizeImportedAncillaryData(QSqlDa
         if (partCols.contains(QStringLiteral("part_number")) && !execSql(database, QStringLiteral("UPDATE parts_catalog SET part_number=COALESCE(part_number,'')"), QStringLiteral("normalize parts_catalog.part_number"), errorText)) return false;
     }
 
-    if (hasPlanning && planningCols.contains(QStringLiteral("day")) && planningCols.contains(QStringLiteral("note"))) {
+    if (!preservePlanningKeys && hasPlanning && planningCols.contains(QStringLiteral("day")) && planningCols.contains(QStringLiteral("note"))) {
         QSqlQuery q(database);
         if (!q.exec(QStringLiteral("SELECT day, note FROM planning_calendar"))) {
             if (errorText) *errorText = QStringLiteral("normalize planning_calendar.read: %1").arg(q.lastError().text());

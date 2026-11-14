@@ -1581,6 +1581,8 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
             "INSERT INTO masters VALUES(1,'Safety Master')"
         }) QVERIFY2(q.exec(sql),qPrintable(q.lastError().text()));
         if (targetState=="populated-key-collision") {
+            QVERIFY(q.exec("CREATE TABLE planning_calendar(day TEXT PRIMARY KEY,note TEXT)"));
+            QVERIFY(q.exec("INSERT INTO planning_calendar VALUES('30.10.26','First note'),('2026-10-30','Second note')"));
             QVERIFY(q.exec("CREATE TABLE parts_catalog(id INTEGER PRIMARY KEY,part_number TEXT,name TEXT,price REAL)"));
             QVERIFY(q.exec("INSERT INTO parts_catalog VALUES(901,'SYN-PART','Original catalog name',91.25)"));
         }
@@ -1929,6 +1931,15 @@ void ReportsOrdersTests::migrationServiceRoundTrip()
     }
     QVERIFY2(ok,qPrintable(error+" | stages="+stages.join(',')));
     if (targetState=="populated-key-collision") {
+        QSqlQuery calendar(Database::db());
+        QVERIFY(calendar.exec("SELECT day,note FROM planning_calendar WHERE day IN ('30.10.26','2026-10-30') ORDER BY day"));
+        QVERIFY(calendar.next());
+        QCOMPARE(calendar.value(0).toString(), QString("2026-10-30"));
+        QCOMPARE(calendar.value(1).toString(), QString("Second note"));
+        QVERIFY(calendar.next());
+        QCOMPARE(calendar.value(0).toString(), QString("30.10.26"));
+        QCOMPARE(calendar.value(1).toString(), QString("First note"));
+        QVERIFY(!calendar.next());
         QSqlQuery catalog(Database::db());
         QVERIFY(catalog.exec("SELECT part_number,name,price FROM parts_catalog WHERE id=901"));
         QVERIFY(catalog.next());

@@ -58,7 +58,7 @@ bool restoreCanonicalRewriteWorkspaceSettings(QSqlDatabase database,
 bool finalizeCanonicalRewriteImportedWorkspace(QSqlDatabase database,
                                               const QString& fingerprint,
                                               const QString& sourcePath,
-                                              QString* errorText)
+                                              QString* errorText, bool preservePlanningKeys)
 {
     if (!database.isValid()) {
         if (errorText) *errorText = QStringLiteral("Canonical rewrite finalization failed: invalid database");
@@ -80,7 +80,7 @@ bool finalizeCanonicalRewriteImportedWorkspace(QSqlDatabase database,
         if (errorText) *errorText = QStringLiteral("canonical import normalization failed: %1").arg(normalizationError);
         return false;
     }
-    if (!LegacyCanonicalAncillaryImportSupport::finalizeImportedAncillaryData(database, &normalizationError)) {
+    if (!LegacyCanonicalAncillaryImportSupport::finalizeImportedAncillaryData(database, &normalizationError, preservePlanningKeys)) {
         if (errorText) *errorText = QStringLiteral("ancillary canonical import normalization failed: %1").arg(normalizationError);
         return false;
     }
