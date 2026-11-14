@@ -1,3 +1,4 @@
+#include "infrastructure/db/sqlite/DbSourceFingerprintSupport.h"
 #include <QScreen>
 #include "ui/tabs/history/HistoryPage.h"
 #include <QLineEdit>
@@ -254,6 +255,7 @@ private slots:
     void migrationPublicationCrashRecovery_data();
     void migrationPublicationCrashRecovery();
     void migrationReservesArchivedOrderKeys();
+    void routerRebuildPreservesAttachedSource();
     void migrationReusesVerifiedSettings();
     void migrationServiceRoundTrip_data();
     void workspaceSchemaPreparationRollback();
@@ -1365,6 +1367,34 @@ void ReportsOrdersTests::migrationPublicationCrashRecovery()
     QCOMPARE(result.importedOrderCount,1);QCOMPARE(result.importedServiceCount,1);QCOMPARE(result.importedPartCount,1);
     QVERIFY2(MigrationRestoreJournal::pending(&pending,&error),qPrintable(error));QVERIFY(pending.isEmpty());
     QSqlQuery q(Database::db());QVERIFY(q.exec("SELECT COUNT(*) FROM work_orders"));QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),2);
+}
+
+void ReportsOrdersTests::routerRebuildPreservesAttachedSource()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.filePath("audited.db");
+    const auto name = QUuid::createUuid().toString();
+    auto db = QSqlDatabase::addDatabase("QSQLITE", name);
+    const auto close = qScopeGuard([&]{ db.close(); db = {}; QSqlDatabase::removeDatabase(name); });
+    db.setDatabaseName(":memory:");
+    QVERIFY(db.open());
+    QVERIFY(ensureWorkspaceSchema(db));
+    QSqlQuery q(db);
+    q.prepare("ATTACH DATABASE ? AS audited_source");
+    q.addBindValue(source);
+    QVERIFY(q.exec());
+    QVERIFY(q.exec("CREATE VIEW audited_source.router_work_order_parts AS SELECT 1 AS sentinel"));
+    QVERIFY(q.exec("DROP VIEW IF EXISTS main.router_work_order_parts"));
+    const auto before = legacySourceFingerprint(source);
+    QVERIFY(before.startsWith(source + '|'));
+    QVERIFY(rebuildRouterViews(db));
+    QVERIFY(q.exec("SELECT sentinel FROM audited_source.router_work_order_parts"));
+    QVERIFY(q.next());
+    QCOMPARE(q.value(0).toInt(), 1);
+    q.finish();
+    QVERIFY(q.exec("DETACH DATABASE audited_source"));
+    QCOMPARE(legacySourceFingerprint(source), before);
 }
 
 void ReportsOrdersTests::migrationReusesVerifiedSettings()

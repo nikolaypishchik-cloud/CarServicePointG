@@ -675,7 +675,7 @@ bool rebuildRouterViews(QSqlDatabase database)
     const QString closedPredicate = OrderStoragePolicyService::closedOrderPredicate(QStringLiteral("o"));
     const QString activePathSql = sqlQuoteText(AppRuntime::activeDbFilePath());
 
-    q.exec("DROP VIEW IF EXISTS router_work_orders");
+    q.exec("DROP VIEW IF EXISTS main.router_work_orders");
     if (!q.exec(
             "CREATE VIEW router_work_orders AS "
             "SELECT o.number, o.order_uid, o.order_number, o.order_year, o.opened_at, o.closed_at, o.status, o.plate, o.plate_norm, o.vin, o.car_year, o.odometer, o.engine_type, o.engine_volume, o.fuel_type, o.car, o.client, o.client_phone, o.master_id, o.works_sum, o.parts_sum, o.discount, o.master_name_closed, o.car_model, o.car_brand, o.car_kind, o.color, o.car_color, o.owner_name, o.client_uid, o.vehicle_uid, o.crm_backfilled_at, o.discount_mode FROM work_orders o "
@@ -686,7 +686,7 @@ bool rebuildRouterViews(QSqlDatabase database)
         qWarning() << "router_work_orders create failed:" << q.lastError().text();
         return false;
     }
-    q.exec("DROP VIEW IF EXISTS router_work_order_services");
+    q.exec("DROP VIEW IF EXISTS main.router_work_order_services");
     const QString serviceUid = tableColumnsForDb(database,QStringLiteral("work_order_services")).contains(QStringLiteral("service_uid"))
         ? QStringLiteral("s.service_uid") : QStringLiteral("''");
     if (!q.exec(QStringLiteral(
@@ -699,7 +699,7 @@ bool rebuildRouterViews(QSqlDatabase database)
         qWarning() << "router_work_order_services create failed:" << q.lastError().text();
         return false;
     }
-    q.exec("DROP VIEW IF EXISTS router_service_masters");
+    q.exec("DROP VIEW IF EXISTS main.router_service_masters");
     if (!q.exec(
             "CREATE VIEW router_service_masters AS "
             "SELECT sm.service_id, sm.master_id, sm.share_percent, sm.role, sm.master_name_closed FROM service_masters sm "
@@ -712,7 +712,7 @@ bool rebuildRouterViews(QSqlDatabase database)
         qWarning() << "router_service_masters create failed:" << q.lastError().text();
         return false;
     }
-    q.exec("DROP VIEW IF EXISTS router_work_order_parts");
+    q.exec("DROP VIEW IF EXISTS main.router_work_order_parts");
     const QString partUid = tableColumnsForDb(database,QStringLiteral("work_order_parts")).contains(QStringLiteral("part_uid"))
         ? QStringLiteral("p.part_uid") : QStringLiteral("''");
     if (!q.exec(QStringLiteral(
@@ -726,7 +726,7 @@ bool rebuildRouterViews(QSqlDatabase database)
         qWarning() << "router_work_order_parts create failed:" << q.lastError().text();
         return false;
     }
-    q.exec("DROP VIEW IF EXISTS router_outsource_repairs");
+    q.exec("DROP VIEW IF EXISTS main.router_outsource_repairs");
     if (!q.exec(
             "CREATE VIEW router_outsource_repairs AS "
             "SELECT r.id, r.order_uid, r.order_number, r.sent_at, r.company, r.part_name, r.repair_cost, r.client_price, r.note, r.created_at, r.service_id FROM outsource_repairs r "
@@ -738,7 +738,7 @@ bool rebuildRouterViews(QSqlDatabase database)
         return false;
     }
 
-    q.exec("DROP VIEW IF EXISTS router_order_locator");
+    q.exec("DROP VIEW IF EXISTS main.router_order_locator");
     if (!q.exec(QStringLiteral(
         "CREATE VIEW router_order_locator AS "
         "SELECT src.number AS number, src.order_uid AS order_uid, src.order_number AS order_number, src.order_year AS order_year, "
@@ -804,20 +804,20 @@ bool rebuildRouterViews(QSqlDatabase database)
         return false;
     }
 
-    q.exec("DROP VIEW IF EXISTS router_closed_order_locator");
+    q.exec("DROP VIEW IF EXISTS main.router_closed_order_locator");
     if (!q.exec(QStringLiteral("CREATE VIEW router_closed_order_locator AS SELECT o.* FROM router_order_locator o WHERE %1").arg(closedPredicate))) {
         qWarning() << "router_closed_order_locator create failed:" << q.lastError().text();
         return false;
     }
-    q.exec("DROP VIEW IF EXISTS router_open_order_locator");
+    q.exec("DROP VIEW IF EXISTS main.router_open_order_locator");
     if (!q.exec(QStringLiteral("CREATE VIEW router_open_order_locator AS SELECT o.* FROM router_order_locator o WHERE o.is_in_active=1 AND NOT %1").arg(closedPredicate))) {
         qWarning() << "router_open_order_locator create failed:" << q.lastError().text();
         return false;
     }
 
-    q.exec("DROP VIEW IF EXISTS router_closed_orders");
+    q.exec("DROP VIEW IF EXISTS main.router_closed_orders");
     q.exec(QStringLiteral("CREATE VIEW router_closed_orders AS SELECT o.* FROM router_work_orders o WHERE %1").arg(closedPredicate));
-    q.exec("DROP VIEW IF EXISTS router_open_orders");
+    q.exec("DROP VIEW IF EXISTS main.router_open_orders");
     q.exec(QStringLiteral("CREATE VIEW router_open_orders AS SELECT o.* FROM router_work_orders o WHERE NOT %1").arg(closedPredicate));
     QString searchError;
     if (!OrderSearchIndex::ensure(database, &searchError)) {
