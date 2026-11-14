@@ -29,6 +29,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QTemporaryFile>
 #include <QThread>
 #include <QTimer>
 #include <QUrl>

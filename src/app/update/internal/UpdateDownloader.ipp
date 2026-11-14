@@ -156,14 +156,8 @@ bool isWritableDirectory(const QString& dirPath)
 {
     QDir dir(dirPath);
     if (!dir.exists()) return false;
-    const QString probe = dir.filePath(QStringLiteral(".__cs_write_probe__"));
-    QFile f(probe);
-    const bool ok = f.open(QIODevice::WriteOnly | QIODevice::Truncate);
-    if (ok) {
-        f.close();
-        safeRemoveUpdateFile(probe, {QStringLiteral(".__cs_write_probe__")});
-    }
-    return ok;
+    QTemporaryFile probe(dir.filePath(QStringLiteral(".__cs_write_probe__.XXXXXX")));
+    return probe.open() && probe.remove();
 }
 
 bool hasInstalledUninstaller(const QString& appDir)

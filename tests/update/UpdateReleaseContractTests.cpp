@@ -1,5 +1,9 @@
 #include <QtTest/QtTest>
 
+#include "app/update/UpdateServiceSupport.h"
+#include <QDir>
+#include <QFile>
+#include <QTemporaryDir>
 #include <QRegularExpression>
 #include <QString>
 
@@ -41,6 +45,26 @@ class UpdateReleaseContractTests final : public QObject
     Q_OBJECT
 
 private slots:
+    void directoryProbePreservesExistingFiles()
+    {
+        QTemporaryDir sandbox;
+        QVERIFY(sandbox.isValid());
+        QDir dir(sandbox.path());
+        QVERIFY(UpdateServiceSupport::isWritableDirectory(dir.path()));
+        const auto filters = QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot;
+        QVERIFY(dir.entryList(filters).isEmpty());
+
+        QFile existing(dir.filePath(QStringLiteral(".__cs_write_probe__")));
+        QVERIFY(existing.open(QIODevice::WriteOnly | QIODevice::NewOnly));
+        QCOMPARE(existing.write("preserve"), 8);
+        existing.close();
+        QVERIFY(UpdateServiceSupport::isWritableDirectory(dir.path()));
+        QVERIFY(existing.open(QIODevice::ReadOnly));
+        QCOMPARE(existing.readAll(), QByteArray("preserve"));
+        QCOMPARE(dir.entryList(filters).size(), 1);
+        QVERIFY(!UpdateServiceSupport::isWritableDirectory(dir.filePath(QStringLiteral("missing"))));
+    }
+
     void exactVersionTokenAcceptsCanonicalInstaller()
     {
         QVERIFY(versionTokenMatches(QStringLiteral("CarServicePointG_Setup_x86_x64_v2.1.1.exe"), QStringLiteral("2.1.1")));
