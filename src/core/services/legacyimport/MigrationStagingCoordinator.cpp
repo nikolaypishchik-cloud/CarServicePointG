@@ -68,6 +68,31 @@ bool retainPreviousArchive(const QString& temporary, const QString& role, const 
     return true;
 }
 
+// FTS5 external-content tables can return the source rows even when MATCH
+// uses stale postings. Validate against the content table itself.
+bool verifyWorkspaceSearchIndexes(QSqlDatabase db, QString* error)
+{
+    for (const auto& table : {QStringLiteral("work_orders_fts"), QStringLiteral("work_order_parts_fts")}) {
+        QSqlQuery exists(db);
+        exists.prepare("SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?");
+        exists.addBindValue(table);
+        if (!exists.exec()) return NativeSnapshotMetadata::fail(error, exists.lastError().text());
+        const bool present = exists.next();
+        if (exists.lastError().isValid()) return NativeSnapshotMetadata::fail(error, exists.lastError().text());
+        exists.finish();
+        if (!present) continue; // FTS is optional on installations without the module.
+
+        QSqlQuery command(db);
+        const QString check = QStringLiteral("INSERT INTO main.%1(%1,rank) VALUES('integrity-check',1)").arg(table);
+        if (command.exec(check)) continue;
+        if (!command.exec(QStringLiteral("INSERT INTO main.%1(%1) VALUES('rebuild')").arg(table))
+            || !command.exec(check)) {
+            return NativeSnapshotMetadata::fail(error, table + QStringLiteral(": ") + command.lastError().text());
+        }
+    }
+    return true;
+}
+
 bool prepareWorkspace(const QString& path, const QString& source, const QString& archive, const QString& identity, QString* error)
 {
     bool copied = false;
@@ -79,6 +104,7 @@ bool prepareWorkspace(const QString& path, const QString& source, const QString&
     db.setDatabaseName(path);
     if (!db.open()) return NativeSnapshotMetadata::fail(error, db.lastError().text());
     if (!ensureWorkspaceSchema(db)) return NativeSnapshotMetadata::fail(error, "Cannot initialize migration workspace");
+    if (!verifyWorkspaceSearchIndexes(db, error)) return false;
     const auto temporary=QFileInfo(path).absolutePath();
     const QString previousRegistry = QDir(temporary).filePath(QStringLiteral("previous-registry.db"));
     bool registryPresent = false;
@@ -162,6 +188,7 @@ bool prepareWorkspace(const QString& path, const QString& source, const QString&
     pin.prepare("INSERT INTO migration_archive_pin VALUES(?,?) ON CONFLICT(source_identity) DO UPDATE SET fingerprint=excluded.fingerprint");
     pin.addBindValue(identity); pin.addBindValue(signature);
     if (!pin.exec()) return NativeSnapshotMetadata::fail(error,pin.lastError().text());
+    if (!verifyWorkspaceSearchIndexes(db, error)) return false;
     if (!db.commit()) return NativeSnapshotMetadata::fail(error, db.lastError().text());
     rollback.dismiss();
     return true;
