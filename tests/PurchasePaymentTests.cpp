@@ -6080,6 +6080,45 @@ private slots:
         QVERIFY(!restricted.documentDebtCents.contains("Beta"));
         QVERIFY(restricted.supplierReconciliations.isEmpty());
         ActivityAuditService::setCurrentActor({"qa-owner","QA Owner","owner","test"});
+        auto* debtTable = report.findChild<QTableView*>("purchaseDebtsTable");
+        auto* debtPage = report.findChild<QWidget*>("purchaseDebtsPage");
+        QVERIFY(debtTable && debtPage);
+        tabs->setCurrentWidget(debtPage);
+        const auto betaRow = [&]() -> QModelIndex {
+            for (int row = 0; row < debtTable->model()->rowCount(); ++row) {
+                const auto key = debtTable->model()->index(row,0);
+                if (key.data(Qt::UserRole).toLongLong() == 4 && key.data(Qt::UserRole+2).toString() == "order-b")
+                    return debtTable->model()->index(row,3);
+            }
+            return {};
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(betaRow().isValid(),10000);
+        bool confirmed = false;
+        QTimer settle;
+        connect(&settle, &QTimer::timeout, &report, [&] {
+            auto* modal = QApplication::activeModalWidget();
+            if (auto* notice = qobject_cast<QMessageBox*>(modal)) {
+                confirmed = notice->windowTitle() == QStringLiteral("Оплату здійснено");
+                notice->accept();
+            } else if (modal && modal->objectName() == "purchasePaymentDialog") {
+                auto* pay = modal->findChild<QPushButton*>("payInFull");
+                if (!pay) return;
+                QTimer::singleShot(0, pay, &QPushButton::click);
+            }
+        });
+        settle.start(30);
+        debtTable->doubleClicked(betaRow());
+        settle.stop();
+        QVERIFY(confirmed);
+        auto paid = PurchasePaymentService::detail(db,"part",4,"order-b",&error);
+        QVERIFY2(error.isEmpty(),qPrintable(error));
+        QCOMPARE(paid.remainingCents(),qint64(0));
+        QCOMPARE(PurchasePaymentService::history(db,paid,&error).size(),1);
+        QVERIFY2(error.isEmpty(),qPrintable(error));
+        tabs->setCurrentWidget(mode->parentWidget());
+        mode->setCurrentText(QStringLiteral("За нарядами"));
+        QTRY_VERIFY_WITH_TIMEOUT(labelContains(tile,FormatUtils::money(200,2)) && cards().size()==1,10000);
+        QCOMPARE(cards().first()->property("supplier").toString(),QStringLiteral("Store"));
     }
 
     void linkedInvoiceClickSelectsRegistryRow() {
