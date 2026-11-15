@@ -355,6 +355,11 @@ void ReportsPage::buildUi()
     m_partsRegister = new PartsRegisterView(partsPage);
     partsLayout->addWidget(m_partsRegister, 1);
     m_partsRegister->hide();
+    QWidget::setTabOrder(search, collapse);
+    QWidget::setTabOrder(collapse, expand);
+    QWidget::setTabOrder(expand, mode);
+    QWidget::setTabOrder(mode, m_partsTable);
+    m_partsRegister->setTabOrderAfter(m_partsTable);
     m_partsRegister->storeChanged = [this] { updateDashboard(); };
     m_partsRegister->orderEdited = [this] { markDirty(); scheduleRefresh(0); queueRefreshAll(0); };
     connect(search, &QLineEdit::textChanged, m_partsRegister, &PartsRegisterView::setSearch);

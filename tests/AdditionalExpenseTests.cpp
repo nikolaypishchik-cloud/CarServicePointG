@@ -295,6 +295,12 @@ private slots:
         auto* store = view->findChildren<QComboBox*>().value(0);
         auto* payment = view->findChildren<QComboBox*>().value(1);
         QVERIFY(store && payment);
+        search->setFocus();
+        for (QWidget* next : QList<QWidget*>{mode, store, payment, table}) {
+            QVERIFY(page.focusWidget());
+            QTest::keyClick(page.focusWidget(), Qt::Key_Tab);
+            QCOMPARE(page.focusWidget(), next);
+        }
         store->setCurrentText("Zulu");
         QVERIFY(table->isRowHidden(0) && !table->isRowHidden(1));
         payment->setCurrentText(QStringLiteral("Сплачено"));
@@ -326,10 +332,24 @@ private slots:
         QCOMPARE(orders->count(), 1);
         QCOMPARE(view->exportSelection().rows.size(), 1);
         QCOMPARE(view->exportSelection().rows.first()[6], QStringLiteral("OEM-71"));
+        auto* link = view->findChild<QPushButton*>("partsRegisterOpenOrder");
+        QVERIFY(link && link->isVisible());
+        payment->setFocus();
+        for (QWidget* next : QList<QWidget*>{orders, link, table}) {
+            QTest::keyClick(page.focusWidget(), Qt::Key_Tab);
+            QCOMPARE(page.focusWidget(), next);
+        }
         mode->setFocus();
         QTest::keyClick(mode, Qt::Key_Left);
         QCOMPARE(mode->currentIndex(), 0);
         QVERIFY(view->isHidden());
+        auto* collapse = page.findChild<QPushButton*>("partsCollapseAll");
+        QVERIFY(collapse && collapse->isEnabled());
+        search->setFocus();
+        QTest::keyClick(search, Qt::Key_Tab);
+        QCOMPARE(page.focusWidget(), collapse);
+        QTest::keyClick(collapse, Qt::Key_Tab);
+        QCOMPARE(page.focusWidget(), mode);
     }
 
     void partsQuantityAndUnitPrice() {

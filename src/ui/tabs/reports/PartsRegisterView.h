@@ -74,6 +74,14 @@ public:
             metrics.horizontalAdvance(tr("Немає підтверджених даних")) + 24));
     }
 
+    void setTabOrderAfter(QWidget* previous) {
+        QWidget::setTabOrder(previous, store);
+        QWidget::setTabOrder(store, payment);
+        QWidget::setTabOrder(payment, orders);
+        QWidget::setTabOrder(orders, orderLink);
+        QWidget::setTabOrder(orderLink, table);
+    }
+
     std::function<void()> orderEdited, storeChanged;
     QMap<QString,QString> supplierCardAmounts() const {
         QMap<QString,QString> result;
