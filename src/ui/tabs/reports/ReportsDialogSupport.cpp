@@ -10,6 +10,13 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QModelIndex>
+#include <QGuiApplication>
+#include <QListWidget>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QScreen>
+#include <QStyle>
+#include <QStyledItemDelegate>
 #include <QPushButton>
 #include <QSizePolicy>
 #include <QTableView>
@@ -243,7 +250,107 @@ void applyPayrollOrdersSnapshot(QTableView* table,
 
 } // namespace
 
+namespace {
+class LinkRowDelegate final : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        QStyledItemDelegate::paint(painter, option, index);
+        painter->save();
+        painter->setPen(QColor("#8adbe4"));
+        painter->drawText(option.rect.adjusted(0,0,-5,0), Qt::AlignRight | Qt::AlignVCenter, QStringLiteral("›"));
+        painter->restore();
+    }
+};
+
+class RecordPopup final : public QDialog {
+public:
+    explicit RecordPopup(QWidget* parent) : QDialog(parent, Qt::Popup | Qt::FramelessWindowHint) {
+        setAttribute(Qt::WA_TranslucentBackground);
+    }
+    int tipX = 16;
+    bool below = true;
+protected:
+    void mousePressEvent(QMouseEvent* event) override {
+        if (!rect().contains(event->position().toPoint())) reject();
+        else QDialog::mousePressEvent(event);
+    }
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        QRectF body = QRectF(rect()).adjusted(2, below ? 9 : 2, -3, below ? -3 : -9);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(QColor(0, 0, 0, 85));
+        painter.drawRoundedRect(body.translated(1, 2), 8, 8);
+        painter.setBrush(QColor("#17242d"));
+        painter.setPen(QColor("#53afbd"));
+        painter.drawRoundedRect(body, 8, 8);
+        const qreal edge = below ? body.top() : body.bottom();
+        const QPolygonF tip{QPointF(tipX-7, edge), QPointF(tipX, edge+(below ? -8 : 8)), QPointF(tipX+7, edge)};
+        painter.setPen(Qt::NoPen);
+        painter.drawPolygon(tip);
+        painter.setPen(QColor("#53afbd"));
+        painter.drawPolyline(tip);
+    }
+};
+}
+
 namespace ReportsDialogSupport {
+int chooseLinkedRecord(QTableView* table, const QModelIndex& cell, const QString& title,
+                       const QStringList& labels, bool invoices) {
+    const QRect visibleCell = table->visualRect(cell).intersected(table->viewport()->rect());
+    if (visibleCell.isEmpty() || labels.isEmpty()) return -1;
+    const QRect anchor(table->viewport()->mapToGlobal(visibleCell.topLeft()), visibleCell.size());
+    QScreen* screen = QGuiApplication::screenAt(anchor.center());
+    const QRect area = (screen ? screen : table->screen())->availableGeometry();
+    RecordPopup popup(table);
+    popup.setWindowTitle(title);
+    auto* layout = new QVBoxLayout(&popup);
+    layout->setSpacing(2);
+    auto* heading = new QHBoxLayout;
+    auto* icon = new QLabel(&popup);
+    icon->setPixmap(table->style()->standardIcon(invoices ? QStyle::SP_FileIcon : QStyle::SP_FileDialogDetailedView).pixmap(18,18));
+    heading->addWidget(icon);
+    auto* caption = new QLabel(title, &popup);
+    caption->setStyleSheet("color:#eef7fa;font-weight:bold;background:transparent;");
+    heading->addWidget(caption, 1);
+    layout->addLayout(heading);
+    auto* list = new QListWidget(&popup);
+    list->setAccessibleName(title);
+    list->setMouseTracking(true);
+    list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    list->setTextElideMode(Qt::ElideRight);
+    list->setStyleSheet("QListWidget{background:#17242d;color:white;border:0;border-top:1px solid #52707b;}"
+        "QListWidget::item{padding:5px 18px 5px 6px;border-left:3px solid transparent;border-bottom:1px solid #34434e;}"
+        "QListWidget::item:hover,QListWidget::item:selected{background:#215264;color:white;border-left:3px solid #71e7ed;}");
+    layout->addWidget(list);
+    const int rowHeight = list->fontMetrics().height()+13;
+    int width = caption->sizeHint().width()+62;
+    for (const auto& label : labels) {
+        auto* item = new QListWidgetItem(label, list);
+        item->setToolTip(label);
+        item->setSizeHint(QSize(0, rowHeight));
+        width = qMax(width, list->fontMetrics().horizontalAdvance(label)+76);
+    }
+    list->setItemDelegate(new LinkRowDelegate(list));
+    const int desiredHeight = heading->sizeHint().height()+qMin(list->count(),10)*rowHeight+33;
+    const int below = area.bottom()-anchor.bottom();
+    const int above = anchor.top()-area.top();
+    popup.below = below >= desiredHeight || below >= above;
+    layout->setContentsMargins(10,popup.below ? 15 : 8,10,popup.below ? 8 : 15);
+    layout->setSizeConstraint(QLayout::SetNoConstraint);
+    popup.resize(qMin(area.width(), qMin(width, 580)), qMin(desiredHeight, qMax(1, qMax(above,below))));
+    if (popup.below) popup.resize(popup.width(), qMin(popup.height(), qMax(1,below)));
+    const int x = qBound(area.left(), anchor.left(), area.right()-popup.width()+1);
+    popup.tipX = qBound(13, anchor.center().x()-x, popup.width()-13);
+    popup.move(x, popup.below ? anchor.bottom()+1 : anchor.top()-popup.height());
+    list->setCurrentRow(0);
+    list->setFocus();
+    QObject::connect(list,&QListWidget::itemClicked,&popup,&QDialog::accept);
+    QObject::connect(list,&QListWidget::itemActivated,&popup,&QDialog::accept);
+    return popup.exec()==QDialog::Accepted ? list->currentRow() : -1;
+}
+
 
 void openPayrollOrdersDialog(QWidget* parent,
                              const QString& masterId,

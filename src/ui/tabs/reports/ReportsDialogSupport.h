@@ -1,13 +1,17 @@
 #pragma once
 
 #include <QList>
-#include <QString>
+#include <QStringList>
 
 #include "core/services/ReportsSyncSupport.h"
 
 class QWidget;
+class QTableView;
+class QModelIndex;
 
 namespace ReportsDialogSupport {
+int chooseLinkedRecord(QTableView* table, const QModelIndex& cell, const QString& title,
+                       const QStringList& labels, bool invoices);
 QWidget* createInvoicePdfPreview(QWidget* parent, const QString& path);
 
 void openPayrollOrdersDialog(QWidget* parent,

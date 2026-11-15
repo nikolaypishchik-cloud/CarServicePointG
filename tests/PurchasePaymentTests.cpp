@@ -699,6 +699,37 @@ private slots:
         QVERIFY(q.exec("SELECT COUNT(*) FROM archive_rollover.work_order_part_attachments"));QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),1);q.finish();
         QVERIFY(q.exec("DETACH DATABASE archive_rollover"));
     }
+    void reportLinkedRecordPopup() {
+        QTableView table;
+        QStandardItemModel model(1,1);
+        table.setModel(&model);
+        table.resize(260,120);
+        const QRect area = table.screen()->availableGeometry();
+        table.move(area.bottomRight()-QPoint(275,165));
+        table.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&table));
+        const QModelIndex cell = model.index(0,0);
+        QStringList labels;
+        for (int i=0; i<40; ++i) labels.append(QString(80,'W')+QString::number(i));
+        labels[31]=labels[30];
+        for (bool invoices : {true,false}) {
+            const QString title = invoices ? QStringLiteral("Накладні наряду") : QStringLiteral("Наряди накладної");
+            bool valid=false;
+            QTimer::singleShot(0,&table,[&] {
+                auto* popup=qobject_cast<QDialog*>(QApplication::activePopupWidget());
+                if (!popup) popup=qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                if (!popup) return;
+                auto* list=popup->findChild<QListWidget*>();
+                valid=list && area.contains(popup->geometry()) && popup->windowTitle()==title
+                    && list->count()==40 && list->item(31)->toolTip()==labels[31];
+                if (!valid) {popup->reject();return;}
+                list->setCurrentRow(31);
+                QTest::keyClick(list,invoices ? Qt::Key_Return : Qt::Key_Escape);
+            });
+            QCOMPARE(ReportsDialogSupport::chooseLinkedRecord(&table,cell,title,labels,invoices),invoices ? 31 : -1);
+            QVERIFY(valid);
+        }
+    }
     void modelTableContextDeleteUsesBusinessAction() {
         QTableView table; QStandardItemModel model(1,1);
         model.setData(model.index(0,0),"Test stock"); table.setModel(&model);

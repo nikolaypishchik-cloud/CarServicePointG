@@ -26,7 +26,6 @@
 #include <QPushButton>
 #include <QDialogButtonBox>
 #include <QMessageBox>
-#include <QMenu>
 #include <QPointer>
 
 #include <QTimer>
@@ -305,10 +304,10 @@ void InvoicesPage::activate(int row, int column) {
     if (column == 3 && !invoice.orders.isEmpty()) {
         int number = invoice.orders.firstKey();
         if (invoice.orders.size() > 1) {
-            QMenu menu(this);
-            for (auto it = invoice.orders.cbegin(); it != invoice.orders.cend(); ++it) menu.addAction(it.value())->setData(it.key());
-            const auto* selected = menu.exec(QCursor::pos()); if (!selected) return;
-            number = selected->data().toInt();
+            const int choice = ReportsDialogSupport::chooseLinkedRecord(m_table, m_model->index(row,column),
+                QStringLiteral("Наряди накладної"), invoice.orders.values(), false);
+            if (choice < 0) return;
+            number = invoice.orders.keys().at(choice);
         }
         QString uid; for (const auto& part : invoice.parts) if (part.orderNumber == number) { uid = part.orderUid; break; }
         QString error;

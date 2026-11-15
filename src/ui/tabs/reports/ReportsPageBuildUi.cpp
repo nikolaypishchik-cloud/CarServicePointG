@@ -9,7 +9,6 @@
 #include <QTabBar>
 #include <QStackedWidget>
 #include <QPainter>
-#include <QMenu>
 #include "ui/tabs/reports/ReportDashboard.h"
 
 namespace {
@@ -500,8 +499,13 @@ void ReportsPage::buildUi()
         const auto names=m_ordersModel->cellText(index.row(),3).split('\n');
         QString key=keys.first();
         if(keys.size()>1) {
-            QMenu menu(this);for(int i=0;i<keys.size();++i)menu.addAction(names.value(i))->setData(keys[i]);
-            auto* selected=menu.exec(QCursor::pos());if(!selected)return;key=selected->data().toString();
+            QStringList labels;
+            for (int i=0; i<keys.size(); ++i)
+                labels.append(names.value(i).isEmpty() ? keys.at(i) : names.at(i));
+            const int choice = ReportsDialogSupport::chooseLinkedRecord(m_ordersTable, index,
+                QStringLiteral("Накладні наряду"), labels, true);
+            if (choice < 0) return;
+            key = keys.at(choice);
         }
         m_tabs->setCurrentIndex(static_cast<int>(ReportTab::Invoices));m_invoicesPage->selectInvoice(key);
     });
