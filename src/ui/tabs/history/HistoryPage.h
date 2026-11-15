@@ -40,12 +40,12 @@ signals:
     void requestRefreshAll();
 
 private:
+    friend class PurchasePaymentTests;
     void queueRefreshAll(int delayMs = 30);
     void startAsyncRefresh();
     void cancelActiveRefreshForOwnerShutdown(const char* reason);
     void applyAsyncSnapshot(const HistoryQueryResult& queryResult,
                             const TabularReadModel& readModel,
-                            int selectedBefore,
                             int vScrollBefore,
                             int hScrollBefore);
 

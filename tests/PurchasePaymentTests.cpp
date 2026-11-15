@@ -159,6 +159,7 @@
 #include "core/services/orders/CurrentOrdersQueryService.h"
 #include "ui/tabs/orders/CurrentOrdersPageModulePrelude.h"
 #include "ui/tabs/history/HistoryPage.h"
+#include "core/services/HistoryQueryService.h"
 #include "core/services/orders/OrderBatchMutationService.h"
 #include "core/services/orders/PartPricingEngine.h"
 #include "core/services/orders/OrderFinancialService.h"
@@ -6890,6 +6891,38 @@ private slots:
             QVERIFY(info.absolutePath() == QFileInfo(root).absolutePath());
             QVERIFY(QDir(profile).removeRecursively());
         }
+    }
+    void orderListsRestoreUidAfterSnapshot() {
+        CurrentOrdersPage current;
+        HistoryPage history;
+        CurrentOrdersQueryResult currentResult;
+        currentResult.hasSource = true;
+        auto verify = [](auto& page, const auto& result) {
+            const QStringList headers = {QStringLiteral("№"), "__internal_number", "__order_uid"};
+            const TabularReadModel initial{headers, {{71, 71, "chosen"}}, {}};
+            page.applyAsyncSnapshot(result, initial, 0, 0);
+            page.m_table->selectRow(0);
+            QCOMPARE(page.selectedOrderUid(), QStringLiteral("chosen"));
+            const TabularReadModel changed{headers, {{71, 71, "different"}, {72, 72, "chosen"}}, {}};
+            page.applyAsyncSnapshot(result, changed, 0, 0);
+            QCOMPARE(page.selectedOrderUid(), QStringLiteral("chosen"));
+            QCOMPARE(page.selectedOrderNumber(), 72);
+            const TabularReadModel gone{headers, {{72, 72, "different"}}, {}};
+            page.applyAsyncSnapshot(result, gone, 0, 0);
+            QVERIFY(!page.m_table->selectionModel()->hasSelection());
+            page.m_table->selectRow(0);
+            page.m_table->clearSelection();
+            page.applyAsyncSnapshot(result, gone, 0, 0);
+            QVERIFY(!page.m_table->selectionModel()->hasSelection());
+            const TabularReadModel old{headers, {{42, 42, ""}}, {}};
+            page.applyAsyncSnapshot(result, old, 0, 0);
+            page.m_table->selectRow(0);
+            page.applyAsyncSnapshot(result, old, 0, 0);
+            QVERIFY(page.m_table->selectionModel()->hasSelection());
+            QCOMPARE(page.selectedOrderNumber(), 42);
+        };
+        verify(current, currentResult);
+        verify(history, HistoryQueryResult{});
     }
     void selectedOrderSettlementFollowsRow() {
         QSqlQuery q(db);

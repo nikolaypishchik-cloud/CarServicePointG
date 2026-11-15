@@ -41,6 +41,7 @@ signals:
     void settlementChanged(const QString& text);
 
 private:
+    friend class PurchasePaymentTests;
     void buildUi();
     void publishSettlement();
     void queueRefreshAll(int delayMs = 30);
@@ -48,7 +49,6 @@ private:
     void cancelActiveRefreshForOwnerShutdown(const char* reason);
     void applyAsyncSnapshot(const CurrentOrdersQueryResult& queryResult,
                             const TabularReadModel& readModel,
-                            int selectedBefore,
                             int vScrollBefore,
                             int hScrollBefore);
 

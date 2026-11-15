@@ -851,7 +851,6 @@ void HistoryPage::refresh()
 
 void HistoryPage::startAsyncRefresh()
 {
-    const int selectedBefore = selectedOrderNumber();
     const int vScrollBefore = (m_table && m_table->verticalScrollBar()) ? m_table->verticalScrollBar()->value() : 0;
     const int hScrollBefore = (m_table && m_table->horizontalScrollBar()) ? m_table->horizontalScrollBar()->value() : 0;
     const QString filter = m_search ? m_search->text().trimmed() : QString();
@@ -917,14 +916,14 @@ void HistoryPage::startAsyncRefresh()
     connect(worker, &QThread::finished, worker, [generation]() {
         PerfWatchdog::asyncJobFinished(QStringLiteral("history-page"), QString::number(generation));
     }, Qt::DirectConnection);
-    connect(worker, &QThread::finished, this, [this, worker, result, asyncHandle, runtimeTicket, selectedBefore, vScrollBefore, hScrollBefore, scopeKey]() {
+    connect(worker, &QThread::finished, this, [this, worker, result, asyncHandle, runtimeTicket, vScrollBefore, hScrollBefore, scopeKey]() {
         if (m_refreshWorker == worker) m_refreshWorker = nullptr;
         const bool canApply = scopeKey == AccessControlService::currentScopeKey()
             && asyncHandle.shouldApply(static_cast<quint64>(m_refreshGeneration))
             && RuntimeJob::RuntimeJobDispatcher::instance().shouldApply(runtimeTicket);
         RuntimeJob::RuntimeJobDispatcher::instance().finish(runtimeTicket, canApply ? RuntimeJob::Status::Succeeded : RuntimeJob::Status::Cancelled);
         if (canApply) {
-            applyAsyncSnapshot(result->queryResult, result->readModel, selectedBefore, vScrollBefore, hScrollBefore);
+            applyAsyncSnapshot(result->queryResult, result->readModel, vScrollBefore, hScrollBefore);
         } else {
             qWarning().noquote() << QStringLiteral("ASYNC_LIFECYCLE history_refresh_result_detached generation=") << asyncHandle.generation();
             m_refreshInProgress = false;
@@ -940,7 +939,6 @@ void HistoryPage::startAsyncRefresh()
 
 void HistoryPage::applyAsyncSnapshot(const HistoryQueryResult& queryResult,
                                      const TabularReadModel& readModel,
-                                     int selectedBefore,
                                      int vScrollBefore,
                                      int hScrollBefore)
 {
@@ -952,6 +950,11 @@ void HistoryPage::applyAsyncSnapshot(const HistoryQueryResult& queryResult,
     }
 
     if (m_table) m_table->setUpdatesEnabled(false);
+    const QModelIndex currentSelection = m_table->currentIndex();
+    const bool selected = currentSelection.isValid()
+        && m_table->selectionModel()->isRowSelected(currentSelection.row(), {});
+    const QString selectedUid = selected ? selectedOrderUid() : QString();
+    const int selectedBefore = selected ? selectedOrderNumber() : -1;
     TabularReadModelMapper::apply(m_model, readModel);
     m_previousPage->setEnabled(m_pageOffset>0);
     m_nextPage->setEnabled(queryResult.hasMore);
@@ -967,7 +970,9 @@ void HistoryPage::applyAsyncSnapshot(const HistoryQueryResult& queryResult,
         if (selectedBefore > 0 && m_model) {
             // P1/pass9 current/history snapshot migration closure: restore selection through
             // the source snapshot index and map through the proxy; never scan view rows.
-            const int sourceRow = m_model->rowByColumnValue(QStringLiteral("__internal_number"), selectedBefore);
+            const int sourceRow = selectedUid.isEmpty()
+                ? m_model->rowByColumnValue(QStringLiteral("__internal_number"), selectedBefore)
+                : m_model->rowByColumnValue(QStringLiteral("__order_uid"), selectedUid);
             if (sourceRow >= 0) {
                 const QModelIndex sourceIndex = m_model->index(sourceRow, 0);
                 const QModelIndex proxyIndex = m_proxy ? m_proxy->mapFromSource(sourceIndex) : sourceIndex;
