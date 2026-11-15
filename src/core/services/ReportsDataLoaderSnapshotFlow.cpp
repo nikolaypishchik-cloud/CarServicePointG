@@ -15,6 +15,9 @@
 #include "core/util/OilServiceClassifier.h"
 #include <QSqlError>
 #include "core/services/InvoiceRegistryService.h"
+#include "core/services/AccessControlService.h"
+#include "core/services/SupplierInvoiceLedger.h"
+#include "core/util/StoreNameNormalizer.h"
 #include "core/services/PartsReportQuery.h"
 
 namespace ReportsDataLoader {
@@ -241,6 +244,29 @@ OrdersSnapshot buildOrdersSnapshot(const QString& dbPath, const QString& df, con
     }
     SqliteConnectionUtils::safeCloseAndRemoveDatabase(connName);
     return snapshot;
+}
+
+static void readSupplierDebtPeriod(QSqlDatabase db, const QDate& from, const QDate& to, PartsSnapshot& snapshot)
+{
+    auto& error = snapshot.supplierDebtError;
+    const auto scope = AccessControlService::currentOrderScope(db);
+    auto debts = PurchasePaymentService::debts(db, &error);
+    if (!error.isEmpty()) return;
+    if (!scope.restricted) {
+        const auto facts = SupplierDebtReconciliationService::load(db, &error);
+        if (!error.isEmpty()) return;
+        debts = SupplierInvoiceLedger::reportingDebts(db, debts, nullptr, &error);
+        if (!error.isEmpty()) return;
+        for (const auto& fact : facts)
+            snapshot.supplierReconciliations.insert(fact.supplier, {fact.actualCents, fact.checkedAt});
+    }
+    for (const auto& debt : debts) {
+        if (scope.restricted && (debt.source != "part" || !scope.contains(debt.orderUid, debt.orderNumber))) continue;
+        const auto date = PartsQueryService::parseBusinessDate(debt.date);
+        if (!date.isValid() || date < from || date > to) continue;
+        const auto supplier = StoreNameNormalizer::canonicalDisplayNameOrDefault(debt.supplier);
+        snapshot.documentDebtCents[supplier] += debt.remainingCents();
+    }
 }
 
 PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const QString& dt,
@@ -599,6 +625,7 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 QString::fromUtf8("<table cellspacing='0' cellpadding='0'><tr><td align='left'>Видано в наряди:</td><td width='REPORT_TILE_VALUE_GAP'></td><td align='left'>%1 од.</td></tr><tr><td align='left'>Встановлено:</td><td width='REPORT_TILE_VALUE_GAP'></td><td align='left'>%2 од.</td></tr></table>").arg(quantity(issued),quantity(installed))};
             if(!stock.errorText.isEmpty())for(int i=0;i<2;++i)snapshot.tileBodies[i]=stock.errorText.toHtmlEscaped();
             if(!partsError.isEmpty()||!stockError.isEmpty())for(int i=2;i<4;++i)snapshot.tileBodies[i]=(partsError+" "+stockError).trimmed().toHtmlEscaped();
+            readSupplierDebtPeriod(db, from, to, snapshot);
             };read();
             if(snapshot.error.isEmpty() && !db.commit())snapshot.error=db.lastError().text();
             if(!snapshot.error.isEmpty())db.rollback();

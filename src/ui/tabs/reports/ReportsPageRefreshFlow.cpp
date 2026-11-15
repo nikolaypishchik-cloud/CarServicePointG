@@ -394,7 +394,12 @@ void ReportsPage::updateDashboard()
     m_invoicesPage->controlsHost()->hide();
     if(!enabled)return;
     m_dashboard->configure(tab,ThemeManager::currentTheme()=="light");
-    if(tab==3)m_dashboard->parts(m_partsTileTitles,m_partsTileBodies);
+    if (tab == 3) {
+        if (m_partsRegister->isActive())
+            m_dashboard->parts({tr("Борг за документами періоду"), tr("Остання звірка магазину")},
+                               m_partsRegister->debtTileBodies(), true);
+        else m_dashboard->parts(m_partsTileTitles, m_partsTileBodies);
+    }
     m_dashboard->status(m_orderStatusFilter);
     {
         QSignalBlocker blocker(m_dashboard->search);
@@ -526,6 +531,7 @@ void ReportsPage::refreshParts()
     updateStats({QString::fromUtf8("Завантаження запчастин…")});
     setTabAuxStats(ReportTab::Parts, QString());
     m_partsRegister->showLoading();
+    updateDashboard();
     ReportsAsyncSupport::showLoadingRow(m_partsTable, m_partsModel, QString::fromUtf8("Завантаження…"));
 
     ReportsAsyncSupport::startPartsLoad(this, asyncHandle, dbPath, df, dt, defaultParts, defaultOil, partsMap, oilMap, [this, generation, key](const PartsSnapshot& snapshot) {

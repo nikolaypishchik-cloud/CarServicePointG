@@ -137,7 +137,7 @@ bool tryGetParts(const QString& key, PartsSnapshot* out)
 void storeParts(const QString& key, const PartsSnapshot& snapshot)
 {
     QMutexLocker lock(&cacheMutex());
-    if(!snapshot.error.isEmpty()){cacheState().parts.remove(key);cacheState().partsOrder.removeAll(key);return;}
+    if(!snapshot.error.isEmpty() || !snapshot.supplierDebtError.isEmpty()){cacheState().parts.remove(key);cacheState().partsOrder.removeAll(key);return;}
     storeImpl(cacheState().parts, cacheState().partsOrder, key, snapshot);
 }
 

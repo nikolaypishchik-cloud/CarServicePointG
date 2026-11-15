@@ -3,6 +3,7 @@
 #include "ui/common/dialogs/InvoiceReviewDialog.h"
 #include "ui/tabs/orders/CurrentOrdersPageLocalSupport.h"
 #include "core/services/SupplierDebtReadService.h"
+#include "ui/tabs/reports/PartsRegisterView.h"
 #include "core/services/ElitDocumentAssociation.h"
 #include "core/io/SupplierInvoiceTemplateStore.h"
 #include <QSemaphore>
@@ -5998,6 +5999,49 @@ private slots:
         QCOMPARE(openedUid, QStringLiteral("order-b"));
         QCOMPARE(openedNumber, QStringLiteral("2"));
         QCOMPARE(mode->currentText(), QStringLiteral("За нарядами"));
+        // Both source purchases belong to this store. Searching for one order
+        // must leave both balances in the period total.
+        QVERIFY2(source.supplierDebtError.isEmpty(), qPrintable(source.supplierDebtError));
+        QCOMPARE(source.documentDebtCents.value("Store"), qint64(20000));
+        auto* tile = report.findChild<QWidget*>("reportPartsTile0");
+        auto* factTile = report.findChild<QWidget*>("reportPartsTile1");
+        QVERIFY(tile && factTile);
+        const auto labelContains = [](QWidget* card, const QString& text) {
+            for (auto* label : card->findChildren<QLabel*>())
+                if (label->text().contains(text)) return true;
+            return false;
+        };
+        QVERIFY(labelContains(tile, FormatUtils::money(200, 2)));
+        search->clear();
+        QVERIFY(labelContains(tile, FormatUtils::money(200, 2)));
+
+        QVERIFY2(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,name,store,ordered_at,purchase_amount,purchase_price) VALUES"
+                        "(3,1,'order-a','Outside','Store','2026-08-31',50,50)"),qPrintable(q.lastError().text()));
+        PartsQueryService::invalidateCache();
+        SupplierDebtReconciliation fact;
+        fact.supplier = "Store";
+        fact.computedCents = 25000;
+        fact.actualCents = 24900;
+        QVERIFY2(SupplierDebtReconciliationService::save(db, {fact}, &error), qPrintable(error));
+        const auto period = ReportsDataLoader::buildPartsSnapshot(db.databaseName(),"2026-09-01","2026-09-01",0,0,{},{});
+        QVERIFY2(period.error.isEmpty(), qPrintable(period.error));
+        QVERIFY2(period.supplierDebtError.isEmpty(), qPrintable(period.supplierDebtError));
+        QCOMPARE(period.documentDebtCents.value("Store"), qint64(20000));
+        QCOMPARE(period.supplierReconciliations.value("Store").first, qint64(24900));
+        QVERIFY(!period.supplierReconciliations.value("Store").second.isEmpty());
+        for (auto* date : dates)
+            if (date->date() == QDate(2026,9,1) && date->objectName().contains("To", Qt::CaseInsensitive)) date->setDate(QDate(2026,9,2));
+        report.refresh();
+        auto* view = report.findChild<QWidget*>("partsRegisterView");
+        QVERIFY(view);
+        QComboBox* shop = nullptr;
+        for (auto* box : view->findChildren<QComboBox*>())
+            if (box->findData("Store") > 0) shop = box;
+        QVERIFY(shop);
+        shop->setCurrentIndex(shop->findData("Store"));
+        QTRY_VERIFY_WITH_TIMEOUT(labelContains(factTile, FormatUtils::money(249, 2)), 10000);
+        QVERIFY(labelContains(factTile, period.supplierReconciliations.value("Store").second));
+        QVERIFY(labelContains(tile, FormatUtils::money(200, 2)));
     }
 
     void linkedInvoiceClickSelectsRegistryRow() {

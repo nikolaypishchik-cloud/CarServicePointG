@@ -1,6 +1,7 @@
 #include "ui/tabs/reports/ReportsAsyncSupport.h"
 #include "ui/tabs/reports/ReportsTableSupport.h"
 #include <functional>
+#include "core/services/AccessControlService.h"
 
 #include "core/cache/ReportsSnapshotCache.h"
 #include "core/perf/PerfWatchdog.h"
@@ -102,7 +103,8 @@ bool isAsyncTab(int idx)
 
 QString buildTabKey(int idx, const QDate& from, const QDate& to)
 {
-    return QStringLiteral("%1|%2|%3").arg(idx).arg(from.toString(Qt::ISODate), to.toString(Qt::ISODate));
+    const auto key = QStringLiteral("%1|%2|%3").arg(idx).arg(from.toString(Qt::ISODate), to.toString(Qt::ISODate));
+    return idx == 3 ? key + "|" + AccessControlService::currentScopeKey() : key;
 }
 
 void showLoadingRow(QTableView* table, ReportsTableSupport::ReportsSnapshotTableModel* model, const QString& text)
@@ -162,18 +164,23 @@ void startPartsLoad(QObject* owner,
                     const QMap<QString,double>& oilMap,
                     std::function<void(const PartsSnapshot&)> onReady)
 {
+    const QString scope = AccessControlService::currentScopeKey();
     const QString cacheKey = ReportsSnapshotCache::makeReportsKey(QStringLiteral("parts"), dbPath, df, dt,
-                                                                  partsCacheExtra(defaultParts, defaultOil, partsMap, oilMap));
+                                                                  partsCacheExtra(defaultParts, defaultOil, partsMap, oilMap) + "|" + scope);
     startSnapshotWorkerImpl<PartsSnapshot>(owner,
         asyncHandle,
         QStringLiteral("reports.parts"),
         cacheKey,
         ReportsSnapshotCache::tryGetParts,
-        ReportsSnapshotCache::storeParts,
+        [scope](const QString& key, const PartsSnapshot& result) {
+            if (scope == AccessControlService::currentScopeKey()) ReportsSnapshotCache::storeParts(key, result);
+        },
         [dbPath, df, dt, defaultParts, defaultOil, partsMap, oilMap]() {
             return ReportsDataLoader::buildPartsSnapshot(dbPath, df, dt, defaultParts, defaultOil, partsMap, oilMap);
         },
-        std::move(onReady));
+        [scope, ready = std::move(onReady)](const PartsSnapshot& result) {
+            if (scope == AccessControlService::currentScopeKey()) ready(result);
+        });
 }
 
 void startOutsourceLoad(QObject* owner,

@@ -159,9 +159,11 @@ public:
         m_row->addWidget(controls,2);
     }
     static bool supports(int tab){return tab>=0&&tab<=7;}
-    void parts(const QStringList& titles,const QStringList& bodies){
+    void parts(const QStringList& titles,const QStringList& bodies,bool debt=false){
         const QStringList defaults={QString::fromUtf8("Олива моторна"),QString::fromUtf8("Антифриз"),QString::fromUtf8("Запчастини · постачання"),QString::fromUtf8("Запчастини · використання")};
         for(int i=0;i<4;++i){
+            m_parts->layout()->itemAt(i)->widget()->setVisible(!debt || i<titles.size());
+            m_partsIcons[i]->setVisible(!debt);
             m_partsTitles[i]->setText(titles.value(i,defaults[i]));
             auto* label=m_partsBodies[i];
             label->setStyleSheet("font-family:'Times New Roman';font-size:11pt;padding:0px;");

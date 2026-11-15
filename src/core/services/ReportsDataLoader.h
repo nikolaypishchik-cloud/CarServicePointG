@@ -65,6 +65,9 @@ struct PartsSnapshotRow {
 
 struct PartsSnapshot {
     QString error;
+    QString supplierDebtError;
+    QMap<QString,qint64> documentDebtCents;
+    QMap<QString,QPair<qint64,QString>> supplierReconciliations;
     QList<PartsSnapshotRow> rows;
     QStringList stats;
     QString oilHtml;

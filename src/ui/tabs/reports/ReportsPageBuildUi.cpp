@@ -340,6 +340,7 @@ void ReportsPage::buildUi()
     m_partsRegister = new PartsRegisterView(partsPage);
     partsLayout->addWidget(m_partsRegister, 1);
     m_partsRegister->hide();
+    m_partsRegister->storeChanged = [this] { updateDashboard(); };
     m_partsRegister->orderEdited = [this] { markDirty(); scheduleRefresh(0); queueRefreshAll(0); };
     connect(search, &QLineEdit::textChanged, m_partsRegister, &PartsRegisterView::setSearch);
     connect(mode, &QComboBox::currentIndexChanged, this, [this, collapse, expand, search, updateRows](int index) {
@@ -350,6 +351,7 @@ void ReportsPage::buildUi()
         expand->setVisible(!flat);
         search->setPlaceholderText(flat ? tr("Запчастина, OEM, авто або наряд") : tr("Запчастина, наряд або накладна"));
         updateRows();
+        updateDashboard();
     });
     m_tabs->addTab(partsPage, QString::fromUtf8("Придбання запчастин"));
     m_tabs->addTab(makeTab(m_outsourceTable, m_outsourceModel), QString::fromUtf8("Аутсорс"));

@@ -3,6 +3,7 @@
 #include "ui/tabs/reports/ReportsTableSupport.h"
 #include "core/services/PartsRegisterPdf.h"
 #include <optional>
+#include "core/util/FormatUtils.h"
 #include <QListWidget>
 #include <QSplitter>
 #include <QPushButton>
@@ -60,7 +61,7 @@ public:
             if (selectedRows.isEmpty()) return;
             ReportsInteractionSupport::openOrderFromReportTable(this, table, 2, selectedRows.first(), orderEdited);
         });
-        connect(store, &QComboBox::currentIndexChanged, this, [this] { filter(); });
+        connect(store, &QComboBox::currentIndexChanged, this, [this] { filter(); if (storeChanged) storeChanged(); });
         connect(payment, &QComboBox::currentIndexChanged, this, [this] { filter(); });
         buildRows({});
         const auto metrics = table->horizontalHeader()->fontMetrics();
@@ -73,7 +74,19 @@ public:
             metrics.horizontalAdvance(tr("Немає підтверджених даних")) + 24));
     }
 
-    std::function<void()> orderEdited;
+    std::function<void()> orderEdited, storeChanged;
+    QStringList debtTileBodies() const {
+        if (!debtState.isEmpty()) return {debtState.toHtmlEscaped(), debtState.toHtmlEscaped()};
+        const auto supplier = store->currentData().toString();
+        qint64 amount = documentDebts.value(supplier);
+        if (supplier.isEmpty()) for (auto cents : documentDebts) amount += cents;
+        QString reconciliation = supplier.isEmpty() ? tr("Оберіть магазин") : tr("Звірку не зафіксовано");
+        const auto fact = reconciliations.constFind(supplier);
+        if (fact != reconciliations.cend())
+            reconciliation = tr("%1 грн · %2").arg(FormatUtils::money(fact.value().first / 100.0, 2),
+                                                    fact.value().second.toHtmlEscaped());
+        return {tr("%1 грн").arg(FormatUtils::money(amount / 100.0, 2)), reconciliation};
+    }
     bool hasExportSelection() const { return !byOrder || !selectedRows.isEmpty(); }
 
     bool isActive() const { return active; }
@@ -114,12 +127,16 @@ public:
 
     void showLoading() {
         pending.reset();
-        state = tr("Завантаження…");
+        debtState = tr("Завантаження…");
+        state = debtState;
         model->clearSnapshot();
         filter();
     }
 
     void setSnapshot(const PartsSnapshot& snapshot) {
+        documentDebts = snapshot.documentDebtCents;
+        reconciliations = snapshot.supplierReconciliations;
+        debtState = snapshot.error.isEmpty() ? snapshot.supplierDebtError : snapshot.error;
         if (active) buildRows(snapshot);
         else pending = snapshot;
     }
@@ -154,6 +171,8 @@ private:
         model->setSnapshot({tr("Дата"), tr("Встановлено"), tr("Наряд"), tr("Авто"), tr("Магазин"),
             tr("Запчастина"), tr("OEM"), tr("Виробник"), tr("Кількість"), tr("Ціна за одиницю, грн"),
             tr("Сума клієнту, грн"), tr("Оплата постачальнику")}, rows);
+        for (const auto& supplier : documentDebts.keys() + reconciliations.keys())
+            if (!stores.contains(supplier)) stores.append(supplier);
         resetChoices(store, stores, tr("Усі магазини"));
         resetChoices(payment, payments, tr("Усі стани оплати"));
         state = snapshot.error;
@@ -246,7 +265,9 @@ private:
     QLabel* message;
     QTableView* table;
     ReportsTableSupport::ReportsSnapshotTableModel* model;
-    QString search, state;
+    QString search, state, debtState = tr("Завантаження…");
+    QMap<QString,qint64> documentDebts;
+    QMap<QString,QPair<qint64,QString>> reconciliations;
     std::optional<PartsSnapshot> pending;
     bool active = false;
 };
