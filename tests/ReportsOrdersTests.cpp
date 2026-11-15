@@ -6302,6 +6302,17 @@ void ReportsOrdersTests::orderListAndPrintData()
         QCOMPARE(receipts.rows[0].clientReceivedCents,qint64(50000));
         QCOMPARE(receipts.rows[1].clientReceivedCents,qint64(0));
         QCOMPARE(receipts.rows[2].clientReceivedCents,qint64(35050));
+        QVERIFY(q.exec("INSERT INTO router_work_orders(number,order_number,order_uid,opened_at) VALUES(103,11,'other-year','2025-09-01')"));
+        const auto ambiguous = ReportsDataLoader::buildOrdersSnapshot(path,"2026-09-01","2026-09-30");
+        QVERIFY(ambiguous.rows.isEmpty());
+        QVERIFY(ambiguous.stats.join(" ").contains("103"));
+        QVERIFY(!ambiguous.clientPaymentError.isEmpty());
+        QVERIFY(q.exec("UPDATE router_work_orders SET number=104 WHERE order_uid='other-year'"));
+        const auto unrelated = ReportsDataLoader::buildOrdersSnapshot(path,"2026-09-01","2026-09-30");
+        QVERIFY(unrelated.clientPaymentError.isEmpty());
+        QCOMPARE(unrelated.rows.size(),3);
+        QCOMPARE(unrelated.rows.first().purchaseTotal,FormatUtils::money(20,2));
+        QVERIFY(q.exec("DELETE FROM router_work_orders WHERE order_uid='other-year'"));
         QVERIFY(q.exec("ALTER TABLE router_work_orders ADD COLUMN order_year INTEGER DEFAULT 2026"));
         QVERIFY(q.exec("ALTER TABLE router_work_orders ADD COLUMN vin TEXT DEFAULT 'VINZZZZZ'"));
         QVERIFY(q.exec("CREATE VIEW router_order_locator AS SELECT * FROM router_work_orders"));

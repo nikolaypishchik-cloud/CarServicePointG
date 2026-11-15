@@ -181,15 +181,26 @@ OrdersSnapshot buildOrdersSnapshot(const QString& dbPath, const QString& df, con
                 // Client receipts never derive from supplier payments or prices.
                 QHash<int,QString> orderUids;
                 QSet<QString> selectedUids;
+                QSet<int> selectedNumbers;
+                for (const auto& row : snapshot.rows) selectedNumbers.insert(row.internalOrderNumber);
                 QSqlQuery identities(db);
                 if(!identities.exec("SELECT number,order_uid FROM router_work_orders")) snapshot.clientPaymentError=identities.lastError().text();
                 else {
                     while(identities.next()) {
                         const int number=identities.value(0).toInt();
-                        if(orderUids.contains(number)) snapshot.clientPaymentError=QStringLiteral("Неоднозначний номер наряду.");
+                        if (!selectedNumbers.contains(number)) continue;
+                        if (orderUids.contains(number)) {
+                            snapshot.clientPaymentError=QStringLiteral("Неоднозначний внутрішній номер наряду %1.").arg(number);
+                            break;
+                        }
                         orderUids.insert(number,identities.value(1).toString());
                     }
                     if(identities.lastError().isValid()) snapshot.clientPaymentError=identities.lastError().text();
+                }
+                if (!snapshot.clientPaymentError.isEmpty()) {
+                    snapshot.rows.clear();
+                    snapshot.stats={snapshot.clientPaymentError};
+                    return;
                 }
                 for(const auto& row:snapshot.rows) {
                     const auto uid=orderUids.value(row.internalOrderNumber);
