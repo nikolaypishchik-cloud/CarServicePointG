@@ -109,8 +109,8 @@ private slots:
             for(const auto& sql:{
                 "INSERT INTO masters(id,name) VALUES('test-owner','Synthetic')",
                 "INSERT INTO work_orders(number,order_uid,order_number,order_year,status,opened_at,closed_at,car,client,plate,plate_norm,master_id) VALUES(1,'crash-order',1,2026,'closed','2026-10-01','2026-10-02','Synthetic','Synthetic','AA 0000 AA','AA0000AA','test-owner')",
-                "INSERT INTO work_order_services(id,order_number,order_uid,title,qty,price,amount) VALUES(10,1,'crash-order','Test work',1,10,10)",
-                "INSERT INTO work_order_parts(id,order_number,order_uid,name,qty,price,amount,purchase_price,purchase_amount) VALUES(20,1,'crash-order','Test part',2,30,60,20,40)"})
+                "INSERT INTO work_order_services(id,order_number,order_uid,service_uid,title,qty,price,amount) VALUES(10,1,'crash-order','crash-service','Test work',1,10,10)",
+                "INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,service_id,name,qty,price,amount,purchase_price,purchase_amount) VALUES(20,1,'crash-order','crash-part',10,'Test part',2,30,60,20,40)"})
                 QVERIFY2(q.exec(sql),qPrintable(q.lastError().text()));
             QVERIFY(OrderClosureJournal::ensureSchema(db,&error));
             QVERIFY2(q.exec("INSERT INTO client_payments VALUES('receipt','request','crash-order',1000,'cash','2026-10-02','test',1)"),qPrintable(q.lastError().text()));
@@ -267,6 +267,24 @@ private slots:
         QVERIFY(q.exec("SELECT COUNT(*),SUM(amount_cents) FROM client_payments"));QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),1);QCOMPARE(q.value(1).toLongLong(),qint64(1000));q.finish();
         QVERIFY2(q.exec("ATTACH DATABASE "+sqlQuoteText(archiveShardFilePathForOrder(1))+" AS proof"),qPrintable(q.lastError().text()));
         QVERIFY(q.exec("SELECT COUNT(*),SUM(amount),SUM(purchase_amount) FROM proof.work_order_parts WHERE order_number=1"));QVERIFY(q.next());QCOMPARE(q.value(0).toInt(),1);QCOMPARE(q.value(1).toDouble(),60.0);QCOMPARE(q.value(2).toDouble(),40.0);q.finish();
+        QVERIFY2(q.exec("SELECT o.order_uid, s.service_uid, p.part_uid, s.amount "
+                        "FROM proof.work_orders o "
+                        "JOIN proof.work_order_services s ON s.order_number=o.number AND s.order_uid=o.order_uid "
+                        "JOIN proof.work_order_parts p ON p.service_id=s.id AND p.order_uid=o.order_uid AND p.order_number=o.number "
+                        "WHERE o.number=1"), qPrintable(q.lastError().text()));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toString(), QStringLiteral("crash-order"));
+        QCOMPARE(q.value(1).toString(), QStringLiteral("crash-service"));
+        QCOMPARE(q.value(2).toString(), QStringLiteral("crash-part"));
+        QCOMPARE(q.value(3).toDouble(), 10.0);
+        QVERIFY(!q.next()); q.finish();
+        QVERIFY(q.exec("SELECT payment_uid,request_uid,order_uid,amount_cents FROM main.client_payments"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toString(), QStringLiteral("receipt"));
+        QCOMPARE(q.value(1).toString(), QStringLiteral("request"));
+        QCOMPARE(q.value(2).toString(), QStringLiteral("crash-order"));
+        QCOMPARE(q.value(3).toLongLong(), 1000LL);
+        QVERIFY(!q.next()); q.finish();
         QVERIFY(q.exec("PRAGMA proof.integrity_check"));QVERIFY(q.next());QCOMPARE(q.value(0).toString(),QString("ok"));q.finish();
         QVERIFY(q.exec("PRAGMA main.integrity_check"));QVERIFY(q.next());QCOMPARE(q.value(0).toString(),QString("ok"));q.finish();
         QVERIFY(ensureRegistrySchemaFile());auto registry=QSqlDatabase::database(dbRegistryConnectionName());QSqlQuery route(registry);
