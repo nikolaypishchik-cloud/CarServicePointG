@@ -5,6 +5,9 @@
 
 #include <QFrame>
 #include <QGridLayout>
+#include "core/util/FormatUtils.h"
+
+#include <QLocale>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -14,6 +17,11 @@
 
 namespace {
 using namespace ReportsUiSupport;
+
+QString editableNumber(double value)
+{
+    return QString::number(value, 'f', QLocale::FloatingPointShortest);
+}
 
 void setEnabledIfPresent(QWidget* widget, bool enabled)
 {
@@ -155,20 +163,20 @@ void applySnapshot(const ExpensesSnapshot& snapshot, const ExpensesWidgets& widg
         b11(widgets.amortizationNoteEdit), b12(widgets.rentEdit), b13(widgets.rentNoteEdit), b14(widgets.otherEdit), b15(widgets.otherNoteEdit),
         b16(widgets.elecKwhEdit), b17(widgets.elecCostEdit);
 
-    widgets.elecPrevEdit->setText(money0(snapshot.elecPrev));
-    widgets.elecCurrEdit->setText(snapshot.foundRow ? money0(snapshot.elecCurr) : QString());
-    widgets.elecTariffEdit->setText(snapshot.elecTariff > 0.0 ? money0(snapshot.elecTariff) : QString());
-    widgets.cleaningEdit->setText(snapshot.foundRow ? money0(snapshot.cleaning) : QString());
+    widgets.elecPrevEdit->setText(editableNumber(snapshot.elecPrev));
+    widgets.elecCurrEdit->setText(snapshot.foundRow ? editableNumber(snapshot.elecCurr) : QString());
+    widgets.elecTariffEdit->setText(snapshot.elecTariff > 0.0 ? editableNumber(snapshot.elecTariff) : QString());
+    widgets.cleaningEdit->setText(snapshot.foundRow ? editableNumber(snapshot.cleaning) : QString());
     widgets.cleaningNoteEdit->setText(snapshot.cleaningNote);
-    widgets.softwareEdit->setText(snapshot.foundRow ? money0(snapshot.software) : QString());
+    widgets.softwareEdit->setText(snapshot.foundRow ? editableNumber(snapshot.software) : QString());
     widgets.softwareNoteEdit->setText(snapshot.softwareNote);
-    widgets.heatingEdit->setText(snapshot.foundRow ? money0(snapshot.heating) : QString());
+    widgets.heatingEdit->setText(snapshot.foundRow ? editableNumber(snapshot.heating) : QString());
     widgets.heatingNoteEdit->setText(snapshot.heatingNote);
-    widgets.amortizationEdit->setText(snapshot.foundRow ? money0(snapshot.amortization) : QString());
+    widgets.amortizationEdit->setText(snapshot.foundRow ? editableNumber(snapshot.amortization) : QString());
     widgets.amortizationNoteEdit->setText(snapshot.amortizationNote);
-    widgets.rentEdit->setText(snapshot.foundRow ? money0(snapshot.rent) : QString());
+    widgets.rentEdit->setText(snapshot.foundRow ? editableNumber(snapshot.rent) : QString());
     widgets.rentNoteEdit->setText(snapshot.rentNote);
-    widgets.otherEdit->setText(snapshot.foundRow ? money0(snapshot.other) : QString());
+    widgets.otherEdit->setText(snapshot.foundRow ? editableNumber(snapshot.other) : QString());
     widgets.otherNoteEdit->setText(snapshot.otherNote);
 
     for (QLineEdit* e : {widgets.elecPrevEdit, widgets.elecCurrEdit, widgets.elecTariffEdit,
@@ -192,7 +200,7 @@ ExpensesRecalcResult recalcForm(const ExpensesWidgets& widgets, bool persistTari
 
     result.kwh = qMax(0.0, curr - prev);
     result.electricityCost = qRound64(result.kwh * tariff);
-    widgets.elecKwhEdit->setText(money0(result.kwh));
+    widgets.elecKwhEdit->setText(editableNumber(result.kwh));
     widgets.elecCostEdit->setText(money0(result.electricityCost));
 
     result.total = result.electricityCost
@@ -203,10 +211,10 @@ ExpensesRecalcResult recalcForm(const ExpensesWidgets& widgets, bool persistTari
         + parseUaNumber(widgets.rentEdit->text())
         + parseUaNumber(widgets.otherEdit->text());
 
-    widgets.expensesTotalEdit->setText(money0(result.total));
+    widgets.expensesTotalEdit->setText(FormatUtils::money(result.total));
     result.stats = {
         QString::fromUtf8("Ел.енергія:  %1  грн.").arg(money0(result.electricityCost)),
-        QString::fromUtf8("Всього витрат:  %1  грн.").arg(money0(result.total))
+        QString::fromUtf8("Всього витрат:  %1  грн.").arg(FormatUtils::money(result.total))
     };
     return result;
 }

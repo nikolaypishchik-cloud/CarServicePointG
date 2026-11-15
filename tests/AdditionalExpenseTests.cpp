@@ -2,6 +2,7 @@
 #include "PayrollGraphProjectionFixture.h"
 #include "PayrollIdentityFixture.h"
 #include "ui/tabs/reports/ReportsDialogSupport.h"
+#include "ui/tabs/reports/ReportsExpensesSupport.h"
 #include "PartsPdfIdentityFixture.h"
 #include "FinancialPdfReadFixture.h"
 #include "StatisticsReadFixture.h"
@@ -896,6 +897,32 @@ private slots:
         QVERIFY(q.exec("ALTER TABLE expenses RENAME COLUMN cleaning TO invalid_cleaning"));
         QVERIFY(!read(db.databaseName()).error.isEmpty());
         QCOMPARE(QSqlDatabase::connectionNames(), before);
+    }
+
+    void expenseFormPreservesFractionalInputs() {
+        QWidget parent;
+        using namespace ReportsExpensesSupport;
+        const auto form = buildExpensesPage(&parent);
+        ExpensesSnapshot snapshot;
+        snapshot.foundRow = true;
+        snapshot.elecPrev = 1250.125;
+        snapshot.elecCurr = 1252.625;
+        snapshot.elecTariff = 4.3275;
+        snapshot.cleaning = 28.75;
+        snapshot.rent = 1050.33;
+        applySnapshot(snapshot, form);
+        const auto result = recalcForm(form, false);
+        const auto saved = buildSavePayload(form);
+        const auto pdf = buildPdfData(form);
+        QCOMPARE(saved.elecPrev, snapshot.elecPrev);
+        QCOMPARE(saved.elecCurr, snapshot.elecCurr);
+        QCOMPARE(saved.elecTariff, snapshot.elecTariff);
+        QCOMPARE(saved.cleaning, snapshot.cleaning);
+        QCOMPARE(saved.rent, snapshot.rent);
+        QCOMPARE(result.kwh, 2.5);
+        QCOMPARE(pdf.elecKwh, saved.elecKwh);
+        QCOMPARE(pdf.elecCost, saved.elecCost);
+        QCOMPARE(pdf.total, 1090.08);
     }
 
     void expenseFormRecoversAfterBrokenSchema() {
