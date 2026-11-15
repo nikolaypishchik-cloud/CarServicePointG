@@ -396,6 +396,12 @@ void ReportsPage::buildUi()
     m_payrollEmployee->setAccessibleName(tr("Співробітник"));
     payrollFilters->addWidget(m_payrollSearch, 1);
     payrollFilters->addWidget(m_payrollEmployee);
+    m_payrollGrouping = new QComboBox(payrollPage);
+    m_payrollGrouping->setObjectName("payrollGrouping");
+    m_payrollGrouping->setAccessibleName(tr("Групування зарплати"));
+    m_payrollGrouping->addItems({tr("Без помісячного розподілу"), tr("За співробітниками й місяцями"), tr("За місяцями й співробітниками")});
+    payrollFilters->addWidget(m_payrollGrouping);
+    connect(m_payrollGrouping, &QComboBox::currentIndexChanged, this, &ReportsPage::refreshPayroll);
     static_cast<QVBoxLayout*>(payrollPage->layout())->insertLayout(0, payrollFilters);
     connect(m_payrollSearch, &QLineEdit::textChanged, this, &ReportsPage::filterPayrollRows);
     connect(m_payrollEmployee, &QComboBox::currentIndexChanged, this, &ReportsPage::filterPayrollRows);

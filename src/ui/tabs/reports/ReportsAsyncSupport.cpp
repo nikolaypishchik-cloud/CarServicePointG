@@ -251,17 +251,18 @@ void startPayrollLoad(QObject* owner,
                       const QString& dbPath,
                       const QString& df,
                       const QString& dt,
+                      bool monthly,
                       std::function<void(const PayrollSnapshot&)> onReady)
 {
-    const QString cacheKey = ReportsSnapshotCache::makeReportsKey(QStringLiteral("payroll"), dbPath, df, dt);
+    const QString cacheKey = ReportsSnapshotCache::makeReportsKey(QStringLiteral("payroll"), dbPath, df, dt, monthly ? QStringLiteral("months") : QString());
     startSnapshotWorkerImpl<PayrollSnapshot>(owner,
         asyncHandle,
         QStringLiteral("reports.payroll"),
         cacheKey,
         ReportsSnapshotCache::tryGetPayroll,
         ReportsSnapshotCache::storePayroll,
-        [dbPath, df, dt]() {
-            return ReportsDataLoader::buildPayrollSnapshot(dbPath, df, dt);
+        [dbPath, df, dt, monthly]() {
+            return ReportsDataLoader::buildPayrollSnapshot(dbPath, df, dt, monthly);
         },
         std::move(onReady));
 }

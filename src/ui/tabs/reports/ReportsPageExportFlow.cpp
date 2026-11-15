@@ -292,7 +292,7 @@ void ReportsPage::refreshPayroll()
     updateStats({QString::fromUtf8("Завантаження зарплати…")});
     ReportsAsyncSupport::showLoadingRow(m_payrollTable, m_payrollModel, QString::fromUtf8("Завантаження…"));
 
-    ReportsAsyncSupport::startPayrollLoad(this, asyncHandle, dbPath, df, dt, [this, generation, key](const PayrollSnapshot& snapshot) {
+    ReportsAsyncSupport::startPayrollLoad(this, asyncHandle, dbPath, df, dt, m_payrollGrouping->currentIndex() != 0, [this, generation, key](const PayrollSnapshot& snapshot) {
         if (generation != m_asyncRefreshGeneration) return;
         if (activeTab() != ReportTab::Payroll) return;
         applyPayrollSnapshot(snapshot);
@@ -309,8 +309,11 @@ void ReportsPage::openPayrollOrdersDialog(int row)
     const QString masterId = m_payrollModel->cellUserValue(row, 0).toString().trimmed();
     if (masterId.isEmpty()) return;
 
-    const QString df = m_from->date().toString("yyyy-MM-dd");
-    const QString dt = m_to->date().toString("yyyy-MM-dd");
+    const auto index = m_payrollModel->index(row, 0);
+    const QDate begin = index.data(ReportsTableSupport::PayrollFromRole).toDate();
+    const QDate end = index.data(ReportsTableSupport::PayrollToRole).toDate();
+    const QString df = (begin.isValid() ? begin : m_from->date()).toString(Qt::ISODate);
+    const QString dt = (end.isValid() ? end : m_to->date()).toString(Qt::ISODate);
     QString error;const auto orders = ReportsSyncSupport::collectPayrollOrdersForMaster(masterId, df, dt,&error);
     if(!error.isEmpty()){QMessageBox::warning(this,QString::fromUtf8("Не вдалося прочитати зарплату"),error);return;}
 

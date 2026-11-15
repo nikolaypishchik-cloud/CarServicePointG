@@ -893,6 +893,49 @@ private slots:
         QCOMPARE(clipped.months.last().to, QDate(2026, 1, 10));
         QCOMPARE(pay(clipped.months.last().rows, "m"), 0.0);
     }
+    void payrollGroupingAndMonthlyDrilldown() {
+        QString error;
+        QVERIFY2(PayrollIdentityFixture::run(db, &error), qPrintable(error));
+        ReportsPage page;
+        page.show();
+        auto* grouping = page.findChild<QComboBox*>("payrollGrouping");
+        auto* employee = page.findChild<QComboBox*>("payrollEmployee");
+        auto* tabs = page.findChild<QTabWidget*>();
+        auto* from = page.findChild<QDateEdit*>("dashboardFrom");
+        auto* to = page.findChild<QDateEdit*>("dashboardTo");
+        QVERIFY(grouping && employee && tabs && from && to);
+        from->setDate(QDate(2026, 1, 1));
+        to->setDate(QDate(2026, 2, 17));
+        for (int i = 0; i < tabs->count(); ++i)
+            if (tabs->tabText(i) == QStringLiteral("Зарплата")) tabs->setCurrentIndex(i);
+        auto* table = tabs->currentWidget()->findChild<QTableView*>();
+        QVERIFY(table);
+        QTRY_VERIFY_WITH_TIMEOUT(employee->findData("m") >= 0, 10000);
+        employee->setCurrentIndex(employee->findData("m"));
+        grouping->setCurrentIndex(1);
+        QTRY_COMPARE_WITH_TIMEOUT(table->model()->rowCount(), 3, 10000);
+        QVERIFY(table->model()->index(0, 0).data().toString().contains("ID m"));
+        grouping->setCurrentIndex(2);
+        QTRY_COMPARE_WITH_TIMEOUT(table->model()->rowCount(), 4, 10000);
+        QCOMPARE(table->model()->index(3, 0).data(ReportsTableSupport::PayrollToRole).toDate(), QDate(2026, 2, 17));
+        for (const int row : {1, 3}) {
+            QString detailText;
+            QTimer::singleShot(0, [&] {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                if (!dialog) return;
+                auto* detail = dialog->findChild<QTableView*>();
+                if (detail && detail->model() && detail->model()->rowCount() == 1) {
+                    detailText = detail->model()->index(0, row == 1 ? 2 : 0).data().toString();
+                }
+                dialog->reject();
+            });
+            table->doubleClicked(table->model()->index(row, 0));
+            QCOMPARE(detailText, row == 1 ? QStringLiteral("7") : QStringLiteral("Немає виконаних нарядів за вибраний період"));
+        }
+        grouping->setCurrentIndex(0);
+        QTRY_VERIFY_WITH_TIMEOUT(employee->isEnabled() && table->model()->rowCount() == 1, 10000);
+        QCOMPARE(table->model()->index(0, 4).data().toString(), FormatUtils::money(0.05, 2));
+    }
     void payrollFiltersDistinguishNamesakes() {
         QString error;
         QVERIFY2(PayrollIdentityFixture::run(db, &error), qPrintable(error));

@@ -14,6 +14,8 @@ class QTableView;
 
 namespace ReportsTableSupport {
 
+constexpr int PayrollFromRole = Qt::UserRole + 33;
+constexpr int PayrollToRole = Qt::UserRole + 34;
 constexpr int OrderUidRole = Qt::UserRole + 32;
 
 class ReportsSnapshotTableModel final : public QAbstractTableModel
@@ -71,7 +73,7 @@ void applyPeriodSnapshot(QTableView* table, ReportsSnapshotTableModel* model, co
 void applyOrdersSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const OrdersSnapshot& snapshot);
 void applyPartsSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const PartsSnapshot& snapshot);
 void applyOutsourceSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const OutsourceSnapshot& snapshot);
-void applyPayrollSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const PayrollSnapshot& snapshot);
+void applyPayrollSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const PayrollSnapshot& snapshot, bool byEmployee = false);
 void applyTotalExpensesSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const TotalExpensesSnapshot& snapshot,
                                 const QSet<QString>* collapsedMonths);
 

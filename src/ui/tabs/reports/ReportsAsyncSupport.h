@@ -72,6 +72,7 @@ void startPayrollLoad(QObject* owner,
                       const QString& dbPath,
                       const QString& df,
                       const QString& dt,
+                      bool monthly,
                       std::function<void(const PayrollSnapshot&)> onReady);
 
 } // namespace ReportsAsyncSupport

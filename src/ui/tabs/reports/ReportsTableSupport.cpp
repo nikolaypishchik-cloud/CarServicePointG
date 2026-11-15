@@ -408,15 +408,14 @@ void applyOutsourceSnapshot(QTableView* table, ReportsSnapshotTableModel* model,
     finishSnapshotApply(table, model);
 }
 
-void applyPayrollSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const PayrollSnapshot& snapshot)
+void applyPayrollSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const PayrollSnapshot& snapshot, bool byEmployee)
 {
     if (!table || !model) return;
     table->setUpdatesEnabled(false);
     table->blockSignals(true);
 
     QVector<ReportsSnapshotTableModel::Row> rows;
-    rows.reserve(snapshot.rows.size());
-    for (const auto& row : snapshot.rows) {
+    auto append = [&](const PayrollSnapshotRow& row, const PayrollMonth* month) {
         ReportsSnapshotTableModel::Row out;
         out.cells = {
             makeCell(row.masterName, int(Qt::AlignLeft | Qt::AlignVCenter), row.masterId),
@@ -425,7 +424,42 @@ void applyPayrollSnapshot(QTableView* table, ReportsSnapshotTableModel* model, c
             makeCell(row.percent, int(Qt::AlignRight | Qt::AlignVCenter)),
             makeCell(row.accrued, int(Qt::AlignRight | Qt::AlignVCenter))
         };
+        if (month) {
+            out.cells[0].extraRoles[PayrollFromRole] = month->from;
+            out.cells[0].extraRoles[PayrollToRole] = month->to;
+            if (byEmployee) out.cells[0].text += QStringLiteral(" · ") + month->from.toString("MM.yyyy");
+        }
         rows.push_back(out);
+    };
+    auto heading = [&](const QString& title) {
+        ReportsSnapshotTableModel::Row group;
+        group.spanAllColumns = true;
+        group.cells = {makeCell(title, int(Qt::AlignLeft | Qt::AlignVCenter), {}, {}, true)};
+        rows.push_back(group);
+    };
+    if (snapshot.months.isEmpty()) {
+        for (const auto& row : snapshot.rows) append(row, nullptr);
+    } else if (byEmployee) {
+        using Entry = QPair<const PayrollMonth*, const PayrollSnapshotRow*>;
+        QHash<QString, QList<Entry>> entries;
+        QStringList employees;
+        for (const auto& month : snapshot.months) {
+            for (const auto& row : month.rows) {
+                if (!entries.contains(row.masterId)) employees.append(row.masterId);
+                entries[row.masterId].append({&month, &row});
+            }
+        }
+        for (const auto& id : employees) {
+            const auto& group = entries.constFind(id).value();
+            heading(QStringLiteral("%1 · ID %2").arg(group.first().second->masterName, id));
+            for (const auto& item : group) append(*item.second, item.first);
+        }
+    } else {
+        for (const auto& month : snapshot.months) {
+            if (month.rows.isEmpty()) continue;
+            heading(month.from.toString("dd.MM.yyyy") + QStringLiteral(" – ") + month.to.toString("dd.MM.yyyy"));
+            for (const auto& row : month.rows) append(row, &month);
+        }
     }
     model->setSnapshot(payrollHeaders(), rows);
     if (rows.isEmpty() && snapshot.error.isEmpty())

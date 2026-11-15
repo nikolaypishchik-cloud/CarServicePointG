@@ -611,13 +611,21 @@ void ReportsPage::filterPayrollRows()
     const QString employee = m_payrollEmployee->currentData().toString();
     PayrollSnapshot filtered;
     qint64 totalCents = 0;
+    const auto matches = [&](const PayrollSnapshotRow& row) {
+        return (employee.isEmpty() || employee == row.masterId)
+            && row.masterName.contains(search, Qt::CaseInsensitive);
+    };
     for (const auto& row : m_payrollSnapshot.rows) {
-        if ((!employee.isEmpty() && employee != row.masterId)
-            || !row.masterName.contains(search, Qt::CaseInsensitive)) continue;
+        if (!matches(row)) continue;
         filtered.rows.append(row);
         totalCents += qRound64(row.accruedValue * 100);
     }
-    ReportsTableSupport::applyPayrollSnapshot(m_payrollTable, m_payrollModel, filtered);
+    for (const auto& month : m_payrollSnapshot.months) {
+        PayrollMonth visible{month.from, month.to, {}};
+        for (const auto& row : month.rows) if (matches(row)) visible.rows.append(row);
+        filtered.months.append(std::move(visible));
+    }
+    ReportsTableSupport::applyPayrollSnapshot(m_payrollTable, m_payrollModel, filtered, m_payrollGrouping->currentIndex() == 1);
     setTabStats(ReportTab::Payroll, {tr("Співробітників:  %1").arg(filtered.rows.size()),
                                      tr("Нараховано:  %1  грн.").arg(FormatUtils::money(totalCents / 100.0, 2))});
     applyCachedTabUi(ReportTab::Payroll);
