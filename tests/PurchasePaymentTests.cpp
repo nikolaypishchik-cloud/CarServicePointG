@@ -4403,6 +4403,35 @@ private slots:
         verifyInsets();
     }
 
+    void pendingFinanceHeaderActions() {
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        auto* header = window.findChild<QFrame*>("top_pill");
+        auto* pages = window.findChild<QStackedWidget*>("pages");
+        QVERIFY(header && pages);
+        auto* rate = header->findChild<QToolButton*>("headerExchangeRate");
+        auto* statements = header->findChild<QToolButton*>("headerStatements");
+        QVERIFY(rate && statements);
+        QCOMPARE(rate->text(), QStringLiteral("Курс"));
+        QCOMPARE(statements->text(), QStringLiteral("Виписки"));
+        for (int index : {1, 3, 9}) {
+            pages->setCurrentIndex(index);
+            QCoreApplication::processEvents();
+            for (auto* button : {rate, statements}) {
+                QVERIFY(button->isVisibleTo(&window));
+                QVERIFY(!button->isEnabled());
+                QVERIFY(!button->icon().isNull());
+                QVERIFY(button->toolTip().contains(button->text()));
+                QVERIFY(header->rect().contains(QRect(button->mapTo(header,QPoint()),button->size())));
+                button->click();
+                QCOMPARE(pages->currentIndex(), index);
+            }
+            QVERIFY(rate->mapTo(header, rate->rect().topRight()).x() < statements->mapTo(header,QPoint()).x());
+        }
+        const QString path = qEnvironmentVariable("CS_HEADER_PREVIEW");
+        if (!path.isEmpty()) QVERIFY(header->grab().save(path));
+    }
     void debtBannerPinnedLayout() {
         MainWindow window;
         window.resize(1400, 900);

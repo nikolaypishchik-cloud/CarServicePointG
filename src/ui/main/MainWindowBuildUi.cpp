@@ -3,6 +3,40 @@
 
 #include "ui/main/MainWindowModulePrelude.h"
 #include "ui/tabs/reports/PurchaseDebtsPage.h"
+#include <QToolButton>
+#include <QPainter>
+
+namespace {
+QIcon pendingHeaderIcon(bool exchangeRate)
+{
+    QPixmap image(64, 64);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(exchangeRate ? QColor("#91db68") : QColor("#b788ef"), 3.4,
+                        Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    if (exchangeRate) {
+        QPainterPath path;
+        path.moveTo(45, 16);
+        path.cubicTo(24, 2, 12, 24, 31, 30);
+        path.cubicTo(56, 38, 41, 62, 18, 49);
+        painter.drawPath(path);
+        painter.drawLine(32, 5, 32, 13);
+        painter.drawLine(32, 54, 32, 61);
+    } else {
+        painter.drawRoundedRect(QRectF(5, 14, 54, 44), 5, 5);
+        painter.drawLine(6, 26, 58, 26);
+        for (int x : {17, 32, 47}) {
+            painter.drawLine(x, 8, x, 19);
+            for (int y : {36, 46}) painter.drawPoint(x, y);
+        }
+    }
+    painter.end();
+    QIcon icon(image);
+    icon.addPixmap(image, QIcon::Disabled);
+    return icon;
+}
+} // namespace
 
 void MainWindow::buildUi()
 {
@@ -151,7 +185,7 @@ void MainWindow::buildUi()
     top->setMinimumHeight(46);
     top->setMaximumHeight(78);
     auto* topL = new QHBoxLayout(top);
-    topL->setContentsMargins(18,10,18,10);
+    topL->setContentsMargins(18,2,18,2);
     topL->setSpacing(10);
 
     m_topTitle = new QLabel(pageTitleForIndex(1), top);
@@ -162,7 +196,24 @@ void MainWindow::buildUi()
 
     m_topRightSpacer = new QWidget(top);
     m_topRightSpacer->setMinimumWidth(180);
-    m_topRightSpacer->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    auto* headerActions = new QHBoxLayout(m_topRightSpacer);
+    headerActions->setContentsMargins(0, 0, 0, 0);
+    headerActions->setSpacing(8);
+    headerActions->addStretch();
+    for (bool exchangeRate : {true, false}) {
+        auto* button = new QToolButton(m_topRightSpacer);
+        button->setObjectName(exchangeRate ? "headerExchangeRate" : "headerStatements");
+        button->setText(exchangeRate ? tr("Курс") : tr("Виписки"));
+        button->setAccessibleName(button->text());
+        button->setToolTip(tr("Екран «%1» буде додано пізніше.").arg(button->text()));
+        button->setAccessibleDescription(button->toolTip());
+        button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        button->setIcon(pendingHeaderIcon(exchangeRate));
+        button->setIconSize(QSize(22, 22));
+        button->setStyleSheet(QStringLiteral("QToolButton:disabled { background: transparent; color: #aab9c5; border: none; padding: 0 4px; }"));
+        button->setEnabled(false);
+        headerActions->addWidget(button);
+    }
     m_topRightSpacer->setAttribute(Qt::WA_StyledBackground, false);
     m_topRightSpacer->setStyleSheet(QStringLiteral("background:transparent; border:none;"));
     topL->addWidget(m_topRightSpacer, 1);
