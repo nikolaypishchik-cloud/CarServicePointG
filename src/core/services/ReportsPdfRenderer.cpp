@@ -214,15 +214,17 @@ ExportResult renderPartsRegisterPdf(QDate from, QDate to, const PartsRegisterSel
     ExportResult result;
     result.reportKind = QStringLiteral("parts-register");
     if (!ReportsPdfSupport::validateFinancialPdfSource(from, to, &result.errorText)) return result;
-    result.path = makeReportPdfPath(QStringLiteral("Придбання запчастин"), QStringLiteral("Усі позиції ") + reportDateRangeStem(from, to));
+    const QString mode = selection.orderCaption.isEmpty() ? QStringLiteral("Усі позиції") : QStringLiteral("За нарядами");
+    result.path = makeReportPdfPath(QStringLiteral("Придбання запчастин"), mode + " " + reportDateRangeStem(from, to));
     if (!ensurePdfOutputPath(result.path, &result.errorText)) return result;
     QSaveFile file(result.path);
     if (!file.open(QIODevice::WriteOnly)) {
         result.errorText = file.errorString();
         return result;
     }
-    QString html = QStringLiteral("<h2>Придбання запчастин — Усі позиції</h2><p>%1 — %2 · %3 · %4</p>")
-        .arg(from.toString("dd.MM.yyyy"), to.toString("dd.MM.yyyy"), selection.store.toHtmlEscaped(), selection.payment.toHtmlEscaped());
+    QString html = QStringLiteral("<h2>Придбання запчастин — %5</h2><p>%1 — %2 · %3 · %4</p>")
+        .arg(from.toString("dd.MM.yyyy"), to.toString("dd.MM.yyyy"), selection.store.toHtmlEscaped(), selection.payment.toHtmlEscaped(), mode);
+    if (!selection.orderCaption.isEmpty()) html += "<p>" + selection.orderCaption.toHtmlEscaped() + "</p>";
     if (!selection.search.isEmpty()) html += QStringLiteral("<p>Пошук: %1</p>").arg(selection.search.toHtmlEscaped());
     html += QStringLiteral("<table width='100%' border='1' cellspacing='0' cellpadding='3'><thead><tr>");
     for (const auto& header : selection.headers) html += "<th>" + header.toHtmlEscaped() + "</th>";
@@ -240,7 +242,7 @@ ExportResult renderPartsRegisterPdf(QDate from, QDate to, const PartsRegisterSel
         pdf.setPageOrientation(QPageLayout::Landscape);
         pdf.setPageMargins(QMarginsF(8, 8, 8, 8));
         pdf.setResolution(144);
-        pdf.setTitle(QStringLiteral("Придбання запчастин — Усі позиції"));
+        pdf.setTitle(QStringLiteral("Придбання запчастин — ") + mode);
         QTextDocument document;
         document.documentLayout()->setPaintDevice(&pdf);
         document.setDefaultFont(QFont(QStringLiteral("Segoe UI"), 8));

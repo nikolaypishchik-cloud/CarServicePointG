@@ -289,7 +289,7 @@ void ReportsPage::buildUi()
     auto* mode = new QComboBox(partsPage);
     mode->setObjectName("partsReportMode");
     mode->setAccessibleName(tr("Режим придбання запчастин"));
-    mode->addItems({tr("Звіт"), tr("Усі позиції")});
+    mode->addItems({tr("Звіт"), tr("За нарядами"), tr("Усі позиції")});
     groupActions->addWidget(mode);
     groupActions->addWidget(search, 1);
     groupActions->addWidget(collapse);
@@ -340,11 +340,12 @@ void ReportsPage::buildUi()
     m_partsRegister = new PartsRegisterView(partsPage);
     partsLayout->addWidget(m_partsRegister, 1);
     m_partsRegister->hide();
+    m_partsRegister->orderEdited = [this] { markDirty(); scheduleRefresh(0); queueRefreshAll(0); };
     connect(search, &QLineEdit::textChanged, m_partsRegister, &PartsRegisterView::setSearch);
     connect(mode, &QComboBox::currentIndexChanged, this, [this, collapse, expand, search, updateRows](int index) {
-        const bool flat = index == 1;
+        const bool flat = index != 0;
         m_partsTable->setVisible(!flat);
-        m_partsRegister->setActive(flat);
+        m_partsRegister->setActive(flat, index == 1);
         collapse->setVisible(!flat);
         expand->setVisible(!flat);
         search->setPlaceholderText(flat ? tr("Запчастина, OEM, авто або наряд") : tr("Запчастина, наряд або накладна"));

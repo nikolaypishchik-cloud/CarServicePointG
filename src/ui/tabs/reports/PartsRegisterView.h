@@ -3,6 +3,10 @@
 #include "ui/tabs/reports/ReportsTableSupport.h"
 #include "core/services/PartsRegisterPdf.h"
 #include <optional>
+#include <QListWidget>
+#include <QSplitter>
+#include <QPushButton>
+#include "ui/tabs/reports/ReportsInteractionSupport.h"
 #include <QComboBox>
 #include <QHeaderView>
 #include <QLabel>
@@ -14,6 +18,7 @@
 class PartsRegisterView final : public QWidget {
 public:
     explicit PartsRegisterView(QWidget* parent) : QWidget(parent) {
+        setObjectName("partsRegisterView");
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
         auto* filters = new QHBoxLayout;
@@ -33,7 +38,28 @@ public:
         table->setModel(model);
         ReportsTableSupport::setTableBaseStyle(table);
         table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
-        layout->addWidget(table, 1);
+        auto* split = new QSplitter(Qt::Horizontal, this);
+        orders = new QListWidget(split);
+        orders->setObjectName("partsRegisterOrders");
+        orders->setAccessibleName(tr("Наряди з придбаними запчастинами"));
+        auto* details = new QWidget(split);
+        auto* detailsLayout = new QVBoxLayout(details);
+        detailsLayout->setContentsMargins(0, 0, 0, 0);
+        orderLink = new QPushButton(details);
+        orderLink->setObjectName("partsRegisterOpenOrder");
+        detailsLayout->addWidget(orderLink, 0, Qt::AlignLeft);
+        detailsLayout->addWidget(table, 1);
+        split->addWidget(orders);
+        split->addWidget(details);
+        split->setStretchFactor(1, 1);
+        layout->addWidget(split, 1);
+        orders->hide();
+        orderLink->hide();
+        connect(orders, &QListWidget::currentRowChanged, this, [this] { displayOrder(); });
+        connect(orderLink, &QPushButton::clicked, this, [this] {
+            if (selectedRows.isEmpty()) return;
+            ReportsInteractionSupport::openOrderFromReportTable(this, table, 2, selectedRows.first(), orderEdited);
+        });
         connect(store, &QComboBox::currentIndexChanged, this, [this] { filter(); });
         connect(payment, &QComboBox::currentIndexChanged, this, [this] { filter(); });
         buildRows({});
@@ -47,11 +73,15 @@ public:
             metrics.horizontalAdvance(tr("Немає підтверджених даних")) + 24));
     }
 
+    std::function<void()> orderEdited;
+    bool hasExportSelection() const { return !byOrder || !selectedRows.isEmpty(); }
+
     bool isActive() const { return active; }
 
     ReportsPdfRenderer::PartsRegisterSelection exportSelection() const {
         ReportsPdfRenderer::PartsRegisterSelection selection;
         selection.headers = model->headers();
+        if (byOrder) selection.orderCaption = orderLink->text();
         selection.store = store->currentText();
         selection.payment = payment->currentText();
         selection.search = search;
@@ -69,7 +99,9 @@ public:
         if (active) filter();
     }
 
-    void setActive(bool value) {
+    void setActive(bool value, bool groupByOrder = false) {
+        byOrder = groupByOrder;
+        orders->setVisible(byOrder);
         active = value;
         if (active && pending) {
             buildRows(*pending);
@@ -111,6 +143,7 @@ private:
                 cell.text = known(value);
                 row.cells.append(cell);
             }
+            row.cells[2].userValue = part.internalOrderNumber;
             row.cells[2].extraRoles[ReportsTableSupport::OrderUidRole] = part.orderUid;
             if (part.supplierPayment == tr("Сплачено")) row.cells.last().foreground = QColor("#218746");
             if (part.supplierPayment == tr("Не сплачено")) row.cells.last().foreground = QColor("#c63737");
@@ -138,6 +171,12 @@ private:
     }
 
     void filter() {
+        const QString previous = orders->currentItem() ? orders->currentItem()->data(Qt::UserRole).toString() : QString();
+        const QSignalBlocker blocker(orders);
+        orders->clear();
+        orderRows.clear();
+        selectedRows.clear();
+        QStringList keys;
         int visible = 0;
         for (int r = 0; r < model->rowCount(); ++r) {
             bool matches = search.isEmpty();
@@ -145,12 +184,64 @@ private:
             if (store->currentIndex() > 0) matches &= model->cellText(r, 4) == store->currentData().toString();
             if (payment->currentIndex() > 0) matches &= model->cellText(r, 11) == payment->currentData().toString();
             table->setRowHidden(r, !matches);
-            if (matches) ++visible;
+            if (!matches) continue;
+            ++visible;
+            if (byOrder) {
+                const auto index = model->index(r, 2);
+                const QString uid = index.data(ReportsTableSupport::OrderUidRole).toString();
+                const QString key = uid.isEmpty() ? "number:" + index.data(Qt::UserRole).toString() : "uid:" + uid;
+                if (!orderRows.contains(key)) keys.append(key);
+                orderRows[key].append(r);
+            }
         }
+        if (byOrder) {
+            for (const auto& key : keys) {
+                const auto& rows = orderRows.constFind(key).value();
+                const int first = rows.first();
+                QString status = model->cellText(first, 11);
+                QString date = model->cellText(first, 0);
+                for (const int row : rows) {
+                    if (model->cellText(row, 11) != status) status = tr("Різні стани оплати");
+                    if (model->cellText(row, 0) != date) date = tr("Різні дати");
+                }
+                const QString label = tr("№%1 · %2\n%3 · Позицій: %4 · %5")
+                    .arg(model->cellText(first, 2), model->cellText(first, 3), date).arg(rows.size()).arg(status);
+                auto* item = new QListWidgetItem(label, orders);
+                item->setData(Qt::UserRole, key);
+            }
+            orders->setCurrentRow(previous.isEmpty() && !keys.isEmpty() ? 0 : keys.indexOf(previous));
+            displayOrder();
+            return;
+        }
+        orderLink->hide();
         message->setText(state.isEmpty() ? tr("За вибраними умовами позицій немає") : state);
         message->setVisible(visible == 0);
     }
 
+    void displayOrder() {
+        const auto* item = orders->currentItem();
+        selectedRows = item ? orderRows.value(item->data(Qt::UserRole).toString()) : QList<int>{};
+        // The list stores row indices in the same ascending order as the source model.
+        int cursor = 0;
+        for (int r = 0; r < model->rowCount(); ++r) {
+            const bool selected = cursor < selectedRows.size() && selectedRows[cursor] == r;
+            table->setRowHidden(r, !selected);
+            if (selected) ++cursor;
+        }
+        if (!selectedRows.isEmpty()) {
+            const int r = selectedRows.first();
+            orderLink->setText(tr("Наряд №%1 · %2").arg(model->cellText(r, 2), model->cellText(r, 3)));
+        }
+        orderLink->setVisible(!selectedRows.isEmpty());
+        message->setText(!state.isEmpty() ? state : (orders->count() ? tr("Виберіть наряд") : tr("За вибраними умовами нарядів немає")));
+        message->setVisible(selectedRows.isEmpty());
+    }
+
+    QListWidget* orders;
+    QPushButton* orderLink;
+    QHash<QString, QList<int>> orderRows;
+    QList<int> selectedRows;
+    bool byOrder = false;
     QComboBox *store, *payment;
     QLabel* message;
     QTableView* table;

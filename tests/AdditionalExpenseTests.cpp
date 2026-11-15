@@ -225,6 +225,46 @@ private slots:
         if (!capture.isEmpty()) QVERIFY(QFile::copy(result.path, capture));
     }
 
+    void purchaseRegisterOrderIdentity() {
+        preparePartsPayrollPdfFixture();
+        PartsRegisterView view(nullptr);
+        PartsSnapshot snapshot;
+        for (int i = 0; i < 3; ++i) {
+            PartsSnapshotRow part;
+            part.orderNumber = "71";
+            part.orderUid = i == 2 ? "other" : "first";
+            part.internalOrderNumber = i == 2 ? 102 : 101;
+            part.car = i == 2 ? "Blue" : "Red";
+            part.oem = QString("QA%1").arg(i);
+            part.installedAt = i == 0 ? "2026-01-01" : "2026-01-02";
+            part.supplierPayment = i == 0 ? "Сплачено" : "Частково сплачено";
+            snapshot.rows.append(part);
+        }
+        view.setSnapshot(snapshot);
+        view.setActive(true, true);
+        auto* orders = view.findChild<QListWidget*>("partsRegisterOrders");
+        QVERIFY(orders);
+        QCOMPARE(orders->count(), 2);
+        QVERIFY(orders->item(0)->text().contains(QStringLiteral("Різні стани оплати")));
+        QCOMPARE(view.exportSelection().rows.size(), 2);
+        orders->setCurrentRow(1);
+        const auto picked = view.exportSelection();
+        QCOMPARE(picked.rows.size(), 1);
+        QCOMPARE(picked.rows.first()[6], QString("QA2"));
+        QVERIFY(picked.orderCaption.contains("Blue"));
+        const auto pdf = ReportsPdfRenderer::renderPartsRegisterPdf(QDate(2026,1,1),QDate(2026,1,31),picked);
+        QVERIFY2(pdf.success,qPrintable(pdf.errorText));
+        QCOMPARE(pdf.recordCount,1);
+        const auto capture = qEnvironmentVariable("CS_ORDER_REGISTER_PDF");
+        if (!capture.isEmpty()) QVERIFY(QFile::copy(pdf.path,capture));
+        view.setSearch("Red");
+        QVERIFY(!view.hasExportSelection());
+        orders->setCurrentRow(0);
+        QCOMPARE(view.exportSelection().rows.size(),2);
+        view.setActive(true,false);
+        QCOMPARE(view.exportSelection().rows.size(),2);
+    }
+
     void flatPartsRegister() {
         preparePartsPayrollPdfFixture();
         QSqlQuery q(db);
@@ -241,7 +281,7 @@ private slots:
         auto* search = page.findChild<QLineEdit*>("partsReportSearch");
         auto* table = page.findChild<QTableView*>("partsRegisterTable");
         QVERIFY(mode && search && table);
-        auto* view = dynamic_cast<PartsRegisterView*>(table->parentWidget());
+        auto* view = dynamic_cast<PartsRegisterView*>(page.findChild<QWidget*>("partsRegisterView"));
         QVERIFY(view);
         page.show();
         auto* tabs = page.findChild<QTabWidget*>();
@@ -270,6 +310,12 @@ private slots:
         QVERIFY(table->isRowHidden(0));
         search->setText("oem-71");
         QVERIFY(!table->isRowHidden(0));
+        mode->setCurrentText(QStringLiteral("За нарядами"));
+        auto* orders = view->findChild<QListWidget*>("partsRegisterOrders");
+        QVERIFY(orders && !orders->isHidden());
+        QCOMPARE(orders->count(), 1);
+        QCOMPARE(view->exportSelection().rows.size(), 1);
+        QCOMPARE(view->exportSelection().rows.first()[6], QStringLiteral("OEM-71"));
         mode->setCurrentIndex(0);
         QVERIFY(view->isHidden());
     }

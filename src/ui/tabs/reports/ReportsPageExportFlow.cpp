@@ -427,6 +427,10 @@ void ReportsPage::exportPartsPdf()
     const QDate fromDate = m_from->date();
     const QDate toDate = m_to->date();
     if (m_partsRegister->isActive()) {
+        if (!m_partsRegister->hasExportSelection()) {
+            QMessageBox::information(this, tr("PDF"), tr("Виберіть наряд для експорту."));
+            return;
+        }
         const auto selection = m_partsRegister->exportSelection();
         runPdfExportTask(tr("Формування PDF усіх позицій…"), [fromDate, toDate, selection] {
             return ReportsPdfRenderer::renderPartsRegisterPdf(fromDate, toDate, selection);
