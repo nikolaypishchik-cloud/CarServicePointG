@@ -9273,6 +9273,22 @@ private slots:
         dialog->setStyleSheet(updated);QTest::qWait(100);
         QCOMPARE(dialog->size(),original);
         for(auto it=geometry.cbegin();it!=geometry.cend();++it)QCOMPARE(it.key()->geometry(),it.value());
+        auto* basis=form->findChild<QComboBox*>("inventoryPriceBasis");
+        auto* cost=form->findChild<QDoubleSpinBox*>("inventoryUnitCost");
+        auto* qty=form->findChild<QDoubleSpinBox*>("inventoryQuantity");
+        auto* save=dialog->findChild<QPushButton*>("saveMaterialReceipt");
+        QVERIFY(basis && cost && qty && save && save->isVisible());
+        qty->setValue(3); cost->setValue(20);
+        QLabel* total=nullptr;
+        for(auto* label:dialog->findChildren<QLabel*>())
+            if(label->text().startsWith(QStringLiteral("Сума надходження:"))) total=label;
+        QVERIFY(total);
+        basis->setCurrentIndex(basis->findData(true));
+        QVERIFY2(total->text().contains(QStringLiteral("20")),qPrintable(total->text()));
+        basis->setCurrentIndex(basis->findData(false));
+        QVERIFY2(total->text().contains(QStringLiteral("60")),qPrintable(total->text()));
+        const auto preview=qEnvironmentVariable("CS_MATERIAL_PREVIEW");
+        if (!preview.isEmpty()) QVERIFY(dialog->grab().save(preview));
         QVERIFY(dialog->grab().save(dir.filePath(QStringLiteral("material-theme.png"))));
         dialog->reject();
     }

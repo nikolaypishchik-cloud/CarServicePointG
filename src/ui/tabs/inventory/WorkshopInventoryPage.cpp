@@ -363,12 +363,7 @@ void WorkshopInventoryPage::buildUi()
     m_materialDialog = new InventoryEntryDialog(this);
     m_materialDialog->setWindowTitle(QString::fromUtf8("Додати матеріал або рідину"));
     m_materialDialog->resize(780, 600);
-    m_materialDialog->setStyleSheet(QStringLiteral(
-        "QDialog{background:#242e38;} QLabel{color:#ffffff;} QLineEdit,QComboBox,QDateEdit,QDoubleSpinBox{background:white;color:#000;border:1px solid #a7b1bb;border-radius:5px;padding:6px;}"
-        "QWidget#workshopInventoryPurchaseForm,QScrollArea,QScrollArea>QWidget {background:#242e38;}"
-        "QComboBox QAbstractItemView {background:white;color:black;selection-background-color:#dbe8fa;selection-color:black;}"
-        "QPushButton {color:white;border-color:#84909d;background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #45494d,stop:0.45 #141619,stop:0.5 #08090b,stop:1 black);}"
-        "QPushButton:disabled {color:#8a9299;}"));
+    m_materialDialog->setStyleSheet(InventoryEntryDialog::materialStyleSheet());
     auto* dialogLayout = new QVBoxLayout(m_materialDialog);
     auto* form = new QWidget(m_materialDialog);
     form->setObjectName(QStringLiteral("workshopInventoryPurchaseForm"));
@@ -472,6 +467,7 @@ void WorkshopInventoryPage::buildUi()
     auto* materialScroll=new QScrollArea(m_materialDialog);materialScroll->setWidgetResizable(true);materialScroll->setWidget(form);
     dialogLayout->addWidget(materialScroll); dialogLayout->addWidget(total);
     auto* materialButtons=new QDialogButtonBox(QDialogButtonBox::Save|QDialogButtonBox::Cancel,m_materialDialog);
+    materialButtons->button(QDialogButtonBox::Save)->setObjectName(QStringLiteral("saveMaterialReceipt"));
     materialButtons->button(QDialogButtonBox::Save)->setText(QString::fromUtf8("Зберегти надходження"));
     materialButtons->button(QDialogButtonBox::Cancel)->setText(QString::fromUtf8("Скасувати"));
     for (auto* button : materialButtons->findChildren<QPushButton*>()) {
