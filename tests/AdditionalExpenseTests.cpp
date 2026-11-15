@@ -1188,6 +1188,51 @@ private slots:
         QVERIFY(!next->isEnabled());
     }
 
+    void totalExpenseMonthGroupsPreserveTotals() {
+        QSqlQuery q(db);
+        QVERIFY(q.exec("INSERT INTO expenses(period_from,period_to,rent,rent_note) VALUES('20.01.26','05.02.26',60.25,'Rent')"));
+        qint64 januaryId = 0;
+        QVERIFY(AdditionalExpenseService::add(db, QDate(2026,1,20), "Other", "January", 5.75, &januaryId));
+        QVERIFY(AdditionalExpenseService::add(db, QDate(2026,2,10), QStringLiteral("Нова пошта"), "February", 10.05));
+        ReportsPage page;
+        page.resize(1400,850);
+        page.show();
+        auto* tabs = page.findChild<QTabWidget*>();
+        QVERIFY(tabs);
+        tabs->setCurrentIndex(6);
+        auto* from = page.findChild<QDateEdit*>("dashboardFrom");
+        auto* to = page.findChild<QDateEdit*>("dashboardTo");
+        auto* table = page.findChild<QTableView*>("additionalExpensesTable");
+        auto* total = page.findChild<QLabel*>("reportMetricValue0");
+        auto* count = page.findChild<QLabel*>("reportMetricValue1");
+        auto* postage = page.findChild<QLabel*>("reportMetricValue2");
+        auto* remove = page.findChild<QPushButton*>("deleteAdditionalExpense");
+        QVERIFY(from && to && table && total && count && postage && remove);
+        from->setDate(QDate(2026,1,1));
+        to->setDate(QDate(2026,2,28));
+        auto* model = table->model();
+        QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 5, 10000);
+        QCOMPARE(model->index(1,2).data().toString(), QStringLiteral("February"));
+        QCOMPARE(model->index(2,2).data().toString(), QStringLiteral("Rent"));
+        auto* footer = page.findChild<QLabel*>("filteredExpenseTotal");
+        QVERIFY(footer);
+        const auto heading = model->index(0,0);
+        QVERIFY(heading.data().toString().contains(QStringLiteral("Лютий 2026")));
+        QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, table->visualRect(heading).center());
+        QCOMPARE(model->rowCount(), 3);
+        QCOMPARE(count->text(), "3");
+        QCOMPARE(total->text(), QStringLiteral("76.05 грн"));
+        QCOMPARE(postage->text(), QStringLiteral("10.05 грн"));
+        QCOMPARE(footer->text(), QStringLiteral("Разом за період: 76.05 грн"));
+        QVERIFY(!remove->isEnabled());
+        QCOMPARE(model->index(2,0).data(Qt::UserRole).toLongLong(), januaryId);
+        table->setFocus();
+        QTest::keyClick(table, Qt::Key_Space);
+        QCOMPARE(model->rowCount(), 5);
+        const auto capture = qEnvironmentVariable("CS_EXPENSE_GROUPS_CAPTURE");
+        if (!capture.isEmpty()) QVERIFY(page.grab().save(capture));
+    }
+
     void totalExpenseFiltersKeepAmountsAndIdentityTogether() {
         const QDate day = QDate::currentDate();
         QSqlQuery q(db);
@@ -1205,6 +1250,9 @@ private slots:
         auto* tabs = page.findChild<QTabWidget*>();
         QVERIFY(tabs);
         tabs->setCurrentIndex(6);
+        auto* grouping = page.findChild<QComboBox*>("totalExpenseGrouping");
+        QVERIFY(grouping);
+        grouping->setCurrentIndex(1);
         auto* table = page.findChild<QTableView*>("additionalExpensesTable");
         auto* category = page.findChild<QComboBox*>("totalExpenseCategory");
         auto* source = page.findChild<QComboBox*>("totalExpenseSource");
@@ -1244,6 +1292,9 @@ private slots:
         auto* tabs = page.findChild<QTabWidget*>(); QVERIFY(tabs);
         tabs->setCurrentIndex(6);
         page.show();
+        auto* grouping = page.findChild<QComboBox*>("totalExpenseGrouping");
+        QVERIFY(grouping);
+        grouping->setCurrentIndex(1);
         auto* table = page.findChild<QTableView*>("additionalExpensesTable"); QVERIFY(table);
         auto* date = page.findChild<QDateEdit*>("additionalExpenseDate"); QVERIFY(date);
         auto* category = page.findChild<QComboBox*>("additionalExpenseCategory"); QVERIFY(category);

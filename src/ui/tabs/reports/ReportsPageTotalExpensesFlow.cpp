@@ -1,6 +1,7 @@
 #include "ui/tabs/reports/ReportsPageModulePrelude.h"
 #include "core/services/AdditionalExpenseService.h"
 #include <QButtonGroup>
+#include <QShortcut>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QScrollArea>
@@ -28,7 +29,9 @@ QPair<QDate, QDate> expensePeriodRange(QDate start, QDate end, int months, int d
 void ReportsPage::buildExpensePeriodControls(QWidget* page, QVBoxLayout* layout)
 {
     auto* row = new QHBoxLayout;
-    row->addWidget(new QLabel(QStringLiteral("Швидкий період"), page));
+    auto* caption = new QLabel(QStringLiteral("Швидкий період"), page);
+    caption->setObjectName("expensePeriodCaption");
+    row->addWidget(caption);
     auto* modes = new QButtonGroup(page);
     auto addMode = [&](const QString& label, int months) {
         auto* button = new QPushButton(label, page);
@@ -86,6 +89,12 @@ void ReportsPage::buildExpensePeriodControls(QWidget* page, QVBoxLayout* layout)
 
 void ReportsPage::buildAdditionalExpensesForm(QWidget* page)
 {
+    page->setObjectName("totalExpensesPage");
+    page->setAttribute(Qt::WA_StyledBackground);
+    page->setStyleSheet(QStringLiteral("#totalExpensesPage {background:#f4f7fa;} "
+                                      "#totalExpensesPage QLabel#expensePeriodCaption, "
+                                      "#totalExpensesPage QLabel#filteredExpenseTotal {color:#172b40; padding:3px 8px;} "
+                                      "#totalExpensesPage QLabel#filteredExpenseTotal {background:#dbe6ef;}"));
     auto* form = new QDialog(this);
     form->setWindowTitle(QString::fromUtf8("Додати витрату"));
     form->setObjectName("additionalExpensesForm");
@@ -179,7 +188,34 @@ void ReportsPage::buildAdditionalExpensesForm(QWidget* page)
     filters->addWidget(m_totalExpenseSearch, 2);
     filters->addWidget(m_totalExpenseCategory, 1);
     filters->addWidget(m_totalExpenseSource, 1);
+    m_expenseGrouping = new QComboBox(page);
+    m_expenseGrouping->setObjectName("totalExpenseGrouping");
+    m_expenseGrouping->setAccessibleName(QStringLiteral("Групування"));
+    m_expenseGrouping->addItems({QStringLiteral("За місяцем"), QStringLiteral("Без групування")});
+    filters->addWidget(m_expenseGrouping, 1);
+    connect(m_expenseGrouping, &QComboBox::currentIndexChanged, this, &ReportsPage::filterTotalExpenses);
+    auto toggleMonth = [this](const QModelIndex& index) {
+        const QString key = index.siblingAtColumn(0).data(Qt::UserRole).toString();
+        if (!key.startsWith(QStringLiteral("month/"))) return;
+        if (!m_collapsedExpenseMonths.remove(key)) m_collapsedExpenseMonths.insert(key);
+        const int row = index.row();
+        filterTotalExpenses();
+        m_totalExpensesTable->setCurrentIndex(m_totalExpensesModel->index(row, 0));
+    };
+    connect(m_totalExpensesTable, &QTableView::clicked, this, toggleMonth);
+    auto* space = new QShortcut(QKeySequence(Qt::Key_Space), m_totalExpensesTable);
+    space->setContext(Qt::WidgetShortcut);
+    connect(space, &QShortcut::activated, this, [this, toggleMonth] {
+        toggleMonth(m_totalExpensesTable->currentIndex());
+    });
     qobject_cast<QVBoxLayout*>(page->layout())->insertLayout(1, filters);
+    m_filteredExpenseTotal = new QLabel(page);
+    m_filteredExpenseTotal->setObjectName("filteredExpenseTotal");
+    m_filteredExpenseTotal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    auto footerFont = m_filteredExpenseTotal->font();
+    footerFont.setBold(true);
+    m_filteredExpenseTotal->setFont(footerFont);
+    page->layout()->addWidget(m_filteredExpenseTotal);
     buildExpensePeriodControls(page, qobject_cast<QVBoxLayout*>(page->layout()));
     connect(m_totalExpenseSearch, &QLineEdit::textChanged, this, &ReportsPage::filterTotalExpenses);
     connect(m_totalExpenseCategory, &QComboBox::currentIndexChanged, this, &ReportsPage::filterTotalExpenses);
@@ -226,8 +262,10 @@ void ReportsPage::filterTotalExpenses()
             visible.periodicCents += row.amountCents;
         }
     }
-    ReportsTableSupport::applyTotalExpensesSnapshot(m_totalExpensesTable, m_totalExpensesModel, visible);
+    ReportsTableSupport::applyTotalExpensesSnapshot(m_totalExpensesTable, m_totalExpensesModel, visible,
+        m_expenseGrouping->currentIndex() == 0 ? &m_collapsedExpenseMonths : nullptr);
     if (!all.error.isEmpty()) {
+        m_filteredExpenseTotal->clear();
         m_totalExpenseMetrics.clear();
         setTabStats(ReportTab::TotalExpenses, all.stats);
         return;
@@ -237,6 +275,7 @@ void ReportsPage::filterTotalExpenses()
     const auto hryvnias = [](qint64 cents) { return FormatUtils::money(cents / 100.0, 2) + QStringLiteral(" грн"); };
     m_totalExpenseMetrics = {hryvnias(visible.periodicCents + visible.additionalCents),
                              QString::number(visible.rows.size()), hryvnias(visible.novaPoshtaCents)};
+    m_filteredExpenseTotal->setText(QStringLiteral("Разом за період: ") + m_totalExpenseMetrics.first());
     setTabStats(ReportTab::TotalExpenses, {QStringLiteral("Періодичні: ") + hryvnias(visible.periodicCents),
                                           QStringLiteral("Додаткові: ") + hryvnias(visible.additionalCents),
                                           QStringLiteral("Разом: ") + m_totalExpenseMetrics.first()});

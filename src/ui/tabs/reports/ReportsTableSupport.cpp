@@ -2,6 +2,7 @@
 
 #include <QAbstractItemView>
 #include <QBrush>
+#include <QLocale>
 #include <QFont>
 #include <QHeaderView>
 #include <QTableView>
@@ -435,7 +436,8 @@ void applyPayrollSnapshot(QTableView* table, ReportsSnapshotTableModel* model, c
     finishSnapshotApply(table, model);
 }
 
-void applyTotalExpensesSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const TotalExpensesSnapshot& snapshot)
+void applyTotalExpensesSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const TotalExpensesSnapshot& snapshot,
+                                const QSet<QString>* collapsedMonths)
 {
     if (!table || !model) return;
     table->setUpdatesEnabled(false);
@@ -443,7 +445,7 @@ void applyTotalExpensesSnapshot(QTableView* table, ReportsSnapshotTableModel* mo
 
     QVector<ReportsSnapshotTableModel::Row> rows;
     rows.reserve(snapshot.rows.size());
-    for (const auto& row : snapshot.rows) {
+    auto appendExpense = [&](const TotalExpensesSnapshotRow& row) {
         const bool bold = row.isTotal;
         ReportsSnapshotTableModel::Row out;
         out.cells = {
@@ -454,6 +456,36 @@ void applyTotalExpensesSnapshot(QTableView* table, ReportsSnapshotTableModel* mo
             makeCell(row.total, int(Qt::AlignRight | Qt::AlignVCenter), QVariant(), QString(), bold)
         };
         rows.push_back(out);
+    };
+    if (collapsedMonths) {
+        QMap<QDate, QList<const TotalExpensesSnapshotRow*>> months;
+        for (const auto& row : snapshot.rows) {
+            const QDate date = row.sortDate;
+            months[QDate(date.year(), date.month(), 1)].append(&row);
+        }
+        const QLocale locale(QLocale::Ukrainian);
+        auto month = months.constEnd();
+        while (month != months.constBegin()) {
+            --month;
+            const QDate date = month.key();
+            const QString key = QStringLiteral("month/") + date.toString(Qt::ISODate);
+            const bool collapsed = collapsedMonths->contains(key);
+            QString name = date.isValid()
+                ? locale.standaloneMonthName(date.month()) + " " + QString::number(date.year())
+                : QStringLiteral("Дата невідома");
+            name[0] = name.at(0).toUpper();
+            ReportsSnapshotTableModel::Row heading;
+            heading.spanAllColumns = true;
+            heading.background = QColor(QStringLiteral("#e0e9f1"));
+            heading.cells = {makeCell(QStringLiteral("%1 %2 · Записів: %3")
+                .arg(collapsed ? QStringLiteral("▸") : QStringLiteral("▾"), name)
+                .arg(month.value().size()), int(Qt::AlignLeft | Qt::AlignVCenter), key,
+                QStringLiteral("Згорнути або розгорнути місяць"), true)};
+            rows.push_back(heading);
+            if (!collapsed) for (const auto* row : month.value()) appendExpense(*row);
+        }
+    } else {
+        for (const auto& row : snapshot.rows) appendExpense(row);
     }
     model->setSnapshot(totalExpensesHeaders(), rows);
     if (rows.isEmpty()) model->setMessageRow(snapshot.error.isEmpty()

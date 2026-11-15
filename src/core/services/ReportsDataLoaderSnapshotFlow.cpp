@@ -898,7 +898,7 @@ TotalExpensesSnapshot buildTotalExpensesSnapshot(const QString& dbPath, const QS
                     const qint64 cents = qRound64(q.value(i + 2).toDouble() * 100);
                     if (cents == 0) continue;
                     TotalExpensesSnapshotRow row;
-                    row.sortDate = q.value(1).toString();
+                    row.sortDate = DateFormats::parseDate(q.value(1).toString());
                     row.period = QString::fromUtf8("%1 — %2").arg(
                         ReportsDateUtils::dmy(q.value(0).toString()), ReportsDateUtils::dmy(q.value(1).toString()));
                     row.category = labels[i];
@@ -930,8 +930,8 @@ TotalExpensesSnapshot buildTotalExpensesSnapshot(const QString& dbPath, const QS
                 else while (q.next()) {
                     TotalExpensesSnapshotRow row;
                     row.expenseId = q.value(0).toLongLong();
-                    row.sortDate = q.value(1).toString();
-                    row.period = ReportsDateUtils::dmy(row.sortDate);
+                    row.sortDate = DateFormats::parseDate(q.value(1).toString());
+                    row.period = ReportsDateUtils::dmy(q.value(1).toString());
                     row.category = q.value(2).toString();
                     row.description = q.value(3).toString();
                     row.source = QString::fromUtf8("Додаткова витрата");

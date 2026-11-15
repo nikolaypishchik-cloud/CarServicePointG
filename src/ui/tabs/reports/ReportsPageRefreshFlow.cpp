@@ -667,6 +667,7 @@ void ReportsPage::applyTotalExpensesSnapshot(const TotalExpensesSnapshot& snapsh
 void ReportsPage::refreshTotalExpenses()
 {
     m_totalExpensesSnapshot.reset();
+    m_filteredExpenseTotal->clear();
     m_totalExpenseMetrics.clear();
     updateExpenseCategories();
     const QString df = m_from->date().toString("yyyy-MM-dd");

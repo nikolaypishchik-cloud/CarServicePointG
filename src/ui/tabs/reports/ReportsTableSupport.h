@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QSet>
+
 #include "core/services/ReportsDataLoader.h"
 
 #include <QAbstractTableModel>
@@ -70,6 +72,7 @@ void applyOrdersSnapshot(QTableView* table, ReportsSnapshotTableModel* model, co
 void applyPartsSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const PartsSnapshot& snapshot);
 void applyOutsourceSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const OutsourceSnapshot& snapshot);
 void applyPayrollSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const PayrollSnapshot& snapshot);
-void applyTotalExpensesSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const TotalExpensesSnapshot& snapshot);
+void applyTotalExpensesSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const TotalExpensesSnapshot& snapshot,
+                                const QSet<QString>* collapsedMonths);
 
 } // namespace ReportsTableSupport

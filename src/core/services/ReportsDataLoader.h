@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <QDate>
 #include <QList>
 #include <QMap>
 #include <QString>
@@ -140,7 +141,7 @@ struct TotalExpensesSnapshotRow {
     qint64 amountCents = 0;
     bool isTotal = false;
     qint64 expenseId = 0;
-    QString sortDate;
+    QDate sortDate;
     QString period;
     QString category;
     QString description;

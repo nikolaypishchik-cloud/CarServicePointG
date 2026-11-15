@@ -3,6 +3,7 @@
 #include <QWidget>
 #include <functional>
 #include <QHash>
+#include <QSet>
 #include <QtGlobal>
 
 #include <atomic>
@@ -85,6 +86,9 @@ private:
     QLineEdit* m_totalExpenseSearch = nullptr;
     QComboBox* m_totalExpenseCategory = nullptr;
     QComboBox* m_totalExpenseSource = nullptr;
+    QLabel* m_filteredExpenseTotal = nullptr;
+    QComboBox* m_expenseGrouping = nullptr;
+    QSet<QString> m_collapsedExpenseMonths;
     void filterTotalExpenses();
     QStringList m_partsTileTitles,m_partsTileBodies;
     void resizeEvent(QResizeEvent* event) override;
