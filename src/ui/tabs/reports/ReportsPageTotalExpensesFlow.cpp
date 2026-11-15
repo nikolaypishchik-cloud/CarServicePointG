@@ -87,6 +87,27 @@ void ReportsPage::buildAdditionalExpensesForm(QWidget* page)
     buttons->addWidget(m_deleteExpenseButton);
     controls->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     qobject_cast<QVBoxLayout*>(page->layout())->insertWidget(0, controls);
+    auto* filters = new QHBoxLayout();
+    m_totalExpenseSearch = new QLineEdit(page);
+    m_totalExpenseSearch->setObjectName("totalExpenseSearch");
+    m_totalExpenseSearch->setPlaceholderText(QStringLiteral("Пошук в описі"));
+    m_totalExpenseSearch->setClearButtonEnabled(true);
+    m_totalExpenseCategory = new QComboBox(page);
+    m_totalExpenseCategory->setObjectName("totalExpenseCategory");
+    m_totalExpenseCategory->setAccessibleName(QStringLiteral("Категорія"));
+    m_totalExpenseSource = new QComboBox(page);
+    m_totalExpenseSource->setObjectName("totalExpenseSource");
+    m_totalExpenseSource->setAccessibleName(QStringLiteral("Джерело"));
+    m_totalExpenseSource->addItem(QStringLiteral("Усі джерела"));
+    m_totalExpenseSource->addItem(QStringLiteral("Витрати за період"));
+    m_totalExpenseSource->addItem(QStringLiteral("Додаткова витрата"));
+    filters->addWidget(m_totalExpenseSearch, 2);
+    filters->addWidget(m_totalExpenseCategory, 1);
+    filters->addWidget(m_totalExpenseSource, 1);
+    qobject_cast<QVBoxLayout*>(page->layout())->insertLayout(1, filters);
+    connect(m_totalExpenseSearch, &QLineEdit::textChanged, this, &ReportsPage::filterTotalExpenses);
+    connect(m_totalExpenseCategory, &QComboBox::currentIndexChanged, this, &ReportsPage::filterTotalExpenses);
+    connect(m_totalExpenseSource, &QComboBox::currentIndexChanged, this, &ReportsPage::filterTotalExpenses);
     m_totalExpensesTable->setObjectName("additionalExpensesTable");
     connect(m_addExpenseButton, &QPushButton::clicked, form, [this, form]() {
         updateExpenseCategories();
@@ -106,6 +127,43 @@ void ReportsPage::buildAdditionalExpensesForm(QWidget* page)
             this, updateDelete);
     connect(m_totalExpensesModel, &QAbstractItemModel::modelReset, this, updateDelete);
     m_deleteExpenseButton->setEnabled(false);
+}
+
+void ReportsPage::filterTotalExpenses()
+{
+    if (!m_totalExpensesSnapshot) return;
+    const auto& all = *m_totalExpensesSnapshot;
+    TotalExpensesSnapshot visible;
+    visible.error = all.error;
+    const QString term = m_totalExpenseSearch->text().trimmed();
+    const QString category = m_totalExpenseCategory->currentData().toString();
+    for (const auto& row : all.rows) {
+        if (!row.description.contains(term, Qt::CaseInsensitive)
+            || (!category.isEmpty() && row.category != category)
+            || (m_totalExpenseSource->currentIndex() > 0 && row.source != m_totalExpenseSource->currentText())) continue;
+        visible.rows.append(row);
+        if (row.expenseId > 0) {
+            visible.additionalCents += row.amountCents;
+            if (row.category.simplified().compare(QStringLiteral("Нова пошта"), Qt::CaseInsensitive) == 0)
+                visible.novaPoshtaCents += row.amountCents;
+        } else {
+            visible.periodicCents += row.amountCents;
+        }
+    }
+    ReportsTableSupport::applyTotalExpensesSnapshot(m_totalExpensesTable, m_totalExpensesModel, visible);
+    if (!all.error.isEmpty()) {
+        m_totalExpenseMetrics.clear();
+        setTabStats(ReportTab::TotalExpenses, all.stats);
+        return;
+    }
+    if (!all.rows.isEmpty() && visible.rows.isEmpty())
+        m_totalExpensesModel->setMessageRow(QStringLiteral("За вибраними фільтрами витрат немає"));
+    const auto hryvnias = [](qint64 cents) { return FormatUtils::money(cents / 100.0, 2) + QStringLiteral(" грн"); };
+    m_totalExpenseMetrics = {hryvnias(visible.periodicCents + visible.additionalCents),
+                             QString::number(visible.rows.size()), hryvnias(visible.novaPoshtaCents)};
+    setTabStats(ReportTab::TotalExpenses, {QStringLiteral("Періодичні: ") + hryvnias(visible.periodicCents),
+                                          QStringLiteral("Додаткові: ") + hryvnias(visible.additionalCents),
+                                          QStringLiteral("Разом: ") + m_totalExpenseMetrics.first()});
 }
 
 void ReportsPage::updateExpenseCategories()

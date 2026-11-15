@@ -647,17 +647,27 @@ void ReportsPage::applyExpensesSnapshot(const ExpensesSnapshot& snapshot, bool r
 
 void ReportsPage::applyTotalExpensesSnapshot(const TotalExpensesSnapshot& snapshot)
 {
-    m_totalExpenseMetrics = snapshot.error.isEmpty() ? QStringList{
-        FormatUtils::money((snapshot.periodicCents + snapshot.additionalCents) / 100.0, 2) + QString::fromUtf8(" грн"),
-        QString::number(snapshot.rows.size()),
-        FormatUtils::money(snapshot.novaPoshtaCents / 100.0, 2) + QString::fromUtf8(" грн")
-    } : QStringList{};
-    ReportsTableSupport::applyTotalExpensesSnapshot(m_totalExpensesTable, m_totalExpensesModel, snapshot);
-    setTabStats(ReportTab::TotalExpenses, snapshot.stats);
+    m_totalExpensesSnapshot = snapshot;
+    if (snapshot.error.isEmpty()) {
+        const QSignalBlocker blocker(m_totalExpenseCategory);
+        const QString selected = m_totalExpenseCategory->currentData().toString();
+        QSet<QString> categories;
+        if (!selected.isEmpty()) categories.insert(selected);
+        for (const auto& row : snapshot.rows) categories.insert(row.category);
+        QStringList choices = categories.values();
+        choices.sort(Qt::CaseInsensitive);
+        m_totalExpenseCategory->clear();
+        m_totalExpenseCategory->addItem(QStringLiteral("Усі категорії"));
+        for (const auto& category : choices) m_totalExpenseCategory->addItem(category, category);
+        if (!selected.isEmpty()) m_totalExpenseCategory->setCurrentIndex(m_totalExpenseCategory->findData(selected));
+    }
+    filterTotalExpenses();
 }
 
 void ReportsPage::refreshTotalExpenses()
 {
+    m_totalExpensesSnapshot.reset();
+    m_totalExpenseMetrics.clear();
     updateExpenseCategories();
     const QString df = m_from->date().toString("yyyy-MM-dd");
     const QString dt = m_to->date().toString("yyyy-MM-dd");

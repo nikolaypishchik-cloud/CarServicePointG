@@ -137,6 +137,7 @@ struct ExpensesSnapshot : ExpensePeriodValues {
 };
 
 struct TotalExpensesSnapshotRow {
+    qint64 amountCents = 0;
     bool isTotal = false;
     qint64 expenseId = 0;
     QString sortDate;

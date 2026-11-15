@@ -80,6 +80,11 @@ private:
     QPushButton* m_repeatExpenses = nullptr;
     QStringList m_invoiceMetrics;
     QStringList m_totalExpenseMetrics;
+    std::optional<TotalExpensesSnapshot> m_totalExpensesSnapshot;
+    QLineEdit* m_totalExpenseSearch = nullptr;
+    QComboBox* m_totalExpenseCategory = nullptr;
+    QComboBox* m_totalExpenseSource = nullptr;
+    void filterTotalExpenses();
     QStringList m_partsTileTitles,m_partsTileBodies;
     void resizeEvent(QResizeEvent* event) override;
     void closeEvent(QCloseEvent* event) override;

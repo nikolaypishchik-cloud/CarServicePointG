@@ -1130,6 +1130,56 @@ private slots:
         QVERIFY(q.exec("SELECT COUNT(*),SUM(amount_cents) FROM additional_expenses"));
         QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 1); QCOMPARE(q.value(1).toInt(), 500);
     }
+    void totalExpenseFiltersKeepAmountsAndIdentityTogether() {
+        const QDate day = QDate::currentDate();
+        QSqlQuery q(db);
+        q.prepare("INSERT INTO expenses(period_from,period_to,rent,rent_note) VALUES(?,?,60.21,'Parcel rent')");
+        q.addBindValue(day.toString(Qt::ISODate));
+        q.addBindValue(day.toString(Qt::ISODate));
+        QVERIFY(q.exec());
+        const QString post = QStringLiteral("Нова пошта");
+        qint64 chosen = 0;
+        QVERIFY(AdditionalExpenseService::add(db, day, post, "Parcel A", 12.34, &chosen));
+        QVERIFY(AdditionalExpenseService::add(db, day, post, "Letter B", 0.01));
+        QVERIFY(AdditionalExpenseService::add(db, day, "Other", "Parcel C", 7.15));
+        ReportsPage page;
+        page.show();
+        auto* tabs = page.findChild<QTabWidget*>();
+        QVERIFY(tabs);
+        tabs->setCurrentIndex(6);
+        auto* table = page.findChild<QTableView*>("additionalExpensesTable");
+        auto* category = page.findChild<QComboBox*>("totalExpenseCategory");
+        auto* source = page.findChild<QComboBox*>("totalExpenseSource");
+        auto* search = page.findChild<QLineEdit*>("totalExpenseSearch");
+        auto* total = page.findChild<QLabel*>("reportMetricValue0");
+        auto* count = page.findChild<QLabel*>("reportMetricValue1");
+        auto* postage = page.findChild<QLabel*>("reportMetricValue2");
+        QVERIFY(table && category && source && search && total && count && postage);
+        QTRY_COMPARE_WITH_TIMEOUT(table->model()->rowCount(), 4, 10000);
+        QCOMPARE(total->text(), QStringLiteral("79.71 грн"));
+        QCOMPARE(postage->text(), QStringLiteral("12.35 грн"));
+        search->setText("PARCEL");
+        QCOMPARE(count->text(), "3");
+        QCOMPARE(total->text(), QStringLiteral("79.7 грн"));
+        source->setCurrentText(QStringLiteral("Додаткова витрата"));
+        QCOMPARE(total->text(), QStringLiteral("19.49 грн"));
+        category->setCurrentText(post);
+        QCOMPARE(count->text(), "1");
+        QCOMPARE(postage->text(), QStringLiteral("12.34 грн"));
+        QCOMPARE(table->model()->index(0,0).data(Qt::UserRole).toLongLong(), chosen);
+        source->setCurrentText(QStringLiteral("Витрати за період"));
+        QCOMPARE(count->text(), "0");
+        QCOMPARE(total->text(), QStringLiteral("0 грн"));
+        QCOMPARE(postage->text(), QStringLiteral("0 грн"));
+        category->setCurrentIndex(0);
+        QCOMPARE(total->text(), QStringLiteral("60.21 грн"));
+        QVERIFY(table->model()->index(0,0).data(Qt::UserRole).toLongLong() == 0);
+        source->setCurrentIndex(0);
+        search->clear();
+        QCOMPARE(count->text(), "4");
+        QCOMPARE(total->text(), QStringLiteral("79.71 грн"));
+    }
+
     void formAddFilterDeleteAndLayout() {
         ReportsPage page;
         page.resize(1400, 850);

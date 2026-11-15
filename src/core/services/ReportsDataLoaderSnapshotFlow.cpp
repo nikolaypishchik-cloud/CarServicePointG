@@ -904,6 +904,7 @@ TotalExpensesSnapshot buildTotalExpensesSnapshot(const QString& dbPath, const QS
                     row.category = labels[i];
                     row.description = i == 0 ? QString() : q.value(i + 8).toString();
                     row.source = QString::fromUtf8("Витрати за період");
+                    row.amountCents = cents;
                     row.total = FormatUtils::money(cents / 100.0, 2);
                     snapshot.periodicCents += cents;
                     snapshot.rows.append(row);
@@ -935,6 +936,7 @@ TotalExpensesSnapshot buildTotalExpensesSnapshot(const QString& dbPath, const QS
                     row.description = q.value(3).toString();
                     row.source = QString::fromUtf8("Додаткова витрата");
                     const qint64 cents = q.value(4).toLongLong();
+                    row.amountCents = cents;
                     row.total = FormatUtils::money(cents / 100.0, 2);
                     snapshot.additionalCents += cents;
                     if (row.category.simplified().compare(QString::fromUtf8("Нова пошта"), Qt::CaseInsensitive) == 0)
