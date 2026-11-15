@@ -443,6 +443,19 @@ private slots:
         PartsQueryService::invalidateCache();
         auto good=read(db.databaseName());QVERIFY2(good.error.isEmpty(),qPrintable(good.error));QCOMPARE(good.rows.size(),2);
         QCOMPARE(good.rows.last().purchase,QString("30"));
+        QVERIFY(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,name,store,ordered_at,qty,purchase_amount) VALUES "
+                       "(22,11,'parts-report-order','group-other','Other part','Other shop','2026-01-02',3,41),"
+                       "(23,11,'parts-report-order','group-same','Second part','Shop','2026-01-03',0.5,10.25)"));
+        const auto grouped = read(db.databaseName());
+        QVERIFY2(grouped.error.isEmpty(), qPrintable(grouped.error));
+        QCOMPARE(grouped.rows.size(), 5);
+        QVERIFY(grouped.rows[2].isStoreHeader);
+        QCOMPARE(grouped.rows[2].store, QStringLiteral("Shop"));
+        QCOMPARE(grouped.rows[2].qty, QStringLiteral("2"));
+        QCOMPARE(grouped.rows[2].purchase, FormatUtils::formatNumberSpaces(40.25, 2));
+        QCOMPARE(grouped.rows[3].partName, QStringLiteral("Second part"));
+        QCOMPARE(grouped.rows[4].partName, QStringLiteral("Synthetic part"));
+        QVERIFY(q.exec("DELETE FROM work_order_parts WHERE id IN (22,23)"));
         QVERIFY(q.exec("UPDATE work_order_parts SET store='База' WHERE id=21"));
         QVERIFY(q.exec("INSERT INTO workshop_inventory_purchases(purchased_on,material_name,material_key,quantity,unit_cost) "
                        "VALUES('2026-01-01','Synthetic part','synthetic part',1,30)"));

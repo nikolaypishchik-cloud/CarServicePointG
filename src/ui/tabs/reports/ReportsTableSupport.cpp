@@ -343,7 +343,8 @@ void applyPartsSnapshot(QTableView* table, ReportsSnapshotTableModel* model, con
         ReportsSnapshotTableModel::Row out;
         if (row.isStoreHeader) {
             out.cells.resize(partsHeaders().size());
-            out.cells[0] = makeCell(QString::fromUtf8("Магазин: %1").arg(row.store),
+            out.cells[0] = makeCell(QStringLiteral("Магазин: %1 · Позицій: %2 · Закупівля: %3 грн")
+                                        .arg(row.store, row.qty, row.purchase),
                                     int(Qt::AlignLeft | Qt::AlignVCenter), QVariant(), QString(), true);
             out.spanAllColumns = true;
             rows.push_back(out);

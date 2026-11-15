@@ -284,6 +284,11 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 bool isOil = false;
             };
 
+            struct StoreTotal {
+                int positions = 0;
+                double purchase = 0.0;
+            };
+            QMap<QString, StoreTotal> storeTotals;
             QList<PartReportRow> rows;
             QMap<QString, QString> stockUnits;
             for (const auto& material : WorkshopInventoryService::loadMaterials(db,&snapshot.error,false)) stockUnits.insert(material.key, material.unit);
@@ -339,19 +344,21 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                         : qMax(0.0, row.client - row.purchase);
                     row.isOil = PartMarkupPolicyService::isInventoryStore(rawStore) && !q.value(22).toBool()
                         && stockUnits.contains(WorkshopInventoryService::normalizedMaterialKey(row.partName));
+                    if (row.isOil) row.store = QStringLiteral("Склад СТО");
+                    auto& total = storeTotals[row.store];
+                    ++total.positions;
+                    total.purchase += row.purchase;
                     rows.append(row);
                 }
             }
 
             if(q.lastError().isValid()){snapshot.error=q.lastError().text();return;}
             std::sort(rows.begin(), rows.end(), [](const PartReportRow& a, const PartReportRow& b) {
-                if (a.isOil != b.isOil) return !a.isOil;
                 if (a.store != b.store) {
-                    if (a.date != b.date) return a.date > b.date;
-                    if (a.orderSortVisible != b.orderSortVisible) return a.orderSortVisible > b.orderSortVisible;
-                if (a.orderInternalNumber != b.orderInternalNumber) return a.orderInternalNumber > b.orderInternalNumber;
-                    const int sc = QString::compare(a.store, b.store, Qt::CaseInsensitive);
-                    if (sc != 0) return sc < 0;
+                    if (a.store == QStringLiteral("Склад СТО")) return false;
+                    if (b.store == QStringLiteral("Склад СТО")) return true;
+                    const int order = QString::compare(a.store, b.store, Qt::CaseInsensitive);
+                    return order == 0 ? a.store < b.store : order < 0;
                 }
                 if (a.date != b.date) return a.date > b.date;
                 if (a.orderSortVisible != b.orderSortVisible) return a.orderSortVisible > b.orderSortVisible;
@@ -371,12 +378,15 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
             QMap<QString, double> oilClientByGrade;
 
             for (const auto& row : rows) {
-                const QString article = row.isOil ? QString::fromUtf8("Склад СТО") : row.store;
+                const QString& article = row.store;
                 if (article != lastStore) {
                     lastStore = article;
                     PartsSnapshotRow header;
                     header.isStoreHeader = true;
                     header.store = article;
+                    const auto total = storeTotals.value(article);
+                    header.qty = QString::number(total.positions);
+                    header.purchase = FormatUtils::formatNumberSpaces(total.purchase, 2);
                     snapshot.rows.append(header);
                 }
 
