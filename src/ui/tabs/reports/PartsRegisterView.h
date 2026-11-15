@@ -3,6 +3,7 @@
 #include "ui/tabs/reports/ReportsTableSupport.h"
 #include "core/services/PartsRegisterPdf.h"
 #include <optional>
+#include <algorithm>
 #include "core/util/FormatUtils.h"
 #include <QListWidget>
 #include <QSplitter>
@@ -49,6 +50,11 @@ public:
         orderLink = new QPushButton(details);
         orderLink->setObjectName("partsRegisterOpenOrder");
         detailsLayout->addWidget(orderLink, 0, Qt::AlignLeft);
+        orderDates = new QLabel(details);
+        orderDates->setObjectName("partsRegisterOrderDates");
+        orderDates->setTextFormat(Qt::PlainText);
+        orderDates->setWordWrap(true);
+        detailsLayout->addWidget(orderDates);
         detailsLayout->addWidget(table, 1);
         split->addWidget(orders);
         split->addWidget(details);
@@ -254,6 +260,8 @@ private:
             return;
         }
         orderLink->hide();
+        orderDates->hide();
+        for (int column = 0; column < 4; ++column) table->showColumn(column);
         message->setText(state.isEmpty() ? tr("За вибраними умовами позицій немає") : state);
         message->setVisible(visible == 0);
     }
@@ -271,7 +279,22 @@ private:
         if (!selectedRows.isEmpty()) {
             const int r = selectedRows.first();
             orderLink->setText(tr("Наряд №%1 · %2").arg(model->cellText(r, 2), model->cellText(r, 3)));
+            QStringList dates;
+            for (int column : {0, 1, 2, 3}) {
+                const QString first = model->cellText(r, column);
+                const bool shared = std::all_of(selectedRows.cbegin(), selectedRows.cend(), [&](int row) {
+                    return model->cellText(row, column) == first;
+                });
+                table->setColumnHidden(column, shared);
+                if (column < 2)
+                    dates.append(tr("%1: %2").arg(model->headers().at(column), shared ? first : tr("див. позиції")));
+            }
+            orderDates->setText(dates.join(tr("   ·   ")));
+        } else {
+            orderLink->setText({});
+            orderDates->clear();
         }
+        orderDates->setVisible(!selectedRows.isEmpty());
         orderLink->setVisible(!selectedRows.isEmpty());
         message->setText(!state.isEmpty() ? state : (orders->count() ? tr("Виберіть наряд") : tr("За вибраними умовами нарядів немає")));
         message->setVisible(selectedRows.isEmpty());
@@ -279,6 +302,7 @@ private:
 
     QListWidget* orders;
     QPushButton* orderLink;
+    QLabel* orderDates;
     QHash<QString, QList<int>> orderRows;
     QList<int> selectedRows;
     bool byOrder = false;

@@ -246,9 +246,18 @@ private slots:
         auto* orders = view.findChild<QListWidget*>("partsRegisterOrders");
         QVERIFY(orders);
         QCOMPARE(orders->count(), 2);
+        auto* dates = view.findChild<QLabel*>("partsRegisterOrderDates");
+        auto* table = view.findChild<QTableView*>("partsRegisterTable");
+        QVERIFY(dates && table);
+        QVERIFY(dates->text().contains(QStringLiteral("Встановлено: див. позиції")));
+        QVERIFY(!table->isColumnHidden(1));
+        QCOMPARE(table->model()->index(0,1).data().toString(), QString("2026-01-01"));
+        QCOMPARE(table->model()->index(1,1).data().toString(), QString("2026-01-02"));
         QVERIFY(orders->item(0)->text().contains(QStringLiteral("Різні стани оплати")));
         QCOMPARE(view.exportSelection().rows.size(), 2);
         orders->setCurrentRow(1);
+        QVERIFY(dates->text().contains("2026-01-02"));
+        QVERIFY(table->isColumnHidden(1));
         const auto picked = view.exportSelection();
         QCOMPARE(picked.rows.size(), 1);
         QCOMPARE(picked.rows.first()[6], QString("QA2"));
@@ -260,9 +269,12 @@ private slots:
         if (!capture.isEmpty()) QVERIFY(QFile::copy(pdf.path,capture));
         view.setSearch("Red");
         QVERIFY(!view.hasExportSelection());
+        QVERIFY(dates->text().isEmpty() && dates->isHidden());
         orders->setCurrentRow(0);
         QCOMPARE(view.exportSelection().rows.size(),2);
         view.setActive(true,false);
+        QVERIFY(dates->isHidden());
+        for (int column = 0; column < 4; ++column) QVERIFY(!table->isColumnHidden(column));
         QCOMPARE(view.exportSelection().rows.size(),2);
     }
 
