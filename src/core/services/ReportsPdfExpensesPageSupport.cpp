@@ -69,10 +69,10 @@ void renderExpensesPage(
     };
 
     drawRow(QString::fromUtf8("Період"), ReportsDateUtils::displayDate(fromIso) + QString::fromUtf8(" — ") + ReportsDateUtils::displayDate(toIso), true);
-    drawRow(QString::fromUtf8("Лічильник минулий"), money2(data.elecPrev));
-    drawRow(QString::fromUtf8("Лічильник поточний"), money2(data.elecCurr));
-    drawRow(QString::fromUtf8("Споживання кВт"), money2(data.elecKwh));
-    drawRow(QString::fromUtf8("Тариф"), money2(data.elecTariff));
+    drawRow(QString::fromUtf8("Лічильник минулий"), FormatUtils::decimalText(data.elecPrev));
+    drawRow(QString::fromUtf8("Лічильник поточний"), FormatUtils::decimalText(data.elecCurr));
+    drawRow(QString::fromUtf8("Споживання (кВт·год)"), FormatUtils::decimalText(data.elecKwh));
+    drawRow(QString::fromUtf8("Тариф (грн/кВт·год)"), FormatUtils::decimalText(data.elecTariff));
     drawRow(QString::fromUtf8("Всього"), money2(data.elecCost) + QString::fromUtf8(" грн"), true);
 
     y += sectionGap;

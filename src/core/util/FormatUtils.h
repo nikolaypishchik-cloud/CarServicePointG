@@ -8,6 +8,7 @@ namespace FormatUtils {
     QString moneyCents(qint64 cents);
     QString formatNumberSpaces(double value, int maxDecimals = 2);
     QString money(double value, int maxDecimals = 2);
+    QString decimalText(double value);
     QString smartQty(double qty, int maxDecimals = 2);
     double roundMoneyValue(double value);
     double inferDiscountPercent(double discountRaw, double worksSum);

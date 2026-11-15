@@ -12,15 +12,6 @@
 #include "core/services/PdfWebsiteFooter.h"
 #include <QPdfWriter>
 
-namespace {
-
-QString money0(double value)
-{
-    return FormatUtils::money(value, 0);
-}
-
-} // namespace
-
 namespace ReportsPdfElectricityPageSupport {
 
 void renderElectricityPage(
@@ -54,8 +45,8 @@ void renderElectricityPage(
         QString::fromUtf8("Період"),
         QString::fromUtf8("Лічильник до"),
         QString::fromUtf8("Лічильник після"),
-        QString::fromUtf8("Спожито кВт"),
-        QString::fromUtf8("Ціна кВт"),
+        QString::fromUtf8("кВт·год"),
+        QString::fromUtf8("грн/кВт·год"),
         QString::fromUtf8("Вартість")
     };
     const int headerH = mmToPx(&pdf, 11.0);
@@ -90,11 +81,11 @@ void renderElectricityPage(
         const QString period = ReportsDateUtils::displayDate(row.periodFrom) + QString::fromUtf8(" — ") + ReportsDateUtils::displayDate(row.periodTo);
         const QStringList cells = {
             period,
-            money0(row.meterBefore),
-            money0(row.meterAfter),
-            money0(row.consumedKwh),
-            money0(row.tariff),
-            money0(row.amount)
+            FormatUtils::decimalText(row.meterBefore),
+            FormatUtils::decimalText(row.meterAfter),
+            FormatUtils::decimalText(row.consumedKwh),
+            FormatUtils::decimalText(row.tariff),
+            FormatUtils::money(row.amount)
         };
 
         int x = tableX;

@@ -1,5 +1,6 @@
 #include "core/util/FormatUtils.h"
 
+#include <QLocale>
 #include <QtMath>
 #include <QStringList>
 #include <cmath>
@@ -61,6 +62,11 @@ QString FormatUtils::money(double value, int maxDecimals)
 {
     // In the python app most sums are displayed as integers (грн), but keep optional decimals.
     return formatNumberSpaces(value, maxDecimals);
+}
+
+QString FormatUtils::decimalText(double value)
+{
+    return QString::number(value, 'f', QLocale::FloatingPointShortest);
 }
 
 QString FormatUtils::smartQty(double qty, int maxDecimals)

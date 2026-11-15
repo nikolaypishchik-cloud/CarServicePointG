@@ -506,10 +506,14 @@ private slots:
     void expensePdfFailuresRightsAndRepeat() {
         QString error;QVERIFY2(FinancialPdfReadFixture::run(db,&error),qPrintable(error));
         configureFinancialReportDirectory();
-        ReportsPdfRenderer::ExpensesFormData data;data.cleaning=12.25;data.other=7.10;data.total=19.35;
+        ReportsPdfRenderer::ExpensesFormData data;data.cleaning=12.25;data.other=7.10;data.total=30.35;
+        data.elecPrev=1250.125; data.elecCurr=1252.625; data.elecKwh=2.5;
+        data.elecTariff=4.3275; data.elecCost=11;
         ReportsPdfRenderer::ExportResult result;
         const auto render=[&]{return ReportsPdfRenderer::renderExpensesPdf(QDate(2026,1,1),QDate(2026,1,31),data,&result);};
         QVERIFY2(render(),qPrintable(result.errorText));QVERIFY(result.success);QVERIFY(result.fileSizeBytes>0);
+        const auto capture = qEnvironmentVariable("CS_EXPENSES_DECIMALS_PDF");
+        if (!capture.isEmpty()) QVERIFY(QFile::copy(result.path, capture));
         const auto path=result.path;const auto original=PayrollReadFixture::bytes(path);QVERIFY(original.startsWith("%PDF"));
         QSqlQuery q(db);QVERIFY(q.exec("ALTER TABLE expenses RENAME COLUMN cleaning TO invalid_cleaning"));
         QVERIFY(!render());QVERIFY(!result.success);QVERIFY(!result.errorText.isEmpty());QCOMPARE(result.recordCount,0);QCOMPARE(PayrollReadFixture::bytes(path),original);
@@ -656,6 +660,13 @@ private slots:
         QVERIFY(q.exec("ALTER TABLE electricity_periods RENAME COLUMN amount TO broken_amount"));QVERIFY(ReportsSyncSupport::loadElectricityPeriods(db,&error).isEmpty());QVERIFY(!error.isEmpty());
         ReportsPdfRenderer::ExportResult failed;QVERIFY(!ReportsPdfRenderer::renderElectricityPdf(&failed));QVERIFY(!failed.errorText.isEmpty());QVERIFY(!QFile::exists(failed.path));
         QVERIFY(q.exec("ALTER TABLE electricity_periods RENAME COLUMN broken_amount TO amount"));QCOMPARE(ReportsSyncSupport::loadElectricityPeriods(db,&error).size(),1);QVERIFY(error.isEmpty());
+        configureFinancialReportDirectory();
+        QVERIFY(q.exec("UPDATE electricity_periods SET meter_before=1250.125, meter_after=1252.625, consumed_kwh=2.5, tariff=4.3275, amount=10.82"));
+        ReportsPdfRenderer::ExportResult exported;
+        QVERIFY2(ReportsPdfRenderer::renderElectricityPdf(&exported), qPrintable(exported.errorText));
+        QCOMPARE(exported.recordCount, 1);
+        const auto capture = qEnvironmentVariable("CS_ELECTRICITY_PDF");
+        if (!capture.isEmpty()) QVERIFY(QFile::copy(exported.path, capture));
     }
     void partsReadFailuresAndRecovery() {
         QString error;QVERIFY(ensureWorkspaceSchema(db));QVERIFY(ensureRouterCacheSchema(db));QVERIFY(rebuildRouterViews(db));

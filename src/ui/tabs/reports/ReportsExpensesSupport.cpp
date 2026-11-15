@@ -3,11 +3,10 @@
 #include "core/services/settings/ReportsSettingsService.h"
 #include "ui/tabs/reports/ReportsUiSupport.h"
 
-#include <QFrame>
-#include <QGridLayout>
 #include "core/util/FormatUtils.h"
 
-#include <QLocale>
+#include <QFrame>
+#include <QGridLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
@@ -17,11 +16,6 @@
 
 namespace {
 using namespace ReportsUiSupport;
-
-QString editableNumber(double value)
-{
-    return QString::number(value, 'f', QLocale::FloatingPointShortest);
-}
 
 void setEnabledIfPresent(QWidget* widget, bool enabled)
 {
@@ -105,11 +99,11 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
     grid->addWidget(w.elecPrevEdit, rr, 4, Qt::AlignLeft);
     ++rr;
 
-    grid->addWidget(new QLabel(QString::fromUtf8("Споживання кВт"), w.page), rr, 0);
+    grid->addWidget(new QLabel(QString::fromUtf8("Споживання (кВт·год)"), w.page), rr, 0);
     w.elecKwhEdit = makeWordField();
     w.elecKwhEdit->setReadOnly(true);
     grid->addWidget(w.elecKwhEdit, rr, 1);
-    grid->addWidget(new QLabel(QString::fromUtf8("Тариф (грн/кВт)"), w.page), rr, 3);
+    grid->addWidget(new QLabel(QString::fromUtf8("Тариф (грн/кВт·год)"), w.page), rr, 3);
     w.elecTariffEdit = makeWordField();
     w.elecTariffEdit->setMaximumWidth(170);
     grid->addWidget(w.elecTariffEdit, rr, 4, Qt::AlignLeft);
@@ -163,20 +157,20 @@ void applySnapshot(const ExpensesSnapshot& snapshot, const ExpensesWidgets& widg
         b11(widgets.amortizationNoteEdit), b12(widgets.rentEdit), b13(widgets.rentNoteEdit), b14(widgets.otherEdit), b15(widgets.otherNoteEdit),
         b16(widgets.elecKwhEdit), b17(widgets.elecCostEdit);
 
-    widgets.elecPrevEdit->setText(editableNumber(snapshot.elecPrev));
-    widgets.elecCurrEdit->setText(snapshot.foundRow ? editableNumber(snapshot.elecCurr) : QString());
-    widgets.elecTariffEdit->setText(snapshot.elecTariff > 0.0 ? editableNumber(snapshot.elecTariff) : QString());
-    widgets.cleaningEdit->setText(snapshot.foundRow ? editableNumber(snapshot.cleaning) : QString());
+    widgets.elecPrevEdit->setText(FormatUtils::decimalText(snapshot.elecPrev));
+    widgets.elecCurrEdit->setText(snapshot.foundRow ? FormatUtils::decimalText(snapshot.elecCurr) : QString());
+    widgets.elecTariffEdit->setText(snapshot.elecTariff > 0.0 ? FormatUtils::decimalText(snapshot.elecTariff) : QString());
+    widgets.cleaningEdit->setText(snapshot.foundRow ? FormatUtils::decimalText(snapshot.cleaning) : QString());
     widgets.cleaningNoteEdit->setText(snapshot.cleaningNote);
-    widgets.softwareEdit->setText(snapshot.foundRow ? editableNumber(snapshot.software) : QString());
+    widgets.softwareEdit->setText(snapshot.foundRow ? FormatUtils::decimalText(snapshot.software) : QString());
     widgets.softwareNoteEdit->setText(snapshot.softwareNote);
-    widgets.heatingEdit->setText(snapshot.foundRow ? editableNumber(snapshot.heating) : QString());
+    widgets.heatingEdit->setText(snapshot.foundRow ? FormatUtils::decimalText(snapshot.heating) : QString());
     widgets.heatingNoteEdit->setText(snapshot.heatingNote);
-    widgets.amortizationEdit->setText(snapshot.foundRow ? editableNumber(snapshot.amortization) : QString());
+    widgets.amortizationEdit->setText(snapshot.foundRow ? FormatUtils::decimalText(snapshot.amortization) : QString());
     widgets.amortizationNoteEdit->setText(snapshot.amortizationNote);
-    widgets.rentEdit->setText(snapshot.foundRow ? editableNumber(snapshot.rent) : QString());
+    widgets.rentEdit->setText(snapshot.foundRow ? FormatUtils::decimalText(snapshot.rent) : QString());
     widgets.rentNoteEdit->setText(snapshot.rentNote);
-    widgets.otherEdit->setText(snapshot.foundRow ? editableNumber(snapshot.other) : QString());
+    widgets.otherEdit->setText(snapshot.foundRow ? FormatUtils::decimalText(snapshot.other) : QString());
     widgets.otherNoteEdit->setText(snapshot.otherNote);
 
     for (QLineEdit* e : {widgets.elecPrevEdit, widgets.elecCurrEdit, widgets.elecTariffEdit,
@@ -200,7 +194,7 @@ ExpensesRecalcResult recalcForm(const ExpensesWidgets& widgets, bool persistTari
 
     result.kwh = qMax(0.0, curr - prev);
     result.electricityCost = qRound64(result.kwh * tariff);
-    widgets.elecKwhEdit->setText(editableNumber(result.kwh));
+    widgets.elecKwhEdit->setText(FormatUtils::decimalText(result.kwh));
     widgets.elecCostEdit->setText(money0(result.electricityCost));
 
     result.total = result.electricityCost
