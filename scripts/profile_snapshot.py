@@ -53,6 +53,11 @@ def inventory(root: Path) -> dict[str, Path]:
     return result
 
 
+def is_attachment(name: str) -> bool:
+    # Attachment directories may be nested beneath an application profile.
+    return any(part.casefold() == 'attachments' for part in PurePosixPath(name).parts[:-1])
+
+
 def database(path: Path) -> bool:
     with path.open('rb') as stream:
         return stream.read(16) == b'SQLite format 3\x00'
@@ -103,9 +108,9 @@ def snapshot(profile_root, destination, *, _step=lambda phase: None):
         raise ValueError('Profile directory is missing')
     target = new_target(Path(destination), root)
     source = inventory(root)
-    databases = {name for name, path in source.items() if database(path)}
+    databases = {name for name, path in source.items() if not is_attachment(name) and database(path)}
     for name in source:
-        if Path(name).suffix.lower() in {'.db', '.sqlite', '.sqlite3'} and name not in databases:
+        if not is_attachment(name) and Path(name).suffix.lower() in {'.db', '.sqlite', '.sqlite3'} and name not in databases:
             raise ValueError(f'Encrypted or unsupported DB requires its native backup provider: {name}')
     sidecars = {name + suffix for name in databases for suffix in ('-wal', '-shm', '-journal')}
     stage = target.with_name(target.name + '.partial-' + uuid.uuid4().hex)
@@ -249,6 +254,8 @@ def relocate_profile(stage, old_root, target):
 
     changes = 0
     for name, path in inventory(stage).items():
+        if is_attachment(name):
+            continue
         if database(path):
             with closing(connect(path, 'rw')) as conn:
                 with conn:

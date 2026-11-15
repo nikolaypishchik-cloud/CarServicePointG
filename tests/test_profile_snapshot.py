@@ -35,6 +35,28 @@ class ProfileSnapshotTests(unittest.TestCase):
                 try:self.assertEqual(conn.execute('SELECT * FROM evidence').fetchall(),[(1,12345)])
                 finally:conn.close()
             else:self.assertEqual(path.read_bytes(),(self.profile/name).read_bytes())
+    def test_attachment_payloads_are_opaque_during_relocation(self):
+        attachments = self.profile / 'attachments' / 'order-7'
+        attachments.mkdir()
+        stored_path = (self.profile / 'attachments/invoice.pdf').as_posix()
+        (attachments / 'report.json').write_bytes(json.dumps({'source': stored_path}).encode())
+        (attachments / 'scanner.ini').write_bytes(('source=' + stored_path).encode() + bytes([13, 10]))
+        with closing(sqlite3.connect(attachments / 'diagnostic.sqlite')) as conn:
+            conn.execute('CREATE TABLE readings(source TEXT)')
+            conn.execute('INSERT INTO readings VALUES(?)', (stored_path,))
+            conn.commit()
+        (attachments / 'device.db').write_bytes(bytes(range(256)))
+        before = {file.name: file.read_bytes() for file in attachments.iterdir()}
+        m.snapshot(self.profile, self.backup)
+        manifest = m.verify(self.backup)
+        for entry in manifest['files']:
+            if entry['path'].startswith('attachments/'):
+                self.assertEqual(entry['kind'], 'file')
+        restored = m.restore(self.backup, self.base / 'restored')
+        for name, expected in before.items():
+            with self.subTest(name=name):
+                self.assertEqual((restored / 'attachments/order-7' / name).read_bytes(), expected)
+
     def test_refuses_existing_destination(self):
         m.snapshot(self.profile,self.backup)
         with self.assertRaises(FileExistsError):m.restore(self.backup,self.profile)
