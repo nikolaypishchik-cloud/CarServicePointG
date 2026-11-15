@@ -2,7 +2,6 @@
 // Compiled as a separate P2 implementation module; include-order dependencies are isolated in the module prelude.
 
 #include "ui/tabs/reports/ReportsPageModulePrelude.h"
-#include "ui/tabs/orders/BayOccupancyPage.h"
 #include "ui/tabs/reports/PurchaseDebtsPage.h"
 #include "ui/tabs/reports/InvoicesPage.h"
 #include <QScrollArea>
@@ -328,17 +327,7 @@ void ReportsPage::buildUi()
         m_tabs->tabBar()->setFixedHeight(40);
         m_tabs->tabBar()->setDrawBase(false);
     }
-    auto* pdfHost = new QWidget(m_tabs);
-    pdfHost->setObjectName("reportsPdfHost");
-    pdfHost->setStyleSheet("#reportsPdfHost {background:transparent;border:none;}");
-    auto* pdfLayout = new QHBoxLayout(pdfHost);
-    pdfLayout->setContentsMargins(4,0,4,0);
-    auto* bayReport = new QPushButton(QString::fromUtf8("Завантаження постів"), pdfHost);
-    bayReport->setObjectName("openBayLoadReport");
-    pdfLayout->addWidget(bayReport);
-    connect(bayReport, &QPushButton::clicked, this, [this] { BayOccupancyPage::open(this); });
-    pdfLayout->addWidget(m_pdfButton);
-    m_tabs->setCornerWidget(pdfHost, Qt::TopRightCorner);
+    m_tabs->setCornerWidget(m_pdfButton, Qt::TopRightCorner);
 
     root->addWidget(m_tabs, 1);
     QPointer<ReportsPage> self(this);

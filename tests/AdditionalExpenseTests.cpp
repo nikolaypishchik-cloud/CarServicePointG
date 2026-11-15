@@ -529,6 +529,19 @@ private slots:
         QVERIFY(!stats->text().contains(QStringLiteral("Не вдалося")));
     }
 
+    void reportsCornerActions() {
+        ReportsPage page;
+        auto* tabs = page.findChild<QTabWidget*>();
+        auto* pdf = page.findChild<QPushButton*>("reportsPdfButton");
+        QVERIFY(tabs && pdf);
+        QVERIFY(tabs->count() > 1);
+        for (int i = 0; i < tabs->count(); ++i) {
+            tabs->setCurrentIndex(i);
+            QCOMPARE(tabs->cornerWidget(Qt::TopRightCorner), static_cast<QWidget*>(pdf));
+            for (auto* action : page.findChildren<QAbstractButton*>())
+                QVERIFY(action->text() != QStringLiteral("Завантаження постів"));
+        }
+    }
     void partsUiRecoversAfterReadFailure() {
         QString error;QVERIFY(ensureWorkspaceSchema(db));QVERIFY(ensureRouterCacheSchema(db));QVERIFY(rebuildRouterViews(db));QVERIFY(WorkshopSpareStockService::ensureSchema(db,&error));
         QSqlQuery q(db);QVERIFY(q.exec("ALTER TABLE work_order_part_attachments RENAME TO parts_broken"));
