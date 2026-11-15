@@ -219,18 +219,23 @@ void VehicleIntakePage::buildUi()
     root->setSpacing(oneMillimetre);
 
     auto* heading = new QHBoxLayout;
-    heading->addStrut(qRound(8 * logicalDpiY() / 25.4) - oneMillimetre);
+    const int headingHeight = qRound(8 * logicalDpiY() / 25.4) - oneMillimetre;
+    heading->addStrut(headingHeight);
     auto* title = new QLabel(this);
-    title->setStyleSheet("font:700 23px 'Segoe UI';color:#f5f8fc;");
+    title->setStyleSheet(QStringLiteral("font:700 %1px 'Segoe UI';color:#f5f8fc;")
+                            .arg(qRound(headingHeight * 0.72)));
     auto* stepLabel = new QLabel(this);
-    stepLabel->setStyleSheet("color:white;border:1px solid #67d6df;border-radius:12px;padding:3px 13px;font-weight:700;");
+    stepLabel->setStyleSheet(QStringLiteral("color:white;border:1px solid #67d6df;border-radius:12px;"
+                                          "padding:1px 13px;font-size:%1px;font-weight:700;")
+                                .arg(qRound(headingHeight * 0.58)));
     auto* badge = new QLabel(this);
-    badge->setPixmap(intakeIcon(0xe8fd).pixmap(28,28));
+    badge->setPixmap(intakeIcon(0xe8fd).pixmap(headingHeight, headingHeight));
     heading->addWidget(badge);
     heading->addWidget(title,1);
     heading->addWidget(stepLabel);
     root->addLayout(heading);
     auto* divider = new QFrame(this);
+    divider->setObjectName("intakeHeadingRule");
     divider->setFixedHeight(2);
     divider->setStyleSheet("background:#67d6df;");
     root->addWidget(divider);

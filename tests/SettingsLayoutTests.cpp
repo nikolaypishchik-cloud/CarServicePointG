@@ -1,4 +1,6 @@
 #include <QMessageBox>
+#include <QStatusBar>
+#include "ui/main/MainWindow.h"
 #include "core/crm/CrmPageReadService.h"
 #include "ui/tabs/crm/CrmPage.h"
 #include "core/crm/CrmPageApplicationService.h"
@@ -132,6 +134,59 @@ private slots:
         }
 
     }
+    void intakeLayoutBetweenBrandAndStatus() {
+        ActivityAuditService::setCurrentActor({"qa-owner","Owner","owner","intake-layout"});
+        QString error;
+        QVERIFY2(CloudSyncSchemaService::ensureSchema(Database::db(),&error),qPrintable(error));
+        QVERIFY(Database::setSetting("settings.booking.sync.enabled",false));
+        QVERIFY(Database::setSetting("settings.cloudsync.enabled",false));
+        QVector<VehicleIntakeService::IntakeRecord> records;
+        QVERIFY2(VehicleIntakeService::listIntakes(&records,&error),qPrintable(error));
+        MainWindow window;
+        window.statusBar()->showMessage("QA");
+        window.resize(1360,850);
+        window.show();
+        QPushButton* intake=nullptr;
+        for (auto* button : window.findChildren<QPushButton*>())
+            if (button->text()==QStringLiteral("Приймання авто")) intake=button;
+        QVERIFY(intake && intake->isEnabled());
+        intake->click();
+        auto* pages=window.findChild<QStackedWidget*>("pages");
+        auto* top=window.findChild<QWidget*>("top_pill");
+        auto* status=window.statusBar();
+        QVERIFY(pages && top && status->isVisible());
+        QTRY_VERIFY(qobject_cast<VehicleIntakePage*>(pages->currentWidget()));
+        auto* page=qobject_cast<VehicleIntakePage*>(pages->currentWidget());
+        auto* next=page->findChild<QPushButton*>("intakeContinue");
+        auto* divider=page->findChild<QFrame*>("intakeHeadingRule");
+        QPushButton* cancel=nullptr;
+        QPushButton* newAct=nullptr;
+        for (auto* button : page->findChildren<QPushButton*>()) {
+            if (button->text()==QStringLiteral("Скасувати")) cancel=button;
+            if (button->text()==QStringLiteral("Новий акт")) newAct=button;
+        }
+        QVERIFY(next && cancel && newAct && divider);
+        auto bounds=[&window](QWidget* w) {return QRect(w->mapTo(&window,QPoint()),w->size());};
+        auto gap=[&bounds](QWidget* upper,QWidget* lower) {return bounds(lower).top()-bounds(upper).bottom()-1;};
+        auto* footer=next->parentWidget();
+        const int mm=qRound(page->logicalDpiY()/25.4);
+        const int heading=qRound(8*page->logicalDpiY()/25.4);
+        for (const int width : {1100,1360}) {
+            window.resize(width,850);
+            QTRY_VERIFY(next->isVisible() && divider->isVisible());
+            const int first=gap(top,divider), second=gap(footer,newAct), third=gap(newAct,status);
+            qInfo()<<"intake geometry"<<width<<page->logicalDpiY()<<first<<second<<third;
+            QCOMPARE(first,heading);
+            QCOMPARE(second,mm);
+            QCOMPARE(third,mm);
+            QCOMPARE(bounds(next).right(),bounds(footer).right());
+            QCOMPARE(bounds(cancel).center().y(),bounds(next).center().y());
+            QVERIFY(bounds(cancel).right()<bounds(next).left());
+            const auto output=qEnvironmentVariable("CS_INTAKE_SCREENSHOTS");
+            if (!output.isEmpty()) QVERIFY(window.grab().save(QDir(output).filePath(QString("window-%1.png").arg(width))));
+        }
+    }
+
     void intakeReadModelsPreserveDataOnFailure() {
         ActivityAuditService::setCurrentActor({"qa-owner","Owner","owner","intake-test"});
         const auto db=Database::db();
