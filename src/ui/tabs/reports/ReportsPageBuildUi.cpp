@@ -273,7 +273,30 @@ void ReportsPage::buildUi()
         else if(index==1){m_orderStatusFilter=0;m_searchEdit->clear();m_to->setDate(QDate::currentDate());m_from->setDate(QDate::currentDate().addDays(-9));}
         markDirty();scheduleRefresh(0);updateDashboard();
     };
-    m_tabs->addTab(makeTab(m_partsTable, m_partsModel), QString::fromUtf8("Придбання запчастин"));
+    auto* partsPage = makeTab(m_partsTable, m_partsModel);
+    auto* partsLayout = qobject_cast<QVBoxLayout*>(partsPage->layout());
+    auto* groupActions = new QHBoxLayout;
+    auto* collapse = new QPushButton(tr("Згорнути всі"), partsPage);
+    auto* expand = new QPushButton(tr("Розгорнути всі"), partsPage);
+    collapse->setObjectName("partsCollapseAll");
+    expand->setObjectName("partsExpandAll");
+    groupActions->addWidget(collapse);
+    groupActions->addWidget(expand);
+    groupActions->addStretch();
+    partsLayout->insertLayout(0, groupActions);
+    const auto setCollapsed = [this, collapse, expand](bool collapsed) {
+        collapse->setEnabled(!collapsed);
+        expand->setEnabled(collapsed);
+        for (int row = 0; row < m_partsModel->rowCount(); ++row)
+            m_partsTable->setRowHidden(row, collapsed && !m_partsModel->rowSpansAllColumns(row));
+    };
+    expand->setEnabled(false);
+    connect(collapse, &QPushButton::clicked, this, [setCollapsed] { setCollapsed(true); });
+    connect(expand, &QPushButton::clicked, this, [setCollapsed] { setCollapsed(false); });
+    connect(m_partsModel, &QAbstractItemModel::modelReset, this, [expand, setCollapsed] {
+        if (!expand->testAttribute(Qt::WA_ForceDisabled)) setCollapsed(true);
+    });
+    m_tabs->addTab(partsPage, QString::fromUtf8("Придбання запчастин"));
     m_tabs->addTab(makeTab(m_outsourceTable, m_outsourceModel), QString::fromUtf8("Аутсорс"));
     m_tabs->addTab(m_expensesPage, QString::fromUtf8("Витрати"));
     auto* totalExpensesPage = makeTab(m_totalExpensesTable, m_totalExpensesModel);

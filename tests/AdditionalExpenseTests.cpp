@@ -555,6 +555,40 @@ private slots:
                 QVERIFY(action->text() != QStringLiteral("Завантаження постів"));
         }
     }
+    void partsStoreCollapseAndExpand() {
+        ReportsPage page;
+        auto* collapse = page.findChild<QPushButton*>("partsCollapseAll");
+        auto* expand = page.findChild<QPushButton*>("partsExpandAll");
+        QVERIFY(collapse && expand);
+        auto* table = collapse->parentWidget()->findChild<QTableView*>();
+        QVERIFY(table);
+        auto* model = dynamic_cast<ReportsTableSupport::ReportsSnapshotTableModel*>(table->model());
+        QVERIFY(model);
+        PartsSnapshot snapshot;
+        PartsSnapshotRow header;
+        header.isStoreHeader = true;
+        header.store = "Store A";
+        header.qty = "1";
+        header.purchase = "45";
+        PartsSnapshotRow part;
+        part.invoiceNumber = "INV-71";
+        snapshot.rows = {header, part};
+        ReportsTableSupport::applyPartsSnapshot(table, model, snapshot);
+        collapse->click();
+        QVERIFY(!table->isRowHidden(0));
+        QVERIFY(table->isRowHidden(1));
+        header.store = "Store B";
+        snapshot.rows.append(header);
+        snapshot.rows.append(part);
+        ReportsTableSupport::applyPartsSnapshot(table, model, snapshot);
+        QVERIFY(!table->isRowHidden(2));
+        QVERIFY(table->isRowHidden(3));
+        expand->click();
+        for (int row = 0; row < model->rowCount(); ++row) QVERIFY(!table->isRowHidden(row));
+        QCOMPARE(model->cellText(3, 3), QStringLiteral("INV-71"));
+        QVERIFY(qvariant_cast<QFont>(model->index(3, 3).data(Qt::FontRole)).underline());
+    }
+
     void partsUiRecoversAfterReadFailure() {
         QString error;QVERIFY(ensureWorkspaceSchema(db));QVERIFY(ensureRouterCacheSchema(db));QVERIFY(rebuildRouterViews(db));QVERIFY(WorkshopSpareStockService::ensureSchema(db,&error));
         QSqlQuery q(db);QVERIFY(q.exec("ALTER TABLE work_order_part_attachments RENAME TO parts_broken"));
