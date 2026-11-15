@@ -77,6 +77,7 @@ private:
     ReportDashboard* m_dashboard=nullptr;
     int m_orderStatusFilter=0;
     bool m_expensesFound=false;
+    QPushButton* m_repeatExpenses = nullptr;
     QStringList m_invoiceMetrics;
     QStringList m_totalExpenseMetrics;
     QStringList m_partsTileTitles,m_partsTileBodies;
@@ -94,8 +95,8 @@ private:
     void refreshOutsource();
     void applyOutsourceSnapshot(const OutsourceSnapshot& snapshot);
     void applyPayrollSnapshot(const PayrollSnapshot& snapshot);
-    void refreshExpenses();
-    void applyExpensesSnapshot(const ExpensesSnapshot& snapshot);
+    void refreshExpenses(bool repeatPrevious = false);
+    void applyExpensesSnapshot(const ExpensesSnapshot& snapshot, bool repeatPrevious = false);
     void refreshTotalExpenses();
     void buildAdditionalExpensesForm(QWidget* page);
     void addAdditionalExpense();

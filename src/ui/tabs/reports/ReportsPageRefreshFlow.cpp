@@ -581,11 +581,13 @@ void ReportsPage::applyPayrollSnapshot(const PayrollSnapshot& snapshot)
     setTabStats(ReportTab::Payroll, snapshot.stats);
 }
 
-void ReportsPage::refreshExpenses()
+void ReportsPage::refreshExpenses(bool repeatPrevious)
 {
     const QString df = m_from->date().toString("yyyy-MM-dd");
     const QString dt = m_to->date().toString("yyyy-MM-dd");
     const QString key = ReportsAsyncSupport::buildTabKey(static_cast<int>(ReportTab::Expenses), m_from->date(), m_to->date());
+    if (repeatPrevious && m_tabKeys.value(static_cast<int>(ReportTab::Expenses)) != key) return;
+    m_tabKeys.remove(static_cast<int>(ReportTab::Expenses));
     const QString dbPath = ReportsDataLoader::currentDatabasePath();
     const quint64 generation = ++m_asyncRefreshGeneration;
     const auto cancelToken = AsyncTaskHandle::renewCancellationToken(m_asyncCancelToken);
@@ -594,24 +596,24 @@ void ReportsPage::refreshExpenses()
     setTabDescription(ReportTab::Expenses, QString::fromUtf8("Витрати — введення та збереження витрат за вибраний період."));
     setTabAuxStats(ReportTab::Expenses, QString());
     updateStats({QString::fromUtf8("Завантаження витрат…")});
-    for (QLineEdit* e : {m_elecPrevEdit,m_elecCurrEdit,m_elecTariffEdit,m_cleaningEdit,m_cleaningNoteEdit,m_softwareEdit,m_softwareNoteEdit,m_heatingEdit,m_heatingNoteEdit,m_amortizationEdit,m_amortizationNoteEdit,m_rentEdit,m_rentNoteEdit,m_otherEdit,m_otherNoteEdit}) {
-        if (e) e->setEnabled(false);
-    }
+    m_expensesPage->setEnabled(false);
+    m_repeatExpenses->setEnabled(false);
     if (m_expensesSaveButton) m_expensesSaveButton->setEnabled(false);
 
-    ReportsAsyncSupport::startExpensesLoad(this, asyncHandle, dbPath, df, dt, [this, generation, key](const ExpensesSnapshot& snapshot) {
+    ReportsAsyncSupport::startExpensesLoad(this, asyncHandle, dbPath, df, dt, repeatPrevious, [this, generation, key, repeatPrevious](const ExpensesSnapshot& snapshot) {
         if (generation != m_asyncRefreshGeneration) return;
         if (activeTab() != ReportTab::Expenses) return;
-        applyExpensesSnapshot(snapshot);
+        applyExpensesSnapshot(snapshot, repeatPrevious);
         if (snapshot.error.isEmpty()) m_tabKeys[static_cast<int>(ReportTab::Expenses)] = key;
         else m_tabKeys.remove(static_cast<int>(ReportTab::Expenses));
         applyCachedTabUi(ReportTab::Expenses);
     });
 }
 
-void ReportsPage::applyExpensesSnapshot(const ExpensesSnapshot& snapshot)
+void ReportsPage::applyExpensesSnapshot(const ExpensesSnapshot& snapshot, bool repeatPrevious)
 {
     m_expensesFound=snapshot.foundRow;
+    m_repeatExpenses->setEnabled(snapshot.error.isEmpty());
     if (!m_expensesPage) return;
     m_expensesPage->setEnabled(snapshot.error.isEmpty());
     if (!snapshot.error.isEmpty()) {
@@ -622,14 +624,25 @@ void ReportsPage::applyExpensesSnapshot(const ExpensesSnapshot& snapshot)
         setTabStats(ReportTab::Expenses, {QStringLiteral("Не вдалося прочитати витрати: ") + snapshot.error});
         return;
     }
-    ReportsExpensesSupport::applySnapshot(snapshot, {
+    if (repeatPrevious && !snapshot.previous) {
+        recalcExpensesForm();
+        m_expenseValidation->setText(QStringLiteral("До початку обраного періоду немає збережених витрат. ") + m_expenseValidation->text());
+        m_expenseValidation->show();
+        return;
+    }
+    const ExpensePeriodValues& values = repeatPrevious ? *snapshot.previous : static_cast<const ExpensePeriodValues&>(snapshot);
+    ReportsExpensesSupport::applySnapshot(values, {
         m_expensesPage, m_elecPrevEdit, m_elecCurrEdit, m_elecTariffEdit, m_elecKwhEdit, m_elecCostEdit,
         m_cleaningEdit, m_cleaningNoteEdit, m_softwareEdit, m_softwareNoteEdit,
         m_heatingEdit, m_heatingNoteEdit, m_amortizationEdit, m_amortizationNoteEdit,
         m_rentEdit, m_rentNoteEdit, m_otherEdit, m_otherNoteEdit, m_expensesTotalEdit,
         m_expensesSaveButton, m_electricityPdfButton
-    });
+    }, repeatPrevious);
     recalcExpensesForm();
+    if (repeatPrevious && m_expensesSaveButton->isEnabled()) {
+        m_expenseValidation->setText(QStringLiteral("Чернетка за даними попереднього періоду до %1.").arg(values.periodEnd));
+        m_expenseValidation->show();
+    }
 }
 
 void ReportsPage::applyTotalExpensesSnapshot(const TotalExpensesSnapshot& snapshot)

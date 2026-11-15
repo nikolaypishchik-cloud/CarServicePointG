@@ -208,6 +208,8 @@ void ReportsPage::buildUi()
     const ExpensesWidgets expensesWidgets = ReportsExpensesSupport::buildExpensesPage(this);
     m_expensesPage = expensesWidgets.page;
     m_expenseValidation = expensesWidgets.validationLabel;
+    m_repeatExpenses = expensesWidgets.repeatButton;
+    connect(m_repeatExpenses, &QPushButton::clicked, this, [this] { refreshExpenses(true); });
     m_elecPrevEdit = expensesWidgets.elecPrevEdit;
     m_elecCurrEdit = expensesWidgets.elecCurrEdit;
     m_elecTariffEdit = expensesWidgets.elecTariffEdit;

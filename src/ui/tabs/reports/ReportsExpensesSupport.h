@@ -37,6 +37,7 @@ struct ExpensesWidgets {
     QPushButton* expensesSaveButton = nullptr;
     QPushButton* electricityPdfButton = nullptr;
     QLabel* validationLabel = nullptr;
+    QPushButton* repeatButton = nullptr;
 };
 
 struct ExpensesRecalcResult {
@@ -48,7 +49,7 @@ struct ExpensesRecalcResult {
 };
 
 ExpensesWidgets buildExpensesPage(QWidget* parent);
-void applySnapshot(const ExpensesSnapshot& snapshot, const ExpensesWidgets& widgets);
+void applySnapshot(const ExpensePeriodValues& snapshot, const ExpensesWidgets& widgets, bool repeatPrevious = false);
 ExpensesRecalcResult recalcForm(const ExpensesWidgets& widgets, bool persistTariffSetting);
 ReportsSyncSupport::ExpensesSavePayload buildSavePayload(const ExpensesWidgets& widgets);
 ReportsPdfRenderer::ExpensesFormData buildPdfData(const ExpensesWidgets& widgets);

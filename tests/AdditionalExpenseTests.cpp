@@ -910,6 +910,60 @@ private slots:
         QCOMPARE(QSqlDatabase::connectionNames(), before);
     }
 
+    void repeatPreviousExpensesOnlyChangesDraft() {
+        ReportsPage page;
+        page.show();
+        auto* tabs = page.findChild<QTabWidget*>();
+        auto* form = page.findChild<QWidget*>("reportsExpensesPage");
+        QVERIFY(tabs && form);
+        tabs->setCurrentWidget(form);
+        auto* repeat = form->findChild<QPushButton*>("expenseRepeat");
+        auto* status = form->findChild<QLabel*>("expenseValidation");
+        auto* from = page.findChild<QDateEdit*>("dashboardFrom");
+        auto* to = page.findChild<QDateEdit*>("dashboardTo");
+        QVERIFY(repeat && status && from && to);
+        from->setDate(QDate(2026,2,1));
+        to->setDate(QDate(2026,2,28));
+        QTRY_VERIFY_WITH_TIMEOUT(repeat->isEnabled(), 10000);
+        repeat->click();
+        QTRY_VERIFY_WITH_TIMEOUT(status->text().contains(QStringLiteral("немає збережених витрат")),10000);
+        QSqlQuery q(db);
+        QVERIFY(q.exec("INSERT INTO expenses(period_from,period_to,elec_curr,elec_tariff,rent,rent_note) VALUES"
+                       "('2025-12-01','2025-12-31',50,3,80,'older'),"
+                       "('01.01.26','31.01.26',100.125,4.3275,120.50,'chosen'),"
+                       "('2026-01-15','2026-02-15',200,5,160,'overlap'),"
+                       "('2026-03-01','2026-03-31',300,6,200,'future')"));
+        auto field = [form](const QString& name) -> QLineEdit* {
+            for (auto* item : form->findChildren<QLineEdit*>())
+                if (item->accessibleName() == name) return item;
+            return nullptr;
+        };
+        auto* rent = field(QStringLiteral("Оренда"));
+        auto* previous = field(QStringLiteral("Попередній показник"));
+        auto* current = field(QStringLiteral("Поточний показник"));
+        auto* tariff = field(QStringLiteral("Тариф"));
+        QVERIFY(rent && previous && current && tariff);
+        QVERIFY(rent->text().isEmpty());
+        repeat->click();
+        QTRY_VERIFY_WITH_TIMEOUT(status->text().contains("31.01.26"),10000);
+        QCOMPARE(previous->text(), QStringLiteral("100.125"));
+        QVERIFY(current->text().isEmpty());
+        QCOMPARE(tariff->text(), QStringLiteral("4.3275"));
+        QCOMPARE(rent->text(), QStringLiteral("120.5"));
+        rent->setText("130,75");
+        bool noteCopied = false;
+        for (auto* item : form->findChildren<QLineEdit*>())
+            if (item->text() == "chosen") noteCopied = true;
+        QVERIFY(noteCopied);
+        QVERIFY(q.exec("SELECT COUNT(*),SUM(rent) FROM expenses"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(),4);
+        QCOMPARE(q.value(1).toDouble(),560.5);
+        QVERIFY(q.exec("SELECT COUNT(*) FROM settings WHERE key='reports.expenses.electricity_tariff'"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(),0);
+    }
+
     void expenseFormPreservesFractionalInputs() {
         QWidget parent;
         using namespace ReportsExpensesSupport;

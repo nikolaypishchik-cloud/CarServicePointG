@@ -208,6 +208,7 @@ void startExpensesLoad(QObject* owner,
                        const QString& dbPath,
                        const QString& df,
                        const QString& dt,
+                       bool readPreviousForDraft,
                        std::function<void(const ExpensesSnapshot&)> onReady)
 {
     const QString cacheKey = ReportsSnapshotCache::makeReportsKey(QStringLiteral("expenses"), dbPath, df, dt);
@@ -215,7 +216,9 @@ void startExpensesLoad(QObject* owner,
         asyncHandle,
         QStringLiteral("reports.expenses"),
         cacheKey,
-        ReportsSnapshotCache::tryGetExpenses,
+        [readPreviousForDraft](const QString& key, ExpensesSnapshot* cached) {
+            return !readPreviousForDraft && ReportsSnapshotCache::tryGetExpenses(key, cached);
+        },
         ReportsSnapshotCache::storeExpenses,
         [dbPath, df, dt]() {
             return ReportsDataLoader::buildExpensesSnapshot(dbPath, df, dt);

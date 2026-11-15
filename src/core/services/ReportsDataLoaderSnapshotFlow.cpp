@@ -786,45 +786,57 @@ PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, c
     return snapshot;
 }
 
+static ExpensePeriodValues expenseValues(const QSqlQuery& q, double savedTariff)
+{
+    ExpensePeriodValues row;
+    row.foundRow = true;
+    row.elecPrev = q.value(0).toDouble();
+    row.elecCurr = q.value(1).toDouble();
+    const double rowTariff = q.value(2).toDouble();
+    row.elecTariff = rowTariff > 0.0 ? rowTariff : savedTariff;
+    row.cleaning = q.value(3).toDouble();
+    row.cleaningNote = q.value(4).toString();
+    row.software = q.value(5).toDouble();
+    row.softwareNote = q.value(6).toString();
+    row.heating = q.value(7).toDouble();
+    row.heatingNote = q.value(8).toString();
+    row.amortization = q.value(9).toDouble();
+    row.amortizationNote = q.value(10).toString();
+    row.rent = q.value(11).toDouble();
+    row.rentNote = q.value(12).toString();
+    row.other = q.value(13).toDouble();
+    row.otherNote = q.value(14).toString();
+    row.periodEnd = q.value(15).toString();
+    row.hasCurrentReading = !q.value(1).isNull();
+    return row;
+}
+
 static ExpensesSnapshot readExpensePeriod(QSqlDatabase& db, const QString& df, const QString& dt)
 {
     ExpensesSnapshot snapshot;
-    QSqlQuery q(db);
-    q.prepare(QStringLiteral("SELECT elec_prev, elec_curr, elec_tariff, cleaning, cleaning_note, sw_opendatabot, software_note, heating, heating_note, amortization, amortization_note, rent, rent_note, other_amount, other_note FROM expenses WHERE %1=? AND %2=? ORDER BY id DESC LIMIT 1").arg(DateFormats::isoSql("period_from"), DateFormats::isoSql("period_to")));
-    q.addBindValue(df);
-    q.addBindValue(dt);
     const double savedTariff = reportsWorkerSetting(db, QStringLiteral("reports.expenses.electricity_tariff"), 0.0, &snapshot.error).toDouble();
     if (!snapshot.error.isEmpty()) return snapshot;
-    if (!q.exec()) {
+    const QString start = DateFormats::isoSql("period_from");
+    const QString end = DateFormats::isoSql("period_to");
+    const QString select = QStringLiteral("SELECT elec_prev, elec_curr, elec_tariff, cleaning, cleaning_note, sw_opendatabot, software_note, heating, heating_note, amortization, amortization_note, rent, rent_note, other_amount, other_note, period_to FROM expenses WHERE ");
+    QSqlQuery q(db);
+    q.prepare(select + QStringLiteral("%1=? AND %2=? ORDER BY id DESC LIMIT 1").arg(start, end));
+    q.addBindValue(df);
+    q.addBindValue(dt);
+    snapshot.elecTariff = savedTariff;
+    if (q.exec() && q.next()) static_cast<ExpensePeriodValues&>(snapshot) = expenseValues(q, savedTariff);
+    if (q.lastError().isValid()) {
         snapshot.error = q.lastError().text();
-    } else if (q.next()) {
-        snapshot.foundRow = true;
-        snapshot.elecPrev = q.value(0).toDouble();
-        snapshot.elecCurr = q.value(1).toDouble();
-        const double rowTariff = q.value(2).toDouble();
-        snapshot.elecTariff = rowTariff > 0.0 ? rowTariff : savedTariff;
-        snapshot.cleaning = q.value(3).toDouble();
-        snapshot.cleaningNote = q.value(4).toString();
-        snapshot.software = q.value(5).toDouble();
-        snapshot.softwareNote = q.value(6).toString();
-        snapshot.heating = q.value(7).toDouble();
-        snapshot.heatingNote = q.value(8).toString();
-        snapshot.amortization = q.value(9).toDouble();
-        snapshot.amortizationNote = q.value(10).toString();
-        snapshot.rent = q.value(11).toDouble();
-        snapshot.rentNote = q.value(12).toString();
-        snapshot.other = q.value(13).toDouble();
-        snapshot.otherNote = q.value(14).toString();
-    } else if (q.lastError().isValid()) {
-        snapshot.error = q.lastError().text();
-    } else {
-        snapshot.elecTariff = savedTariff;
-        QSqlQuery prev(db);
-        prev.prepare(QStringLiteral("SELECT COALESCE(elec_curr,0) FROM expenses WHERE date((CASE WHEN substr(trim(period_to),3,1)='.' AND substr(trim(period_to),6,1)='.' THEN CASE WHEN substr(trim(period_to),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_to),7,4) ELSE '20'||substr(trim(period_to),7,2) END||'-'||substr(trim(period_to),4,2)||'-'||substr(trim(period_to),1,2) ELSE period_to END)) < date(?) ORDER BY date((CASE WHEN substr(trim(period_to),3,1)='.' AND substr(trim(period_to),6,1)='.' THEN CASE WHEN substr(trim(period_to),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(period_to),7,4) ELSE '20'||substr(trim(period_to),7,2) END||'-'||substr(trim(period_to),4,2)||'-'||substr(trim(period_to),1,2) ELSE period_to END)) DESC, id DESC LIMIT 1"));
-        prev.addBindValue(df);
-        if (prev.exec() && prev.next()) snapshot.elecPrev = prev.value(0).toDouble();
-        if (prev.lastError().isValid()) snapshot.error = prev.lastError().text();
+        return snapshot;
     }
+    q.finish();
+    q.prepare(select + QStringLiteral("date(%1) < date(?) AND date(%2) <= date(%1) ORDER BY date(%1) DESC, id DESC LIMIT 1").arg(end, start));
+    q.addBindValue(df);
+    if (q.exec() && q.next()) {
+        snapshot.previous = expenseValues(q, savedTariff);
+        if (!snapshot.foundRow) snapshot.elecPrev = snapshot.previous->elecCurr;
+    }
+    if (q.lastError().isValid()) snapshot.error = q.lastError().text();
     return snapshot;
 }
 

@@ -57,6 +57,7 @@ void startExpensesLoad(QObject* owner,
                        const QString& dbPath,
                        const QString& df,
                        const QString& dt,
+                       bool readPreviousForDraft,
                        std::function<void(const ExpensesSnapshot&)> onReady);
 
 void startTotalExpensesLoad(QObject* owner,

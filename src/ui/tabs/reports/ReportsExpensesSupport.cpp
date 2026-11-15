@@ -64,6 +64,7 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
         #reportsExpensesPage QLabel#expenseValidation {
             background: #fff2d5; color: #583600; border-radius: 4px; padding: 4px 8px;
         }
+        #reportsExpensesPage QPushButton#expenseRepeat { background: #554370; color: white; border-radius: 5px; padding: 6px 12px; }
         #reportsExpensesPage QPushButton#expenseSave {
             background: #117477; color: white; border-radius: 5px; padding: 6px 16px;
         }
@@ -148,6 +149,10 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
     w.expensesTotalEdit->setReadOnly(true);
     footer->addWidget(w.expensesTotalEdit);
     footer->addStretch(1);
+    w.repeatButton = new QPushButton(QStringLiteral("Повторити минулий період"), w.page);
+    w.repeatButton->setObjectName(QStringLiteral("expenseRepeat"));
+    w.repeatButton->setEnabled(false);
+    footer->addWidget(w.repeatButton);
     w.electricityPdfButton = new QPushButton(QString::fromUtf8("PDF ел.енергії"), w.page);
     w.expensesSaveButton = new QPushButton(QString::fromUtf8("Зберегти"), w.page);
     w.expensesSaveButton->setObjectName(QStringLiteral("expenseSave"));
@@ -163,15 +168,16 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
     return w;
 }
 
-void applySnapshot(const ExpensesSnapshot& snapshot, const ExpensesWidgets& widgets)
+void applySnapshot(const ExpensePeriodValues& snapshot, const ExpensesWidgets& widgets, bool repeatPrevious)
 {
     const QSignalBlocker b1(widgets.elecPrevEdit), b2(widgets.elecCurrEdit), b3(widgets.elecTariffEdit), b4(widgets.cleaningEdit), b5(widgets.cleaningNoteEdit),
         b6(widgets.softwareEdit), b7(widgets.softwareNoteEdit), b8(widgets.heatingEdit), b9(widgets.heatingNoteEdit), b10(widgets.amortizationEdit),
         b11(widgets.amortizationNoteEdit), b12(widgets.rentEdit), b13(widgets.rentNoteEdit), b14(widgets.otherEdit), b15(widgets.otherNoteEdit),
         b16(widgets.elecKwhEdit), b17(widgets.elecCostEdit);
 
-    widgets.elecPrevEdit->setText(FormatUtils::decimalText(snapshot.elecPrev));
-    widgets.elecCurrEdit->setText(snapshot.foundRow ? FormatUtils::decimalText(snapshot.elecCurr) : QString());
+    if (repeatPrevious && !snapshot.hasCurrentReading) widgets.elecPrevEdit->clear();
+    else widgets.elecPrevEdit->setText(FormatUtils::decimalText(repeatPrevious ? snapshot.elecCurr : snapshot.elecPrev));
+    widgets.elecCurrEdit->setText(snapshot.foundRow && snapshot.hasCurrentReading && !repeatPrevious ? FormatUtils::decimalText(snapshot.elecCurr) : QString());
     widgets.elecTariffEdit->setText(snapshot.elecTariff > 0.0 ? FormatUtils::decimalText(snapshot.elecTariff) : QString());
     widgets.cleaningEdit->setText(snapshot.foundRow ? FormatUtils::decimalText(snapshot.cleaning) : QString());
     widgets.cleaningNoteEdit->setText(snapshot.cleaningNote);

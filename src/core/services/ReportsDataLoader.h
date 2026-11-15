@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <QList>
 #include <QMap>
 #include <QString>
@@ -109,8 +110,9 @@ struct PayrollSnapshot {
     QStringList stats;
 };
 
-struct ExpensesSnapshot {
-    QString error;
+struct ExpensePeriodValues {
+    QString periodEnd;
+    bool hasCurrentReading = true;
     bool foundRow = false;
     double elecPrev = 0.0;
     double elecCurr = 0.0;
@@ -127,6 +129,11 @@ struct ExpensesSnapshot {
     QString rentNote;
     double other = 0.0;
     QString otherNote;
+};
+
+struct ExpensesSnapshot : ExpensePeriodValues {
+    QString error;
+    std::optional<ExpensePeriodValues> previous;
 };
 
 struct TotalExpensesSnapshotRow {
