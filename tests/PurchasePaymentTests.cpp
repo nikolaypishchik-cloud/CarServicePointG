@@ -6435,13 +6435,29 @@ private slots:
         QCOMPARE(moved.bay, assigned.bay);
         QVERIFY(repo.isDayReminderActive(day));
     }
+    void dispatchUnassignedMouseDrag_data() {
+        QTest::addColumn<bool>("scroll");
+        QTest::addColumn<int>("initialHour");
+        QTest::newRow("later-visible-time") << false << 8;
+        QTest::newRow("earlier-visible-time") << false << 10;
+        QTest::newRow("time-beyond-viewport") << true << 8;
+    }
     void dispatchUnassignedMouseDrag() {
+        QFETCH(bool, scroll);
+        QFETCH(int, initialHour);
         QSqlQuery sql(db);
         QVERIFY(sql.exec("CREATE TABLE planning_calendar(day TEXT PRIMARY KEY,note TEXT)"));
         const QDate today = QDate::currentDate();
         PlanningRepository repo;
-        const QString raw = QStringLiteral("Oil service");
-        repo.setDayMap(today, {{8, raw}});
+        PlanningDispatch::Entry booking;
+        booking.start=initialHour*60;
+        booking.minutes=45;
+        booking.work="Oil service";
+        booking.client="QA client";
+        booking.plate="QA 001";
+        booking.vehicle="QA car";
+        const QString raw=scroll ? PlanningDispatch::encode(booking) : booking.work;
+        repo.setDayMap(today, {{initialHour,raw}});
         PlanningPage page(nullptr, true);
         page.resize(1000, 680);
         page.show();
@@ -6451,31 +6467,69 @@ private slots:
             if (b->text() == QStringLiteral("День")) { b->click(); break; }
         auto* card = grid->findChild<QPushButton*>("dispatchAppointment");
         QVERIFY(card);
-        grid->scrollToItem(grid->item(grid->rowCount()-1,1));
-        QCoreApplication::processEvents();
-        const QPoint press(3, card->height()/2);
-        const int y = card->mapTo(grid->viewport(), press).y();
-        const QPoint target(grid->columnViewportPosition(6)+2, y);
-        QVERIFY(grid->viewport()->rect().contains(target));
+        QVERIFY(QTest::qWaitForWindowExposed(&page));
+        QWidget* viewport=grid->viewport();
+        const int initialColumn=1+(initialHour-8)*4;
+        grid->scrollToItem(grid->item(grid->rowCount()-1,initialColumn),QAbstractItemView::PositionAtBottom);
+        QTRY_VERIFY(!card->visibleRegion().isEmpty());
+        const QRect visible=QRect(card->mapTo(viewport,QPoint()),card->size()).intersected(viewport->rect());
+        QVERIFY(!visible.isEmpty());
+        const QPoint start(visible.left()+2,visible.center().y());
+        const QPoint press=card->mapFromGlobal(viewport->mapToGlobal(start));
+        QCOMPARE(grid->columnAt(start.x()),initialColumn);
+        auto* details=page.findChild<QLabel*>("dispatchInfo");
+        QVERIFY(details);
+        bool boldHeading=false;
+        for (auto* label : page.findChildren<QLabel*>())
+            if (label->text()==QStringLiteral("Картка запису")) boldHeading=label->font().bold();
+        QVERIFY(boldHeading);
+        const QPoint edge(viewport->width()-6,start.y());
+        const int lastVisible=grid->columnAt(edge.x());
+        const QPoint target=scroll ? edge : QPoint(grid->columnViewportPosition(6)+2,start.y());
+        qInfo()<<"dispatch gesture"<<viewport->size()<<visible<<target<<lastVisible;
+        QVERIFY(viewport->rect().contains(target));
+        if (scroll) QVERIFY(lastVisible>1 && lastVisible+2<grid->columnCount());
+        int expected=555;
         const auto gesture = [&](bool cancel) {
-            const QPoint destination = card->mapFromGlobal(grid->viewport()->mapToGlobal(target));
-            QTest::mousePress(card, Qt::LeftButton, {}, press);
-            QMouseEvent move(QEvent::MouseMove, QPointF(destination), QPointF(card->mapToGlobal(destination)),
-                             Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
-            QApplication::sendEvent(card, &move);
-            if (cancel) QTest::keyClick(card, Qt::Key_Escape);
-            QTest::mouseRelease(card, Qt::LeftButton, {}, destination);
+            QPoint global=viewport->mapToGlobal(target);
+            const QPoint destination=card->mapFromGlobal(global);
+            QTest::mousePress(card,Qt::LeftButton,{},press);
+            QMouseEvent move(QEvent::MouseMove,QPointF(destination),QPointF(global),
+                             Qt::NoButton,Qt::LeftButton,Qt::NoModifier);
+            QApplication::sendEvent(card,&move);
+            if (cancel) QTest::keyClick(card,Qt::Key_Escape);
+            else if (scroll) {
+                const int targetColumn=lastVisible+2;
+                QTRY_VERIFY(grid->columnViewportPosition(targetColumn)+grid->columnWidth(targetColumn)
+                            < viewport->width()-32);
+                const QPoint drop(grid->columnViewportPosition(targetColumn)+grid->columnWidth(targetColumn)/2,start.y());
+                QCOMPARE(grid->columnAt(drop.x()),targetColumn);
+                global=viewport->mapToGlobal(drop);
+                QMouseEvent settle(QEvent::MouseMove,QPointF(card->mapFromGlobal(global)),QPointF(global),
+                                   Qt::NoButton,Qt::LeftButton,Qt::NoModifier);
+                QApplication::sendEvent(card,&settle);
+                expected=480+(targetColumn-1)*15;
+            }
+            QTest::mouseRelease(card,Qt::LeftButton,{},card->mapFromGlobal(global));
         };
         gesture(true);
-        QCOMPARE(repo.getDayMap(today).value(8), raw);
+        QCOMPARE(repo.getDayMap(today).value(initialHour),raw);
         gesture(false);
-        QTRY_VERIFY(repo.getDayMap(today).contains(9));
-        const auto stored = PlanningDispatch::decode(today, 9, repo.getDayMap(today).value(9));
-        QCOMPARE(stored.start, 555);
-        QCOMPARE(stored.work, raw);
+        QTRY_VERIFY(repo.getDayMap(today).contains(expected/60));
+        const auto stored=PlanningDispatch::decode(today,expected/60,repo.getDayMap(today).value(expected/60));
+        QCOMPARE(stored.start,expected);
+        QCOMPARE(stored.work,booking.work);
+        if (scroll) {
+            QCOMPARE(stored.plate,booking.plate);
+            QCOMPARE(stored.vehicle,booking.vehicle);
+            QCOMPARE(stored.client,booking.client);
+            QCOMPARE(stored.minutes,booking.minutes);
+        }
+        QCOMPARE(repo.getDayMap(today).size(),1);
+        QVERIFY(details->text().contains(QTime(expected/60,expected%60).toString("HH:mm")));
         QVERIFY(stored.mechanicId.isEmpty());
-        QCOMPARE(stored.bay, 0);
-        QVERIFY(!repo.getDayMap(today).contains(8));
+        QCOMPARE(stored.bay,0);
+        QVERIFY(!repo.getDayMap(today).contains(initialHour));
     }
     void workshopDispatchQueueAndResources() {
         using namespace PlanningDispatch;
