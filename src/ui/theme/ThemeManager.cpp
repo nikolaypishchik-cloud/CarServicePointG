@@ -150,13 +150,9 @@ static QString qssGraphite()
             border: none;
         }
         #top_pill {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                        stop:0 rgba(22,27,33,0.78),
-                                        stop:0.18 rgba(52,61,72,0.68),
-                                        stop:0.50 rgba(112,124,138,0.56),
-                                        stop:0.82 rgba(54,63,74,0.68),
-                                        stop:1 rgba(26,31,37,0.78));
-            border: 1px solid rgba(255,255,255,0.26);
+            background: qlineargradient(x1:0, y1:0, x2:0.3, y2:1,
+                                        stop:0 #1a202a, stop:0.6 #303946, stop:1 #222a35);
+            border: 1px solid #a7bdd3;
             border-radius: 16px;
             padding: 2px;
         }
@@ -482,13 +478,9 @@ static QString qssLight()
             border: none;
         }
         #top_pill {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                        stop:0 rgba(245,247,249,0.96),
-                                        stop:0.12 rgba(231,236,241,0.96),
-                                        stop:0.50 rgba(210,217,225,0.96),
-                                        stop:0.88 rgba(231,236,241,0.96),
-                                        stop:1 rgba(245,247,249,0.96));
-            border: 1px solid rgba(52,61,72,0.20);
+            background: qlineargradient(x1:0, y1:0, x2:0.3, y2:1,
+                                        stop:0 #1a202a, stop:0.6 #303946, stop:1 #222a35);
+            border: 1px solid #a7bdd3;
             border-radius: 16px;
             padding: 2px;
         }

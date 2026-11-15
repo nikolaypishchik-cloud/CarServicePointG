@@ -188,11 +188,14 @@ void MainWindow::buildUi()
     topL->setContentsMargins(18,2,18,2);
     topL->setSpacing(10);
 
-    m_topTitle = new QLabel(pageTitleForIndex(1), top);
-    m_topTitle->setObjectName("top_title");
-    m_topTitle->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    m_topTitle->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    topL->addWidget(m_topTitle, 1);
+    auto* logo = new AnimatedMetalLogoWidget(top);
+    logo->setObjectName("animated_logo");
+    logo->setAccessibleName(QStringLiteral("CarService PointG"));
+    logo->setAttribute(Qt::WA_TransparentForMouseEvents);
+    logo->setFixedWidth(logo->sizeHint().width());
+    topL->addWidget(logo, 0, Qt::AlignLeft | Qt::AlignVCenter);
+    topL->addStretch();
+    updateTopTitleForPage(1);
 
     m_topRightSpacer = new QWidget(top);
     m_topRightSpacer->setMinimumWidth(180);
@@ -218,10 +221,6 @@ void MainWindow::buildUi()
     m_topRightSpacer->setStyleSheet(QStringLiteral("background:transparent; border:none;"));
     topL->addWidget(m_topRightSpacer, 1);
 
-    m_animatedLogo = new AnimatedMetalLogoWidget(top);
-    m_animatedLogo->setObjectName("animated_logo");
-    m_animatedLogo->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    m_animatedLogo->raise();
     cL->addWidget(top);
 
     m_stack = new QStackedWidget(m_content);
@@ -307,7 +306,6 @@ void MainWindow::buildUi()
     rootL->addWidget(m_content, 1);
 
     applyAdaptiveShellMetrics();
-    positionAnimatedLogo();
 
     setCentralWidget(m_root);
     applyAdaptiveShellMetrics();

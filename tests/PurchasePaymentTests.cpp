@@ -4413,6 +4413,9 @@ private slots:
         auto* rate = header->findChild<QToolButton*>("headerExchangeRate");
         auto* statements = header->findChild<QToolButton*>("headerStatements");
         QVERIFY(rate && statements);
+        auto* logo = header->findChild<QWidget*>("animated_logo");
+        QVERIFY(logo);
+        QCOMPARE(logo->accessibleName(), QStringLiteral("CarService PointG"));
         QCOMPARE(rate->text(), QStringLiteral("Курс"));
         QCOMPARE(statements->text(), QStringLiteral("Виписки"));
         for (int index : {1, 3, 9}) {
@@ -4427,6 +4430,11 @@ private slots:
                 button->click();
                 QCOMPARE(pages->currentIndex(), index);
             }
+            QVERIFY(logo->isVisibleTo(&window));
+            const QRect brand(logo->mapTo(header, QPoint()), logo->size());
+            QVERIFY(header->rect().contains(brand));
+            QVERIFY(brand.left() < header->width() / 10);
+            QVERIFY(brand.right() < rate->mapTo(header, QPoint()).x());
             QVERIFY(rate->mapTo(header, rate->rect().topRight()).x() < statements->mapTo(header,QPoint()).x());
         }
         const QString path = qEnvironmentVariable("CS_HEADER_PREVIEW");

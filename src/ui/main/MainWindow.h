@@ -32,7 +32,6 @@ class QResizeEvent;
 class QShowEvent;
 class QMoveEvent;
 class QEvent;
-class AnimatedMetalLogoWidget;
 class PageActivationCoordinator;
 class BookingSyncManager;
 class EmailSyncManager;
@@ -70,7 +69,6 @@ protected:
 
 private:
     void buildUi();
-    void positionAnimatedLogo();
     void applyStyle();
     void applyAdaptiveShellMetrics();
     void scheduleGeometryLock(int delayMs = 0);
@@ -97,8 +95,6 @@ private:
     QWidget* m_sidebar = nullptr;
     QWidget* m_content = nullptr;
     QWidget* m_topPill = nullptr;
-    QLabel* m_topTitle = nullptr;
-    AnimatedMetalLogoWidget* m_animatedLogo = nullptr;
     QWidget* m_topRightSpacer = nullptr;
 
     QStackedWidget* m_stack = nullptr;

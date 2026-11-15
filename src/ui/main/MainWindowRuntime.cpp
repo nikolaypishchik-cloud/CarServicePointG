@@ -363,11 +363,7 @@ QString MainWindow::pageTitleForIndex(int idx) const
 
 void MainWindow::updateTopTitleForPage(int idx)
 {
-    if (!m_topTitle) return;
-    const QString title = pageTitleForIndex(idx);
-    if (!title.isEmpty() && m_topTitle->text() != title) {
-        m_topTitle->setText(title);
-    }
+    if (m_topPill) m_topPill->setAccessibleDescription(pageTitleForIndex(idx));
 }
 
 void MainWindow::applyFrozenPageMode(int activeIndex)
@@ -510,17 +506,6 @@ void MainWindow::applyAdaptiveShellMetrics()
     }
 }
 
-void MainWindow::positionAnimatedLogo()
-{
-    if (!m_topPill || !m_animatedLogo) return;
-    const QSize hint = m_animatedLogo->sizeHint();
-    const int liftPx = 4;         // ~1 mm
-    const int x = qMax(0, (m_topPill->width() - hint.width()) / 2);
-    const int y = qMax(0, ((m_topPill->height() - hint.height()) / 2) - liftPx);
-    m_animatedLogo->setGeometry(x, y, hint.width(), hint.height());
-    m_animatedLogo->raise();
-}
-
 void MainWindow::showEvent(QShowEvent* event)
 {
     QMainWindow::showEvent(event);
@@ -603,7 +588,6 @@ void MainWindow::resizeEvent(QResizeEvent* event)
 {
     QMainWindow::resizeEvent(event);
     applyAdaptiveShellMetrics();
-    positionAnimatedLogo();
 }
 
 void MainWindow::moveEvent(QMoveEvent* event)
