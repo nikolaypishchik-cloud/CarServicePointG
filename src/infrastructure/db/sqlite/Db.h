@@ -98,6 +98,7 @@ public:
     static bool removeOrderFromRegistryByUid(const QString& orderUid, QString* errorText = nullptr);
 
 private:
+    static bool ensureCatalogTables(QSqlDatabase database, QString* errorText);
     static bool ensureColumn(const QString& table, const QString& colName, const QString& ddl);
     static bool tableExists(const QString& table);
 };

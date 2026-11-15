@@ -24,13 +24,18 @@ bool Database::ensureCatalogImportSchema(QString* errorText)
     // with:
     //   missing view router_work_order_services
     //   missing view router_work_order_parts
-    if (!ensureRouterCacheSchema(d) || !rebuildRouterViews(d)) {
+    if (!rebuildRouterViews(d)) {
         if (errorText && errorText->trimmed().isEmpty()) {
             *errorText = QString::fromUtf8("Не вдалося відновити router views після підготовки catalog schema.");
         }
         return false;
     }
 
+    return ensureCatalogTables(d, errorText);
+}
+
+bool Database::ensureCatalogTables(QSqlDatabase d, QString* errorText)
+{
     const QSet<QString> currentCols = tableColumnsForDb(d, QStringLiteral("parts_catalog"));
     if (currentCols.isEmpty()) {
         if (errorText) *errorText = QString::fromUtf8("Не вдалося прочитати структуру таблиці parts_catalog.");

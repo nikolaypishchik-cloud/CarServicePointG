@@ -90,7 +90,7 @@ bool Database::runStartupSchemaCheck(QString* errorText)
         if (errorText) *errorText = d.lastError().text();
         return false;
     }
-    if (!ensureRouterCacheSchema(d) || !rebuildRouterViews(d)) {
+    if (!rebuildRouterViews(d)) {
         if (errorText) *errorText = QStringLiteral("Router schema/view rebuild failed");
         return false;
     }
@@ -104,14 +104,13 @@ bool Database::runStartupSchemaCheck(QString* errorText)
     }
 
     QString auditError;
-    if (!ensureCatalogImportSchema(&auditError)) {
+    if (!ensureCatalogTables(d, &auditError)) {
         if (errorText) *errorText = auditError.trimmed().isEmpty() ? QStringLiteral("Catalog schema prepare failed") : auditError;
         return false;
     }
 
-    // ensureCatalogImportSchema() may recurse into ensureSchema(); keep the router
-    // derived views freshly rebuilt right before the audit/preflight boundary.
-    if (!ensureRouterCacheSchema(d) || !rebuildRouterViews(d)) {
+    // Canonical detail preparation can replace tables referenced by router views.
+    if (!rebuildRouterViews(d)) {
         if (errorText) *errorText = QStringLiteral("Router schema/view rebuild failed after catalog schema prepare");
         return false;
     }
