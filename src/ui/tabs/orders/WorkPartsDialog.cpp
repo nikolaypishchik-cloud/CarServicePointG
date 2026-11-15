@@ -431,6 +431,7 @@ void WorkPartsDialog::scheduleWorkPartsRefresh(bool reloadServices,
         }
 
         RuntimeJob::RuntimeJobDispatcher::instance().markRunning(ticket);
+        const auto closeConnection = qScopeGuard([] { AppRuntimeService::closeThreadConnection(); });
         WorkPartsRefreshPayload payload;
         payload.reloadServices = requestedReloadServices;
         payload.reloadParts = requestedReloadParts;

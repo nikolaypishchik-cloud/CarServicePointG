@@ -5897,6 +5897,114 @@ private slots:
         }
     }
 
+    void linkedOrderClickOpensMatchingUid() {
+        QString error;
+        QVERIFY2(StaffAccountService::ensureSchema(db,&error),qPrintable(error));
+        QVERIFY2(AccessControlService::ensureSchema(db,&error),qPrintable(error));
+        QSqlQuery q(db);
+        QVERIFY2(q.exec("INSERT INTO staff_accounts(id,display_name,role) VALUES('qa-owner','QA Owner','owner')"),qPrintable(q.lastError().text()));
+        ActivityAuditService::setCurrentActor({"qa-owner","QA Owner","owner","test"});
+        QVERIFY(AccessControlService::currentUserHasPermission(db,"nav.reports"));
+        QVERIFY2(q.exec("INSERT INTO masters(id,name) VALUES('qa-mechanic','QA')"),qPrintable(q.lastError().text()));
+        QVERIFY2(q.exec("INSERT INTO work_orders(number,order_number,order_year,order_uid,opened_at,status,plate,plate_norm,car,client,master_id) VALUES"
+                        "(1,11,2026,'order-a','2026-09-01','open','AA1234AA','AA1234AA','First','QA','qa-mechanic'),"
+                        "(2,22,2026,'order-b','2026-09-01','open','BB1234BB','BB1234BB','Second','QA','qa-mechanic')"),qPrintable(q.lastError().text()));
+        QVERIFY(prepareFixtureOrderState(1));
+        QVERIFY(prepareFixtureOrderState(2));
+        QVERIFY2(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,name,store,ordered_at,purchase_amount,purchase_price) VALUES"
+                        "(1,1,'order-a','First','Store','2026-09-01',100,100),(2,2,'order-b','Second','Store','2026-09-01',100,100)"),qPrintable(q.lastError().text()));
+        QVERIFY2(q.exec("INSERT INTO work_order_part_attachments(part_id,invoice_number,invoice_date,file_path) VALUES"
+                        "(1,'QA-401','01.09.26','same.pdf'),(2,'QA-401','01.09.26','same.pdf')"),qPrintable(q.lastError().text()));
+        InvoicesPage page;
+        page.resize(1150,600);
+        page.show();
+        page.refresh();
+        auto* table=page.findChild<QTableView*>("invoicesTable");
+        QVERIFY(table);
+        QTRY_COMPARE_WITH_TIMEOUT(table->model()->rowCount(),1,10000);
+        const QModelIndex cell=table->model()->index(0,3);
+        QString uid,internal,openError;
+        bool picked=false;
+        QTimer::singleShot(0,&page,[&] {
+            auto* popup=qobject_cast<QDialog*>(QApplication::activePopupWidget());
+            if (!popup) return;
+            auto* list=popup->findChild<QListWidget*>();
+            if (!list || list->count()!=2) { popup->reject(); return; }
+            const QString capture=qEnvironmentVariable("CS_TEST_SCREENSHOTS");
+            if (!capture.isEmpty() && !popup->grab().save(QDir(capture).filePath("linked-orders.png"))) {
+                popup->reject(); return;
+            }
+            picked=true;
+            QTimer::singleShot(50,&page,[&]{
+                auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                if (auto* order=qobject_cast<OrderDialog*>(dialog)) {
+                    uid=order->recoveryOrderUid();
+                    internal=order->recoveryEntityId();
+                }
+                if (auto* warning=qobject_cast<QMessageBox*>(dialog)) openError=warning->text();
+                if (dialog) dialog->reject();
+            });
+            QTest::mouseClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,list->visualItemRect(list->item(1)).center());
+        });
+        QTest::mouseClick(table->viewport(),Qt::LeftButton,Qt::NoModifier,table->visualRect(cell).center());
+        QVERIFY(picked);
+        QVERIFY2(openError.isEmpty(),qPrintable(openError));
+        QCOMPARE(internal,QStringLiteral("2"));
+        QCOMPARE(uid,QStringLiteral("order-b"));
+    }
+
+    void linkedInvoiceClickSelectsRegistryRow() {
+        QSqlQuery q(db);
+        QVERIFY(q.exec("CREATE TABLE work_order_part_attachments(part_id INTEGER PRIMARY KEY,invoice_number TEXT,invoice_date TEXT,file_path TEXT)"));
+        QVERIFY(q.exec("INSERT INTO work_order_part_attachments VALUES(1,'QA-301','01.09.26','first.pdf'),(2,'QA-302','02.09.26','second.pdf')"));
+        QString error;
+        const auto invoices=InvoiceRegistryService::load(db,&error);
+        QVERIFY2(error.isEmpty(),qPrintable(error));
+        QCOMPARE(invoices.size(),2);
+        OrdersSnapshotRow row;
+        for (const auto& invoice : invoices) {
+            row.invoiceKeys.append(invoice.key);
+            row.invoiceNumbers.append(invoice.number);
+        }
+        OrdersSnapshot snapshot;
+        snapshot.rows.append(row);
+        ReportsPage page;
+        page.resize(1100,650);
+        page.show();
+        auto* tabs=page.findChild<QTabWidget*>();
+        QVERIFY(tabs);
+        tabs->setCurrentIndex(1);
+        auto* orders=tabs->currentWidget()->findChild<QTableView*>();
+        QVERIFY(orders);
+        auto* model=dynamic_cast<ReportsTableSupport::ReportsSnapshotTableModel*>(orders->model());
+        QVERIFY(model);
+        ReportsTableSupport::applyOrdersSnapshot(orders,model,snapshot);
+        const QModelIndex link=model->index(0,3);
+        orders->scrollTo(link);
+        const QRect cell=orders->visualRect(link);
+        QVERIFY(orders->viewport()->rect().contains(cell.center()));
+        auto* registry=page.findChild<QTableView*>("invoicesTable");
+        QVERIFY(registry);
+        bool picked=false;
+        QTimer::singleShot(0,&page,[&]{
+            auto* popup=qobject_cast<QDialog*>(QApplication::activePopupWidget());
+            if (!popup) return;
+            auto* list=popup->findChild<QListWidget*>();
+            if (!list || list->count()!=2) { popup->reject(); return; }
+            const QString capture=qEnvironmentVariable("CS_TEST_SCREENSHOTS");
+            if (!capture.isEmpty() && !popup->grab().save(QDir(capture).filePath("linked-invoices.png"))) {
+                popup->reject(); return;
+            }
+            picked=list->item(1)->text()==row.invoiceNumbers.at(1);
+            QTest::mouseClick(list->viewport(),Qt::LeftButton,Qt::NoModifier,list->visualItemRect(list->item(1)).center());
+        });
+        QTest::mouseClick(orders->viewport(),Qt::LeftButton,Qt::NoModifier,cell.center());
+        QVERIFY(picked);
+        QVERIFY(registry->isVisible());
+        QTRY_VERIFY_WITH_TIMEOUT(registry->selectionModel()->hasSelection(),10000);
+        QCOMPARE(registry->selectionModel()->selectedRows(1).first().data().toString(),row.invoiceNumbers.at(1));
+    }
+
     void orderInvoiceLabelsAndPaymentEmphasis() {
         QTableView table;
         ReportsTableSupport::ReportsSnapshotTableModel model;
@@ -6866,6 +6974,10 @@ private slots:
         QVERIFY2(Database::openPrepared(&runtimeError),qPrintable(runtimeError));
         db=Database::db();
         QCOMPARE(QFileInfo(db.databaseName()).absoluteFilePath(),QFileInfo(App::activeDbFilePath()).absoluteFilePath());
+        if (QByteArray(QTest::currentTestFunction())=="linkedOrderClickOpensMatchingUid") {
+            QVERIFY2(Database::runStartupSchemaCheck(&runtimeError),qPrintable(runtimeError));
+            return;
+        }
         QSqlQuery q(db);
         const QStringList sql={
             "CREATE TABLE work_orders(number INTEGER PRIMARY KEY,order_number INTEGER,order_uid TEXT,plate TEXT,car TEXT,vin TEXT,status TEXT,opened_at TEXT,closed_at TEXT)",
