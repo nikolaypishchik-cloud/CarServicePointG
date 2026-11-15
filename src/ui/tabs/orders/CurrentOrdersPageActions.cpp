@@ -192,6 +192,7 @@ void CurrentOrdersPage::showEvent(QShowEvent* event)
 
 void CurrentOrdersPage::refresh()
 {
+    if (CurrentOrdersRefreshJob::refreshWorkspaceRevision()) m_dirty = true;
     const QString scopeKey = AccessControlService::currentScopeKey();
     if (m_actorScopeKey != scopeKey) {
         m_actorScopeKey = scopeKey;

@@ -110,6 +110,9 @@ void CurrentOrdersPage::buildUi()
         if(isVisible()) BaySnapshot::refresh(this,[this]{markDirty();refresh();});
     };
     connect(bayTimer,&QTimer::timeout,this,refreshBays);
+    connect(bayTimer, &QTimer::timeout, this, [this] {
+        if (isVisible() && !m_refreshInProgress) refresh();
+    });
     bayTimer->start(30000);
     QTimer::singleShot(0,this,refreshBays);
 

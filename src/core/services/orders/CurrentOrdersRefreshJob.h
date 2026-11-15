@@ -16,6 +16,7 @@ struct Result {
     bool cancelled = false;
 };
 
+bool refreshWorkspaceRevision();
 Result run(const QString& filter, const std::shared_ptr<std::atomic_bool>& cancelToken);
 
 } // namespace CurrentOrdersRefreshJob
