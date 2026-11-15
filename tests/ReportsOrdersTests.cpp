@@ -63,6 +63,7 @@
 #include "core/services/ReportsDataLoader.h"
 #include "core/services/orders/OrderDialogPrintQueryService.h"
 #include "core/services/HistoryQueryService.h"
+#include "core/services/orders/CurrentOrdersQueryService.h"
 #include "core/services/OrderStoragePolicyService.h"
 #include "core/services/orders/PartRowPayloadBuilderService.h"
 #include "core/services/WorkshopInventoryService.h"
@@ -166,6 +167,7 @@ private slots:
     void outsourceSnapshotReadFailures();
     void callerOwnedConnectionScope();
     void reportsFilterUsesExplicitSource();
+    void orderRegisterMembershipByUid();
     void orderListAndPrintData();
     void invoiceLinkOpensAttachedFile();
     void partsPdfLayout();
@@ -6159,6 +6161,85 @@ void ReportsOrdersTests::reportsFilterUsesExplicitSource()
     QVERIFY2(!QSqlDatabase::contains(currentConnectionName()),"An explicit-source report must not create a default runtime connection");
     QVERIFY(!QFileInfo::exists(unrelatedRuntime));
     QCOMPARE(found.rows.size(),1);QCOMPARE(found.rows.first().internalOrderNumber,101);
+}
+
+void ReportsOrdersTests::orderRegisterMembershipByUid()
+{
+    QTemporaryDir profile;
+    QVERIFY(profile.isValid());
+    const auto oldRoot = qEnvironmentVariable("CS_TEST_DATA_ROOT");
+    const auto oldName = QCoreApplication::applicationName();
+    const auto oldActor = ActivityAuditService::currentActor();
+    const bool oldTest = QStandardPaths::isTestModeEnabled();
+    const auto restore = qScopeGuard([&] {
+        Database::close();
+        ActivityAuditService::setCurrentActor(oldActor);
+        setIsolatedTestRoot(oldRoot);
+        QCoreApplication::setApplicationName(oldName);
+        QStandardPaths::setTestModeEnabled(oldTest);
+    });
+    QVERIFY(setIsolatedTestRoot(profile.path()));
+    QStandardPaths::setTestModeEnabled(true);
+    QCoreApplication::setApplicationName(isolatedSafetyName("Safety-Register-", profile.path()));
+    QString error;
+    QVERIFY2(Database::prepareRuntime(&error), qPrintable(error));
+    QVERIFY2(Database::openPrepared(&error), qPrintable(error));
+    auto db = Database::db();
+    QVERIFY(QFileInfo(db.databaseName()).absoluteFilePath().startsWith(profile.path() + "/"));
+    QVERIFY(Database::ensureSchema());
+    QVERIFY(ensureRouterCacheSchema(db));
+    QVERIFY(rebuildRouterViews(db));
+    QVERIFY(StaffAccountService::ensureSchema(db, &error));
+    QVERIFY(AccessControlService::ensureSchema(db, &error));
+    QSqlQuery q(db);
+    QVERIFY(q.exec("INSERT INTO staff_accounts(id,display_name,role,active) VALUES('nav-owner','Owner','owner',1)"));
+    ActivityAuditService::setCurrentActor({"nav-owner","Owner","owner","test"});
+    QVERIFY(q.exec("INSERT INTO masters(id,name,role) VALUES('nav-master','Master','master')"));
+    const QStringList statuses{"open", "in_progress", "completed", "paid", "", "planned", "deleted", ""};
+    for (int i = 0; i < statuses.size(); ++i) {
+        q.prepare("INSERT INTO work_orders(number,order_uid,order_number,order_year,opened_at,closed_at,status,plate,plate_norm,car,client,master_id) "
+                  "VALUES(?,?,?,2026,'2026-09-01',?,?,'','','Test',?,'nav-master')");
+        q.addBindValue(101+i);
+        q.addBindValue(QStringLiteral("fixture-%1").arg(i));
+        q.addBindValue(101+i);
+        q.addBindValue(i >= 2 && i <= 4 ? QStringLiteral("2026-09-02") : QStringLiteral(""));
+        q.addBindValue(statuses[i]);
+        q.addBindValue(i % 2 == 0 ? QStringLiteral("Matchclient") : QStringLiteral("Other"));
+        QVERIFY2(q.exec(), qPrintable(q.lastError().text()));
+        QVERIFY2(Database::finalizeNewOrderWorkspaceState(101+i, &error), qPrintable(error));
+    }
+    QVERIFY2(rebuildRouterCacheFromActiveWorkspaceData(db, &error), qPrintable(error));
+    auto verify = [](const QString& filter, const QStringList& open, const QStringList& closed) {
+        auto checkRows = [](const auto& result, QStringList& found) {
+            QVERIFY2(result.errorText.isEmpty(), qPrintable(result.errorText));
+            const int column = result.headers.indexOf("__order_uid");
+            QVERIFY(column >= 0);
+            for (const auto& row : result.rows) found.append(row.at(column).toString());
+        };
+        QStringList current;
+        checkRows(CurrentOrdersQueryService::loadOpenOrders(filter), current);
+        current.sort();
+        QCOMPARE(current, open);
+        HistoryQueryParams params{QDate(2026,9,1), QDate(2026,9,30), filter};
+        params.pageSize = 2;
+        QStringList history;
+        for (;;) {
+            const auto page = HistoryQueryService::loadHistory(params);
+            checkRows(page, history);
+            QVERIFY(history.size() <= closed.size());
+            if (!page.hasMore) break;
+            QCOMPARE(page.rows.size(), params.pageSize);
+            params.offset += params.pageSize;
+        }
+        history.sort();
+        QCOMPARE(history, closed);
+    };
+    const QStringList open{"fixture-0", "fixture-1", "fixture-7"};
+    const QStringList closed{"fixture-2", "fixture-3", "fixture-4"};
+    verify({}, open, closed);
+    verify("Matchclient", {"fixture-0"}, {"fixture-2", "fixture-4"});
+    verify("Absentclient", {}, {});
+    verify({}, open, closed);
 }
 
 void ReportsOrdersTests::orderListAndPrintData()
