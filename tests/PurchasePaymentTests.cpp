@@ -5908,10 +5908,10 @@ private slots:
         QVERIFY2(q.exec("INSERT INTO staff_accounts(id,display_name,role) VALUES('qa-owner','QA Owner','owner')"),qPrintable(q.lastError().text()));
         ActivityAuditService::setCurrentActor({"qa-owner","QA Owner","owner","test"});
         QVERIFY(AccessControlService::currentUserHasPermission(db,"nav.reports"));
-        QVERIFY2(q.exec("INSERT INTO masters(id,name) VALUES('qa-mechanic','QA')"),qPrintable(q.lastError().text()));
+        QVERIFY2(q.exec("INSERT INTO masters(id,name) VALUES('qa-mechanic','QA'),('qa-other','QA Other')"),qPrintable(q.lastError().text()));
         QVERIFY2(q.exec("INSERT INTO work_orders(number,order_number,order_year,order_uid,opened_at,status,plate,plate_norm,car,client,master_id) VALUES"
                         "(1,11,2026,'order-a','2026-09-01','open','AA1234AA','AA1234AA','First','QA','qa-mechanic'),"
-                        "(2,22,2026,'order-b','2026-09-01','open','BB1234BB','BB1234BB','Second','QA','qa-mechanic')"),qPrintable(q.lastError().text()));
+                        "(2,22,2026,'order-b','2026-09-01','open','BB1234BB','BB1234BB','Second','QA','qa-other')"),qPrintable(q.lastError().text()));
         QVERIFY(prepareFixtureOrderState(1));
         QVERIFY(prepareFixtureOrderState(2));
         QVERIFY2(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,name,store,ordered_at,purchase_amount,purchase_price) VALUES"
@@ -6016,7 +6016,7 @@ private slots:
         QVERIFY(labelContains(tile, FormatUtils::money(200, 2)));
 
         QVERIFY2(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,name,store,ordered_at,purchase_amount,purchase_price) VALUES"
-                        "(3,1,'order-a','Outside','Store','2026-08-31',50,50)"),qPrintable(q.lastError().text()));
+                        "(3,1,'order-a','Outside','Store','2026-08-31',50,50),(4,2,'order-b','Other supplier','Beta','2026-09-01',75,75)"),qPrintable(q.lastError().text()));
         PartsQueryService::invalidateCache();
         SupplierDebtReconciliation fact;
         fact.supplier = "Store";
@@ -6042,6 +6042,22 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(labelContains(factTile, FormatUtils::money(249, 2)), 10000);
         QVERIFY(labelContains(factTile, period.supplierReconciliations.value("Store").second));
         QVERIFY(labelContains(tile, FormatUtils::money(200, 2)));
+        QVERIFY(shop->findData("Beta") > 0);
+        shop->setCurrentIndex(shop->findData("Beta"));
+        QVERIFY(labelContains(tile, FormatUtils::money(75, 2)));
+        QVERIFY(!labelContains(factTile, FormatUtils::money(249, 2)));
+        shop->setCurrentIndex(0);
+        QVERIFY(labelContains(tile, FormatUtils::money(275, 2)));
+        QVERIFY2(q.exec("INSERT INTO staff_accounts(id,display_name,role,master_id) VALUES"
+                        "('qa-master','QA Mechanic','master','qa-mechanic')"),qPrintable(q.lastError().text()));
+        ActivityAuditService::setCurrentActor({"qa-master","QA Mechanic","master","test"});
+        const auto restricted = ReportsDataLoader::buildPartsSnapshot(db.databaseName(),"2026-09-01","2026-09-01",0,0,{},{});
+        QVERIFY2(restricted.error.isEmpty(),qPrintable(restricted.error));
+        QVERIFY2(restricted.supplierDebtError.isEmpty(),qPrintable(restricted.supplierDebtError));
+        QCOMPARE(restricted.documentDebtCents.value("Store"),qint64(10000));
+        QVERIFY(!restricted.documentDebtCents.contains("Beta"));
+        QVERIFY(restricted.supplierReconciliations.isEmpty());
+        ActivityAuditService::setCurrentActor({"qa-owner","QA Owner","owner","test"});
     }
 
     void linkedInvoiceClickSelectsRegistryRow() {
