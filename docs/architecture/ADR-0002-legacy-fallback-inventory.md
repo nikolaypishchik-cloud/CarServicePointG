@@ -512,6 +512,7 @@ Counts below classify concrete existing compatibility behavior, not architecture
 | `server/app/services/sync_access.py` | legacy=2 | active | Documents single-station historical scope; empty scope is not cross-tenant authorization. |
 | `server/app/services/sync_service.py` | legacy=1 | active | Keeps ACK conflict policy for clients without revision metadata. |
 | `server/scripts/reconcile_desktop_snapshot.py` | legacy=1 | active | Reads confirmed historical order deletion audit identifiers for reconciliation. |
+| `tests/test_profile_snapshot.py` | legacy=1 | test-only | Verifies restoration of v1 profile manifests without a directory inventory. |
 | `server/tests/test_order_closure.py` | legacy=1 | test-only | Isolated regression coverage for historical data and compatibility behavior; no production exemption. |
 | `server/tests/test_stage2_sync.py` | legacy=2 | test-only | Isolated regression coverage for historical data and compatibility behavior; no production exemption. |
 | `server/tests/test_stage3_security.py` | legacy=3 | test-only | Isolated regression coverage for historical data and compatibility behavior; no production exemption. |

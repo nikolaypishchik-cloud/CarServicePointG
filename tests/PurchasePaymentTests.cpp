@@ -3250,6 +3250,14 @@ private slots:
             QVERIFY(q.exec("CREATE VIEW router_work_order_parts AS SELECT * FROM work_order_parts"));
             changed=CrmFinancialService::read(local,"a");
             QVERIFY2(changed.ok(),qPrintable(changed.error)); QCOMPARE(changed.orders.size(),3); QCOMPARE(changed.totalCents,487002);
+            QVERIFY(q.exec("INSERT INTO work_order_services VALUES(NULL,4,'1','20',NULL)"));
+            QVERIFY(!CrmFinancialService::read(local,"a").ok());
+            QVERIFY(!CrmFinancialService::readOrder(local,"fresh").ok());
+            QVERIFY(q.exec("UPDATE work_order_services SET order_number=2 WHERE order_uid IS NULL"));
+            const auto unambiguous = CrmFinancialService::readOrder(local,"a2");
+            QVERIFY2(unambiguous.ok(),qPrintable(unambiguous.error));
+            QCOMPARE(unambiguous.totalCents,97002);
+            QVERIFY(q.exec("DELETE FROM work_order_services WHERE order_uid IS NULL"));
             QVERIFY(CrmFinancialService::read(local,"missing").orders.isEmpty());
             QVERIFY(CrmFinancialService::read(local,"a' OR 1=1 --").orders.isEmpty());
             QVERIFY(q.exec("INSERT INTO client_payments VALUES('a1',1.5)"));

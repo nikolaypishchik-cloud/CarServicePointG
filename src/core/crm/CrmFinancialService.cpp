@@ -41,10 +41,13 @@ static Snapshot readFiltered(QSqlDatabase db, const QString& identity, bool sing
         identities.insert(order.uid);
         qint64 works=0, materials=0;
         QSqlQuery lines(db);
-        lines.prepare(QStringLiteral("SELECT kind,qty,price,amount FROM (SELECT 0 AS kind,order_uid,order_number,qty,price,amount FROM %1 UNION ALL SELECT 1,order_uid,order_number,qty,price,amount FROM %2) WHERE (TRIM(COALESCE(order_uid,''))<>'' AND order_uid=?) OR (TRIM(COALESCE(order_uid,''))='' AND order_number=?)").arg(services,parts));
+        lines.prepare(QStringLiteral("SELECT kind,qty,price,amount, CASE WHEN TRIM(COALESCE(order_uid,''))='' THEN (SELECT COUNT(*) FROM %3 WHERE number=?) ELSE 1 END FROM (SELECT 0 AS kind,order_uid,order_number,qty,price,amount FROM %1 UNION ALL SELECT 1,order_uid,order_number,qty,price,amount FROM %2) WHERE (TRIM(COALESCE(order_uid,''))<>'' AND order_uid=?) OR (TRIM(COALESCE(order_uid,''))='' AND order_number=?)").arg(services,parts,orders));
+        lines.addBindValue(order.number);
         lines.addBindValue(order.uid); lines.addBindValue(order.number);
         if (!lines.exec()) return fail(lines.lastError().text());
         while (lines.next()) {
+            if (lines.value(4).toLongLong()!=1)
+                return fail(QStringLiteral("Неоднозначний номер наряду %1 для історичної позиції без UID.").arg(order.number));
             const auto amount=(singleOrder || lines.value(3).isNull())
                 ? ExactMoney::storedLineAmount(lines.value(1).toString().toStdString(),lines.value(2).toString().toStdString())
                 : ExactMoney::payment(lines.value(3).toString().toStdString());
