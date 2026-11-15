@@ -36,6 +36,7 @@ struct ExpensesWidgets {
     QLineEdit* expensesTotalEdit = nullptr;
     QPushButton* expensesSaveButton = nullptr;
     QPushButton* electricityPdfButton = nullptr;
+    QLabel* validationLabel = nullptr;
 };
 
 struct ExpensesRecalcResult {
@@ -43,6 +44,7 @@ struct ExpensesRecalcResult {
     double electricityCost = 0.0;
     double total = 0.0;
     QStringList stats;
+    QString inputError;
 };
 
 ExpensesWidgets buildExpensesPage(QWidget* parent);

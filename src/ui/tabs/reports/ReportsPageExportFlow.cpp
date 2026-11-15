@@ -457,6 +457,7 @@ void ReportsPage::exportOutsourcePdf()
 
 void ReportsPage::exportExpensesPdf()
 {
+    if (!canUseExpenseForm()) return;
     const auto data = ReportsExpensesSupport::buildPdfData({
         m_expensesPage, m_elecPrevEdit, m_elecCurrEdit, m_elecTariffEdit, m_elecKwhEdit, m_elecCostEdit,
         m_cleaningEdit, m_cleaningNoteEdit, m_softwareEdit, m_softwareNoteEdit,

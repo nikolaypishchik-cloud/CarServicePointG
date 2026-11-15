@@ -936,6 +936,27 @@ private slots:
         QCOMPARE(pdf.total, 1090.08);
     }
 
+    void expenseFormRejectsInvalidInput() {
+        QWidget parent;
+        using namespace ReportsExpensesSupport;
+        const auto form = buildExpensesPage(&parent);
+        form.elecPrevEdit->setText("25");
+        form.elecCurrEdit->setText("24");
+        QVERIFY(!recalcForm(form, false).inputError.isEmpty());
+        form.elecCurrEdit->setText("26");
+        QVERIFY(!recalcForm(form, false).inputError.isEmpty());
+        form.elecTariffEdit->setText("4,25");
+        for (const auto& value : QStringList{"wrong", "NaN", "inf"}) {
+            form.rentEdit->setText(value);
+            QVERIFY(!recalcForm(form, false).inputError.isEmpty());
+            QVERIFY(form.expensesTotalEdit->text().isEmpty());
+        }
+        form.rentEdit->setText("28,75");
+        const auto corrected = recalcForm(form, false);
+        QVERIFY(corrected.inputError.isEmpty());
+        QCOMPARE(corrected.total, 32.75);
+    }
+
     void expenseFormRecoversAfterBrokenSchema() {
         QSqlQuery q(db);
         QVERIFY(q.exec("ALTER TABLE expenses RENAME COLUMN cleaning TO invalid_cleaning"));
@@ -958,8 +979,33 @@ private slots:
         QVERIFY(dashboard->styleSheet().contains("#145957"));
         QVERIFY(form->findChild<QFrame*>("electricityPanel"));
         QVERIFY(form->findChild<QFrame*>("otherExpensesPanel"));
+        auto* save = form->findChild<QPushButton*>("expenseSave");
+        auto* warning = form->findChild<QLabel*>("expenseValidation");
+        QLineEdit* rent = nullptr;
+        for (auto* field : form->findChildren<QLineEdit*>()) {
+            if (field->accessibleName() == QStringLiteral("Оренда")) rent = field;
+        }
+        QVERIFY(save && warning && rent);
+        rent->setText(QStringLiteral("помилка"));
+        QVERIFY(!save->isEnabled());
+        QVERIFY(warning->isVisible());
+        QVERIFY(warning->text().contains(QStringLiteral("Оренда")));
+        QVERIFY(QMetaObject::invokeMethod(&page, "saveExpenses", Qt::DirectConnection));
+        QVERIFY(q.exec("SELECT count(*) FROM expenses"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 0);
+        rent->setText("120,50");
+        QVERIFY(save->isEnabled());
+        QVERIFY(!warning->isVisible());
         const QString capture = qEnvironmentVariable("CS_EXPENSE_PALETTE_CAPTURE");
         if (!capture.isEmpty()) QVERIFY(page.grab().save(capture));
+        auto* fromDate = dashboard->findChild<QDateEdit*>("dashboardFrom");
+        QVERIFY(fromDate);
+        fromDate->setDate(fromDate->date().addDays(-1));
+        QVERIFY(QMetaObject::invokeMethod(&page, "saveExpenses", Qt::DirectConnection));
+        QVERIFY(q.exec("SELECT count(*) FROM expenses"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(), 0);
         tabs->setCurrentIndex(0);
         QTRY_VERIFY(!dashboard->styleSheet().contains("#145957"));
     }

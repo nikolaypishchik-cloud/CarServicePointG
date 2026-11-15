@@ -207,6 +207,7 @@ void ReportsPage::buildUi()
 
     const ExpensesWidgets expensesWidgets = ReportsExpensesSupport::buildExpensesPage(this);
     m_expensesPage = expensesWidgets.page;
+    m_expenseValidation = expensesWidgets.validationLabel;
     m_elecPrevEdit = expensesWidgets.elecPrevEdit;
     m_elecCurrEdit = expensesWidgets.elecCurrEdit;
     m_elecTariffEdit = expensesWidgets.elecTariffEdit;

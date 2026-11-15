@@ -12,14 +12,17 @@ QString money0(double value)
     return FormatUtils::money(value, 0);
 }
 
-double parseUaNumber(const QString& input)
+double parseUaNumber(const QString& input, bool* valid)
 {
     QString s = input.trimmed();
+    if (valid) *valid = true;
     if (s.isEmpty()) return 0.0;
     s.remove(' ');
     s.replace(',', '.');
     bool ok = false;
     const double v = s.toDouble(&ok);
+    ok = ok && qIsFinite(v);
+    if (valid) *valid = ok;
     return ok ? v : 0.0;
 }
 

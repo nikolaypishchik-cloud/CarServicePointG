@@ -13,6 +13,7 @@
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 #include <QtMath>
+#include <limits>
 
 namespace {
 using namespace ReportsUiSupport;
@@ -31,6 +32,7 @@ void addExpenseRow(QWidget* parent,
 {
     auto* l = new QLabel(label, parent);
     valueEdit = makeWordField();
+    valueEdit->setAccessibleName(label);
     noteEdit = makeWordField(QString::fromUtf8("примітка"));
     grid->addWidget(l, row, 0);
     grid->addWidget(valueEdit, row, 1);
@@ -59,6 +61,9 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
             background: #f8fafc; border: 1px solid #cad6df; border-radius: 8px;
         }
         #electricityPanel QLabel, #otherExpensesPanel QLabel { color: #203044; }
+        #reportsExpensesPage QLabel#expenseValidation {
+            background: #fff2d5; color: #583600; border-radius: 4px; padding: 4px 8px;
+        }
         #reportsExpensesPage QPushButton#expenseSave {
             background: #117477; color: white; border-radius: 5px; padding: 6px 16px;
         }
@@ -92,9 +97,11 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
 
     grid->addWidget(new QLabel(QString::fromUtf8("Лічильник поточний"), w.page), rr, 0);
     w.elecCurrEdit = makeWordField();
+    w.elecCurrEdit->setAccessibleName(QStringLiteral("Поточний показник"));
     grid->addWidget(w.elecCurrEdit, rr, 1);
     grid->addWidget(new QLabel(QString::fromUtf8("Лічильник минулий"), w.page), rr, 3);
     w.elecPrevEdit = makeWordField();
+    w.elecPrevEdit->setAccessibleName(QStringLiteral("Попередній показник"));
     w.elecPrevEdit->setMaximumWidth(170);
     grid->addWidget(w.elecPrevEdit, rr, 4, Qt::AlignLeft);
     ++rr;
@@ -105,6 +112,7 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
     grid->addWidget(w.elecKwhEdit, rr, 1);
     grid->addWidget(new QLabel(QString::fromUtf8("Тариф (грн/кВт·год)"), w.page), rr, 3);
     w.elecTariffEdit = makeWordField();
+    w.elecTariffEdit->setAccessibleName(QStringLiteral("Тариф"));
     w.elecTariffEdit->setMaximumWidth(170);
     grid->addWidget(w.elecTariffEdit, rr, 4, Qt::AlignLeft);
     ++rr;
@@ -145,6 +153,11 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
     w.expensesSaveButton->setObjectName(QStringLiteral("expenseSave"));
     footer->addWidget(w.electricityPdfButton);
     footer->addWidget(w.expensesSaveButton);
+    w.validationLabel = new QLabel(w.page);
+    w.validationLabel->setObjectName(QStringLiteral("expenseValidation"));
+    w.validationLabel->setWordWrap(true);
+    w.validationLabel->hide();
+    expRoot->addWidget(w.validationLabel);
     expRoot->addLayout(footer);
 
     return w;
@@ -188,6 +201,37 @@ ExpensesRecalcResult recalcForm(const ExpensesWidgets& widgets, bool persistTari
     const double prev = parseUaNumber(widgets.elecPrevEdit->text());
     const double curr = parseUaNumber(widgets.elecCurrEdit->text());
     const double tariff = parseUaNumber(widgets.elecTariffEdit->text());
+    for (auto* field : {widgets.elecPrevEdit, widgets.elecCurrEdit, widgets.elecTariffEdit,
+                        widgets.cleaningEdit, widgets.softwareEdit, widgets.heatingEdit,
+                        widgets.amortizationEdit, widgets.rentEdit, widgets.otherEdit}) {
+        bool valid;
+        parseUaNumber(field->text(), &valid);
+        if (!valid) {
+            result.inputError = QStringLiteral("%1: введіть число.").arg(field->accessibleName());
+            break;
+        }
+    }
+    if (result.inputError.isEmpty()) {
+        if (prev < 0 || curr < 0 || tariff < 0)
+            result.inputError = QStringLiteral("Показники лічильника і тариф мають бути невід’ємними.");
+        else if (!widgets.elecCurrEdit->text().trimmed().isEmpty()) {
+            if (widgets.elecPrevEdit->text().trimmed().isEmpty())
+                result.inputError = QStringLiteral("Введіть попередній показник лічильника.");
+            else if (curr < prev)
+                result.inputError = QStringLiteral("Поточний показник менший за попередній.");
+            else if (curr > prev && widgets.elecTariffEdit->text().trimmed().isEmpty())
+                result.inputError = QStringLiteral("Введіть тариф для розрахунку спожитої електроенергії.");
+            else if ((curr - prev) * tariff >= double(std::numeric_limits<qint64>::max()))
+                result.inputError = QStringLiteral("Вартість електроенергії перевищує діапазон розрахунку.");
+        }
+    }
+    if (!result.inputError.isEmpty()) {
+        widgets.elecKwhEdit->clear();
+        widgets.elecCostEdit->clear();
+        widgets.expensesTotalEdit->clear();
+        result.stats = {result.inputError};
+        return result;
+    }
     if (persistTariffSetting && tariff > 0.0) {
         ReportsSettingsService::saveElectricityTariff(tariff);
     }

@@ -58,6 +58,7 @@ private slots:
     void exportElectricityPdf();
 
 private:
+    bool canUseExpenseForm() const;
     enum class ReportTab {
         Period = 0,
         Orders = 1,
@@ -166,6 +167,7 @@ private:
     QLineEdit* m_otherEdit = nullptr;
     QLineEdit* m_otherNoteEdit = nullptr;
     QLineEdit* m_expensesTotalEdit = nullptr;
+    QLabel* m_expenseValidation = nullptr;
     QPushButton* m_expensesSaveButton = nullptr;
     QPushButton* m_electricityPdfButton = nullptr;
     QTableView* m_totalExpensesTable = nullptr;

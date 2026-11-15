@@ -684,6 +684,9 @@ void ReportsPage::recalcExpensesForm()
         m_rentEdit, m_rentNoteEdit, m_otherEdit, m_otherNoteEdit, m_expensesTotalEdit,
         m_expensesSaveButton, m_electricityPdfButton
     }, sender() == m_elecTariffEdit);
+    m_expenseValidation->setText(result.inputError);
+    m_expenseValidation->setVisible(!result.inputError.isEmpty());
+    m_expensesSaveButton->setEnabled(m_elecCurrEdit->isEnabled() && result.inputError.isEmpty());
 
     QStringList stats = {
         QString::fromUtf8("Період:  %1 — %2").arg(m_from->date().toString("dd.MM.yy"), m_to->date().toString("dd.MM.yy"))
@@ -692,9 +695,19 @@ void ReportsPage::recalcExpensesForm()
     setTabStats(ReportTab::Expenses, stats);
 }
 
+bool ReportsPage::canUseExpenseForm() const
+{
+    const int tab = static_cast<int>(ReportTab::Expenses);
+    const QString key = ReportsAsyncSupport::buildTabKey(tab, m_from->date(), m_to->date());
+    return activeTab() == ReportTab::Expenses && m_expensesSaveButton->isEnabled()
+        && m_tabKeys.value(tab) == key;
+}
+
 void ReportsPage::saveExpenses()
 {
+    if (!canUseExpenseForm()) return;
     recalcExpensesForm();
+    if (!m_expensesSaveButton->isEnabled()) return;
     const QString df = m_from->date().toString("yyyy-MM-dd");
     const QString dt = m_to->date().toString("yyyy-MM-dd");
 
