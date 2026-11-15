@@ -70,10 +70,23 @@ class ProfileSnapshotTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.verify(self.backup)
 
+    def test_missing_directory_inventory_blocks_new_restore(self):
+        (self.profile / 'empty-documents').mkdir()
+        m.snapshot(self.profile, self.backup)
+        path = self.backup / 'manifest.json'
+        data = json.loads(path.read_text(encoding='utf-8'))
+        del data['directories']
+        path.write_text(json.dumps(data), encoding='utf-8')
+        target = self.base / 'restored'
+        with self.assertRaisesRegex(ValueError, 'directory inventory'):
+            m.restore(self.backup, target)
+        self.assertFalse(target.exists())
+
     def test_legacy_manifest_without_directories_restores_files(self):
         m.snapshot(self.profile, self.backup)
         path = self.backup / 'manifest.json'
         data = json.loads(path.read_text(encoding='utf-8'))
+        data['format'] = 'carservice-profile-v1'
         data.pop('directories', None)
         path.write_text(json.dumps(data), encoding='utf-8')
         target = m.restore(self.backup, self.base / 'restored')

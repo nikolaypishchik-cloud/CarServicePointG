@@ -170,7 +170,7 @@ def snapshot(profile_root, destination, *, _step=lambda phase: None):
         for name, expected in before.items():
             if digest(current[name]) != expected:
                 raise ValueError(f'File changed during snapshot: {name}')
-        manifest = dict(format='carservice-profile-v1', state='complete',
+        manifest = dict(format='carservice-profile-v2', state='complete',
                         created_utc=datetime.now(timezone.utc).isoformat(), files=entries,
                         source_root=str(root), directories=sorted(directories),
                         scope='Files beneath source_root; no external files or OS credential stores')
@@ -184,8 +184,11 @@ def snapshot(profile_root, destination, *, _step=lambda phase: None):
 def verify(snapshot_root):
     root = checked(Path(snapshot_root))
     manifest = json.loads(checked(root / 'manifest.json').read_text(encoding='utf-8'))
-    if manifest.get('format') != 'carservice-profile-v1' or manifest.get('state') != 'complete':
+    version = manifest.get('format')
+    if version not in ('carservice-profile-v1', 'carservice-profile-v2') or manifest.get('state') != 'complete':
         raise ValueError('Incomplete or unsupported snapshot')
+    if version == 'carservice-profile-v2' and 'directories' not in manifest:
+        raise ValueError('Missing directory inventory')
     seen = set()
     def validate_name(name):
         relative = PurePosixPath(name)
