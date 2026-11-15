@@ -264,6 +264,35 @@ QWidget* MainWindow::ensurePage(int idx)
     }
 }
 
+void MainWindow::openHeaderExpenses()
+{
+    if (!canAccessPage(5)) return;
+    if (auto* active = QApplication::activeModalWidget()) {
+        if (active->objectName() == QStringLiteral("headerExpensesWindow")) {
+            if (active->isMinimized()) active->showNormal();
+            active->raise();
+            active->activateWindow();
+        }
+        return;
+    }
+    if (m_stack->currentIndex() == 5 && m_pageReports && m_pageReports->isShowingExpenses()) {
+        m_pageReports->setFocus();
+        return;
+    }
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("headerExpensesWindow"));
+    dialog.setWindowTitle(tr("Витрати"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* reports = new ReportsPage(&dialog);
+    layout->addWidget(reports);
+    connectPageSignals(reports);
+    reports->showExpensesOnly();
+    const QRect available = AdaptiveUi::availableRect(this);
+    dialog.resize(size().boundedTo(available.size()));
+    dialog.move(available.center() - dialog.rect().center());
+    dialog.exec();
+}
+
 void MainWindow::openHeaderWarehouse()
 {
     if (!canAccessPage(13)) return;

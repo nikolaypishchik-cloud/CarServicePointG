@@ -58,6 +58,9 @@ void AnimatedMetalLogoWidget::rebuildCacheIfNeeded() {
     font.setBold(true);
     font.setPixelSize(static_cast<int>(kTargetLetterPx));
     font.setHintingPreference(QFont::PreferFullHinting);
+    const qreal naturalWidth = QFontMetricsF(font).horizontalAdvance(m_text);
+    if (naturalWidth > width() - 12)
+        font.setPixelSize(qMax(1, qFloor(kTargetLetterPx * (width() - 12) / naturalWidth)));
 
     const qreal ratio = devicePixelRatioF();
     if (m_cachedFont == font && m_cachedSize == size() && !m_letterPixmaps.isEmpty()
@@ -125,6 +128,7 @@ void AnimatedMetalLogoWidget::paintEvent(QPaintEvent* event) {
     font.setBold(true);
     font.setPixelSize(static_cast<int>(kTargetLetterPx));
     font.setHintingPreference(QFont::PreferFullHinting);
+    font = m_cachedFont;
     p.setFont(font);
 
     QFontMetricsF fm(font);

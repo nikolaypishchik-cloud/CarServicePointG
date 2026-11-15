@@ -192,7 +192,7 @@ void MainWindow::buildUi()
     logo->setObjectName("animated_logo");
     logo->setAccessibleName(QStringLiteral("CarService PointG"));
     logo->setAttribute(Qt::WA_TransparentForMouseEvents);
-    logo->setFixedWidth(logo->sizeHint().width());
+    logo->setMaximumWidth(logo->sizeHint().width());
     topL->addWidget(logo, 0, Qt::AlignLeft | Qt::AlignVCenter);
     topL->addStretch();
     updateTopTitleForPage(1);
@@ -237,6 +237,19 @@ void MainWindow::buildUi()
     }
     warehouse->setIcon(QIcon(warehouseImage));
     connect(warehouse, &QToolButton::clicked, this, &MainWindow::openHeaderWarehouse);
+    m_headerExpenses = makeModuleButton("headerExpenses", tr("Витрати"), tr("Відкрити витрати за період"));
+    QPixmap expensesImage(64, 64);
+    expensesImage.fill(Qt::transparent);
+    {
+        QPainter painter(&expensesImage);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(QColor("#f7ac65"), 3.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawRoundedRect(QRectF(12, 5, 40, 54), 4, 4);
+        for (int y : {18, 29, 40}) painter.drawLine(21, y, 43, y);
+        painter.drawLine(33, 50, 43, 50);
+    }
+    m_headerExpenses->setIcon(QIcon(expensesImage));
+    connect(m_headerExpenses, &QAbstractButton::clicked, this, &MainWindow::openHeaderExpenses);
     auto* balance = makeModuleButton("headerInventoryBalance", tr("Залишки"), tr("Відкрити залишки складу"));
     m_headerBalance = balance;
     QPixmap balanceImage(64, 64);

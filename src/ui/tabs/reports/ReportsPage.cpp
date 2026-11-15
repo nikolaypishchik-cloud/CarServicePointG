@@ -50,6 +50,7 @@
 #include <QResizeEvent>
 #include <QSignalBlocker>
 #include <QStandardPaths>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QTableView>
 #include <QTimer>
@@ -60,6 +61,17 @@ namespace {
 using namespace ReportsExpensesSupport;
 using namespace ReportsUiSupport;
 } // namespace
+
+bool ReportsPage::isShowingExpenses() const
+{
+    return activeTab() == ReportTab::Expenses;
+}
+
+void ReportsPage::showExpensesOnly()
+{
+    m_tabs->setCurrentWidget(m_expensesPage);
+    m_tabs->tabBar()->hide();
+}
 
 ReportsPage::ReportsPage(QWidget* parent)
     : QWidget(parent)

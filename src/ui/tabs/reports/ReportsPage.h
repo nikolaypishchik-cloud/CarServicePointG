@@ -36,6 +36,8 @@ class ReportsPage : public QWidget
 {
     Q_OBJECT
 public:
+    bool isShowingExpenses() const;
+    void showExpensesOnly();
     explicit ReportsPage(QWidget* parent=nullptr);
 
 public slots:

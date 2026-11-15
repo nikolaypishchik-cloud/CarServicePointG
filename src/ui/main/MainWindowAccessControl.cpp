@@ -111,6 +111,7 @@ void MainWindow::applyAccessControl()
         it.value()->setEnabled(allowed);
     }
 
+    if (m_headerExpenses) m_headerExpenses->setEnabled(canAccessPage(5));
     if (m_headerWarehouse) m_headerWarehouse->setEnabled(canAccessPage(13));
     if (m_headerBalance) m_headerBalance->setEnabled(canAccessPage(13));
 
