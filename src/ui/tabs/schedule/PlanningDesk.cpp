@@ -326,9 +326,17 @@ void PlanningDesk::edit(Entry original){
     });
     dlg.ensurePolished();
     const auto available = dlg.screen()->availableGeometry().size();
-    const auto wanted = QSize(qMax(460, fields->sizeHint().width() + 44),
-                              fields->sizeHint().height() + buttons.sizeHint().height() + 48);
-    dlg.resize(wanted.boundedTo(available - QSize(32, 64)));
+    const QSize limit=available-QSize(32,64);
+    const auto desiredSize=[&] {
+        return QSize(qMax(460,fields->sizeHint().width()+44),
+                     fields->sizeHint().height()+buttons.sizeHint().height()+48);
+    };
+    if (desiredSize().height()>limit.height()) {
+        form.setContentsMargins(12,6,12,6);
+        form.setVerticalSpacing(3);
+        fields->setStyleSheet(QStringLiteral("QLineEdit,QComboBox,QAbstractSpinBox{padding:2px 7px;}"));
+    }
+    dlg.resize(desiredSize().boundedTo(limit));
     QTimer::singleShot(0, &dlg, [this, &dlg] {
         const QRect workArea = dlg.screen()->availableGeometry();
         QRect frame = dlg.frameGeometry();

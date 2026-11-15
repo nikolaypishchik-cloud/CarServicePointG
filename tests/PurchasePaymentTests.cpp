@@ -6535,6 +6535,8 @@ private slots:
         using namespace PlanningDispatch;
         QSqlQuery sql(db);
         QVERIFY(sql.exec("CREATE TABLE planning_calendar(day TEXT PRIMARY KEY,note TEXT)"));
+        QVERIFY(sql.exec("CREATE TABLE masters(id TEXT PRIMARY KEY,name TEXT,role TEXT,admin_percent REAL,active INTEGER,active_from TEXT,active_to TEXT)"));
+        QVERIFY(sql.exec("INSERT INTO masters VALUES('m1','First master','master',0,1,'',''),('m2','Second master','master',0,1,'','')"));
         const QDate day=QDate::currentDate();
         PlanningRepository repo;
         repo.setDayMap(day,{{8,"Oil change"}});
@@ -6549,7 +6551,7 @@ private slots:
         QVERIFY(queue(&error).isEmpty());QVERIFY(!save(pending[0],a,&error));
         auto scheduled=decode(day,9,repo.getDayMap(day).value(9));
         QCOMPARE(scheduled.vehicle,a.vehicle);QCOMPARE(scheduled.minutes,90);
-        Entry other=a;other.start=600;other.bay=2;
+        Entry other=a;other.start=600;other.bay=2;other.plate="QA42";
         QVERIFY(!save({},other,&error));other.mechanicId="m2";other.bay=1;
         QVERIFY(!save({},other,&error));other.bay=2;
         QVERIFY2(save({},other,&error),qPrintable(error));
@@ -6598,6 +6600,93 @@ private slots:
         QVERIFY(click(QStringLiteral("Змінити запис")));
         QVERIFY(cancelled);
         QCOMPARE(repo.getDayMap(day), beforeEdit);
+        bool saved=false;
+        QTimer::singleShot(30,&page,[&] {
+            auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            auto close=qScopeGuard([&]{if (dialog->isVisible()) dialog->reject();});
+            auto* fields=dialog->findChild<QFrame*>("bookingFields");
+            auto* scroll=dialog->findChild<QScrollArea*>();
+            auto* buttons=dialog->findChild<QDialogButtonBox*>();
+            QVERIFY(fields && scroll && buttons);
+            auto* form=qobject_cast<QFormLayout*>(fields->layout());
+            QVERIFY(form);
+            QCOMPARE(form->rowCount(),10);
+            for (int row=0;row<form->rowCount();++row) {
+                auto* field=form->itemAt(row,QFormLayout::FieldRole);
+                if (!field) field=form->itemAt(row,QFormLayout::SpanningRole);
+                QVERIFY(field && field->widget());
+                const auto bounds=[&](QWidget* w){return QRect(w->mapTo(scroll->viewport(),QPoint()),w->size());};
+                const QRect value=bounds(field->widget());
+                QVERIFY2(scroll->viewport()->rect().contains(value),qPrintable(QString("Hidden field at row %1").arg(row)));
+                if (auto* label=form->itemAt(row,QFormLayout::LabelRole)) {
+                    QVERIFY(scroll->viewport()->rect().contains(bounds(label->widget())));
+                    QVERIFY(bounds(label->widget()).right()<value.left());
+                }
+            }
+            auto* queueBox=fields->findChild<QCheckBox*>();
+            auto* when=fields->findChild<QDateEdit*>();
+            auto* time=fields->findChild<QTimeEdit*>();
+            auto* master=qobject_cast<QComboBox*>(form->itemAt(9,QFormLayout::FieldRole)->widget());
+            auto* client=qobject_cast<QLineEdit*>(form->itemAt(2,QFormLayout::FieldRole)->widget());
+            QVERIFY(queueBox && when && time && master && client);
+            QCOMPARE(master->currentData().toString(),QString("m2"));
+            QCOMPARE(time->time(),QTime(10,0));
+            client->setText("QA customer");
+            queueBox->setChecked(true);
+            QVERIFY(!time->isEnabled() && !when->isEnabled());
+            buttons->button(QDialogButtonBox::Save)->click();
+            saved=dialog->result()==QDialog::Accepted;
+        });
+        QVERIFY(click(QStringLiteral("Змінити запис")));
+        QVERIFY(saved);
+        const auto queued=queue(&error);
+        QCOMPARE(queued.size(),1);
+        QCOMPARE(queued.first().client,QString("QA customer"));
+        QCOMPARE(queued.first().vehicle,other.vehicle);
+        QCOMPARE(queued.first().plate,other.plate);
+        QCOMPARE(queued.first().mechanicId,other.mechanicId);
+        QCOMPARE(queued.first().minutes,other.minutes);
+        QCOMPARE(queued.first().bay,other.bay);
+        QCOMPARE(queued.first().work,other.work);
+        QVERIFY(!repo.getDayMap(day).contains(10));
+        QListWidget* queueList=nullptr;
+        for (auto* list : desk->findChildren<QListWidget*>())
+            if (list->count()==1 && list->item(0)->text().contains(other.plate)) queueList=list;
+        QVERIFY(queueList);
+        queueList->setCurrentRow(0);
+        bool scheduledAgain=false;
+        QTimer::singleShot(30,&page,[&] {
+            auto* dialog=qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            auto close=qScopeGuard([&]{if (dialog->isVisible()) dialog->reject();});
+            auto* box=dialog->findChild<QCheckBox*>();
+            auto* when=dialog->findChild<QDateEdit*>();
+            auto* time=dialog->findChild<QTimeEdit*>();
+            auto* buttons=dialog->findChild<QDialogButtonBox*>();
+            QVERIFY(box && when && time && buttons);
+            QVERIFY(box->isChecked() && !when->isEnabled() && !time->isEnabled());
+            box->setChecked(false);
+            QVERIFY(when->isEnabled() && time->isEnabled());
+            when->setDate(day.addDays(2));
+            time->setTime(QTime(13,15));
+            buttons->button(QDialogButtonBox::Save)->click();
+            scheduledAgain=dialog->result()==QDialog::Accepted;
+        });
+        QTest::keyClick(queueList,Qt::Key_Return);
+        QVERIFY(scheduledAgain);
+        QVERIFY(queue(&error).isEmpty());
+        const auto reloaded=repo.getDayMap(day.addDays(2));
+        QCOMPARE(reloaded.size(),1);
+        const auto result=decode(day.addDays(2),13,reloaded.value(13));
+        QCOMPARE(result.start,795);
+        QCOMPARE(result.minutes,other.minutes);
+        QCOMPARE(result.vehicle,other.vehicle);
+        QCOMPARE(result.plate,other.plate);
+        QCOMPARE(result.client,QString("QA customer"));
+        QCOMPARE(result.work,other.work);
+        QCOMPARE(result.bay,other.bay);
+        QCOMPARE(result.mechanicId,other.mechanicId);
         QVERIFY(click(QStringLiteral("Місяць")));QCOMPARE(grid->columnCount(),7);QVERIFY(grid->rowCount()>=4);
         if(!capture.isEmpty())QVERIFY(page.grab().save(capture+"/month.png"));
     }
