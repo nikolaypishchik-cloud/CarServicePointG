@@ -44,6 +44,7 @@
 #include "core/services/ReportsDataLoader.h"
 #include "core/services/ReportsSyncSupport.h"
 #include "core/util/FormatUtils.h"
+#include "core/services/PurchasePaymentService.h"
 #include "core/services/ReportsPdfPartsSupport.h"
 #include "ui/tabs/reports/ReportsPage.h"
 #include "ui/tabs/reports/ReportsTableSupport.h"
@@ -163,6 +164,29 @@ private slots:
         }
         QSqlDatabase::removeDatabase(connection);
         QCOMPARE(QSqlDatabase::connectionNames(), before);
+    }
+
+    void partsReportSupplierPaymentIdentity() {
+        preparePartsPayrollPdfFixture();
+        QString error;
+        QVERIFY2(PurchasePaymentService::ensureSchema(db, &error), qPrintable(error));
+        QSqlQuery q(db);
+        const auto tip = [&] {
+            const auto report = ReportsDataLoader::buildPartsSnapshot(db.databaseName(), "2026-01-01", "2026-01-31", 0, 0, {}, {});
+            return report.rows.size() == 2 ? report.rows.last().tooltip : report.error;
+        };
+        QVERIFY(q.exec("UPDATE work_order_parts SET paid=0 WHERE id=21"));
+        QVERIFY(q.exec("INSERT INTO purchase_payment_balances VALUES('part:21:other-order',3000)"));
+        QVERIFY(tip().contains(QStringLiteral("Оплата постачальнику: Не сплачено")));
+        QVERIFY(q.exec("INSERT INTO purchase_payment_balances VALUES('part:21:pdf-order',1250)"));
+        QVERIFY(tip().contains(QStringLiteral("Оплата постачальнику: Частково сплачено")));
+        QVERIFY(q.exec("UPDATE purchase_payment_balances SET paid_cents=3010 WHERE payment_key='part:21:pdf-order'"));
+        QVERIFY(tip().contains(QStringLiteral("Оплата постачальнику: Сплачено")));
+        QVERIFY(q.exec("CREATE TABLE archived_report_parts AS SELECT * FROM router_work_order_parts"));
+        QVERIFY(q.exec("UPDATE archived_report_parts SET part_uid='other-archived-part'"));
+        QVERIFY(q.exec("DROP VIEW router_work_order_parts"));
+        QVERIFY(q.exec("CREATE VIEW router_work_order_parts AS SELECT * FROM archived_report_parts"));
+        QVERIFY(tip().contains(QStringLiteral("Оплата постачальнику: Немає підтверджених даних")));
     }
 
     void partsQuantityAndUnitPrice() {

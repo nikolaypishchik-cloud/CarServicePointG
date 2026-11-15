@@ -15,6 +15,7 @@ inline bool execute(QSqlDatabase db,QSqlQuery* query,QString* error,bool withIss
         return db.record(table).contains("part_uid") ? "COALESCE(" + alias + ".part_uid,'')" : QStringLiteral("''");
     };
     const QSqlRecord partColumns = db.record("router_work_order_parts");
+    const QString paid = partColumns.contains("paid") ? QStringLiteral("p.paid") : QStringLiteral("NULL");
     const QString manufacturer = partColumns.contains("manufacturer") ? QStringLiteral("p.manufacturer") : QStringLiteral("NULL");
     const QString installedAt = partColumns.contains("installed_at") ? QStringLiteral("p.installed_at") : QStringLiteral("NULL");
     if(!query->prepare(QStringLiteral(
@@ -26,7 +27,7 @@ inline bool execute(QSqlDatabase db,QSqlQuery* query,QString* error,bool withIss
                 "COALESCE(p.store,''), COALESCE(p.name,''), COALESCE(p.part_number,''), "
                 "COALESCE(wo.plate,''), COALESCE(wo.car,''), COALESCE(wo.vin,''), "
                 "COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END), "
-                "p.qty, COALESCE(p.amount,0), COALESCE(p.purchase_price,0), COALESCE(p.markup_percent,0), COALESCE(p.manual_markup_override,0), COALESCE(a.invoice_number,''), COALESCE(a.file_path,''), COALESCE(a.invoice_date,''), COALESCE(p.pricing_calc_version,1), wo.order_uid%4, %6 AS report_manufacturer, %7 AS report_installed_at "
+                "p.qty, COALESCE(p.amount,0), COALESCE(p.purchase_price,0), COALESCE(p.markup_percent,0), COALESCE(p.manual_markup_override,0), COALESCE(a.invoice_number,''), COALESCE(a.file_path,''), COALESCE(a.invoice_date,''), COALESCE(p.pricing_calc_version,1), wo.order_uid%4, %6 AS report_manufacturer, %7 AS report_installed_at, %8 AS report_paid, wp.id IS NOT NULL AS report_local_part "
                 "FROM router_work_order_parts p "
                 "LEFT JOIN unique_owners owner ON owner.lookup=CASE WHEN COALESCE(p.order_uid,'')<>'' THEN 'u:'||p.order_uid ELSE 'n:'||p.order_number END "
                 "LEFT JOIN headers wo ON wo.number=owner.number AND wo.order_uid IS owner.order_uid "
@@ -35,7 +36,7 @@ inline bool execute(QSqlDatabase db,QSqlQuery* query,QString* error,bool withIss
                 .arg(uidColumn("work_order_parts","wp"), uidColumn("router_work_order_parts","p"),
                      withIssuedStock ? QStringLiteral("issued_stock AS MATERIALIZED (SELECT DISTINCT part_id,order_number FROM workshop_spare_movements WHERE operation='issue'), ") : QString(),
                      withIssuedStock ? QStringLiteral(", issued.part_id IS NOT NULL") : QString(),
-                     withIssuedStock ? QStringLiteral(" LEFT JOIN issued_stock issued ON issued.part_id=wp.id AND issued.order_number=wp.order_number") : QString(), manufacturer, installedAt)
+                     withIssuedStock ? QStringLiteral(" LEFT JOIN issued_stock issued ON issued.part_id=wp.id AND issued.order_number=wp.order_number") : QString(), manufacturer, installedAt, paid)
                 + (withIssuedStock ? QStringLiteral(" ORDER BY COALESCE(NULLIF(TRIM(p.store),''), '(без магазину)') ASC,p.order_number ASC,p.id ASC") : QString()))){if(error)*error=query->lastError().text();return false;}
     if(!query->exec()){if(error)*error=query->lastError().text();return false;}
     return true;

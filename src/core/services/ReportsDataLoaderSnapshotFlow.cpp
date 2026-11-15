@@ -271,6 +271,7 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 QString store;
                 QString partName;
                 QString partNumber;
+                QString supplierPayment;
                 QString manufacturer;
                 QString installedAt;
                 QString invoiceNumber;
@@ -299,6 +300,8 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
             const QDate from = DateFormats::parseDate(df);
             const QDate to = DateFormats::parseDate(dt);
             QSqlQuery q(db);
+            QString balanceError;
+            const auto balances = PurchasePaymentService::balances(db, &balanceError);
             if(!PartsReportQuery::execute(db,&q,&snapshot.error,true))return;
 
             {
@@ -331,6 +334,23 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                     row.purchase = q.value(11).toDouble();
                     row.quantityKnown = !q.value(12).isNull();
                     row.qty = q.value(12).toDouble();
+                    const QVariant paidFlag = q.value("report_paid");
+                    const bool localPart = q.value("report_local_part").toBool();
+                    const QString paymentKey = PurchasePaymentService::key("part", row.rowId, row.orderUid);
+                    if (localPart && balanceError.isEmpty() && balances.contains(paymentKey)) {
+                        const qint64 paidCents = balances.value(paymentKey);
+                        const qint64 totalCents = PurchasePaymentService::cents(row.purchase);
+                        if (paidCents <= 0) row.supplierPayment = QStringLiteral("Не сплачено");
+                        else if (totalCents <= 0) row.supplierPayment = QStringLiteral("Потребує звірки");
+                        else if (paidCents < totalCents) row.supplierPayment = QStringLiteral("Частково сплачено");
+                        else row.supplierPayment = QStringLiteral("Сплачено");
+                    } else if (localPart && balanceError.isEmpty() && !paidFlag.isNull()) {
+                        row.supplierPayment = paidFlag.toBool() ? QStringLiteral("Сплачено") : QStringLiteral("Не сплачено");
+                    } else if (!localPart && paidFlag.toBool()) {
+                        row.supplierPayment = QStringLiteral("Сплачено");
+                    } else {
+                        row.supplierPayment = QStringLiteral("Немає підтверджених даних");
+                    }
                     const double storedClientAmount = qMax(0.0, q.value(13).toDouble());
                     const bool recordedPrice = q.value(20).toInt() >= 3;
                     row.client = storedClientAmount;
@@ -411,6 +431,7 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 out.qty = row.quantityKnown ? FormatUtils::smartQty(row.qty) : QStringLiteral("—");
                 out.client = FormatUtils::formatNumberSpaces(row.client, 0);
                 QStringList tip;
+                tip << QStringLiteral("Оплата постачальнику: %1").arg(row.supplierPayment);
                 if (!row.partNumber.trimmed().isEmpty()) tip << QString::fromUtf8("OEM: %1").arg(row.partNumber.trimmed());
                 if (!row.manufacturer.isEmpty()) tip << QStringLiteral("Виробник: %1").arg(row.manufacturer);
                 if (!row.installedAt.isEmpty()) tip << QStringLiteral("Встановлено: %1").arg(row.installedAt);
