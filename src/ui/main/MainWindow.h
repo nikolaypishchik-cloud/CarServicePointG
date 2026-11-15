@@ -111,7 +111,6 @@ private:
     PlanningPage* m_pagePlanning = nullptr;
     CurrentOrdersPage* m_pageCurrent = nullptr;
     HistoryPage* m_pageHistory = nullptr;
-    QWidget* m_ordersNavigation = nullptr;
     PartsPage* m_pageParts = nullptr;
     WorkshopInventoryPage* m_pageWorkshopInventory = nullptr;
     MastersPage* m_pageMasters = nullptr;

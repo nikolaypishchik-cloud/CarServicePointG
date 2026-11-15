@@ -464,11 +464,15 @@ void PlanningPage::setPageFrozen(bool frozen)
 
 QRect PlanningPage::editorTargetRect() const
 {
-    const QRect area = m_scroll->viewport()->rect();
-    const QSize sz(qMax(760, area.width()-60), qMax(520, area.height()-60));
-    const QPoint p = m_scroll->viewport()->mapTo(const_cast<PlanningPage*>(this),
-        QPoint((area.width()-sz.width())/2, (area.height()-sz.height())/2));
-    return QRect(p, sz);
+    const QWidget* host = m_desk ? static_cast<const QWidget*>(this) : m_scroll->viewport();
+    QRect area = QRect(host->mapToGlobal(QPoint()), host->size())
+                     .intersected(QRect(mapToGlobal(QPoint()), size()));
+    if (QScreen* monitor = host->screen())
+        area = area.intersected(monitor->availableGeometry());
+    const int xMargin = qMin(30, area.width() / 20);
+    const int yMargin = qMin(30, area.height() / 20);
+    area.adjust(xMargin, yMargin, -xMargin, -yMargin);
+    return QRect(mapFromGlobal(area.topLeft()), area.size());
 }
 void PlanningPage::animateEditorOpen()
 {
@@ -476,7 +480,7 @@ void PlanningPage::animateEditorOpen()
     m_editorAnimGroup->stop();
     const QRect target = editorTargetRect();
     const QPoint c = target.center();
-    const QSize startSz(qMax(420, target.width()/2), qMax(280, target.height()/2));
+    const QSize startSz = (target.size() / 2).expandedTo(m_editor->minimumSizeHint()).boundedTo(target.size());
     const QRect start(QPoint(c.x() - startSz.width()/2, c.y() - startSz.height()/2), startSz);
     m_editor->setGeometry(start);
     m_editor->show();
@@ -497,7 +501,7 @@ void PlanningPage::animateEditorClose(bool hideOnly)
     m_editorAnimGroup->stop();
     const QRect cur = m_editor->geometry();
     const QPoint c = cur.center();
-    const QSize endSz(qMax(380, cur.width()/2), qMax(240, cur.height()/2));
+    const QSize endSz = (cur.size() / 2).expandedTo(m_editor->minimumSizeHint()).boundedTo(cur.size());
     const QRect end(QPoint(c.x() - endSz.width()/2, c.y() - endSz.height()/2), endSz);
     m_editorGeomAnim->setStartValue(cur);
     m_editorGeomAnim->setEndValue(end);

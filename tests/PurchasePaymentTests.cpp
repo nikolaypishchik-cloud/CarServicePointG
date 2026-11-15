@@ -6,6 +6,7 @@
 #include "core/services/ElitDocumentAssociation.h"
 #include "core/io/SupplierInvoiceTemplateStore.h"
 #include <QSemaphore>
+#include <QMouseEvent>
 #include <thread>
 #include "infrastructure/db/sqlite/ScopedConnectionManager.h"
 #include "ui/tabs/settings/StaffSessionDialog.h"
@@ -6097,6 +6098,97 @@ private slots:
         QVERIFY(!table->model()->index(0, 0).data(Qt::BackgroundRole).isValid());
         QCOMPARE(table->model()->index(0, 5).data().toString(), QString::fromUtf8("Сплачена"));
     }
+    void dispatchMovesTimeWithoutChangingBookingIdentity() {
+        using namespace PlanningDispatch;
+        QSqlQuery sql(db);
+        QVERIFY(sql.exec("CREATE TABLE planning_calendar(day TEXT PRIMARY KEY,note TEXT)"));
+        const auto day = QDate::currentDate();
+        const QString raw = QStringLiteral("Oil service");
+        Entry assigned;
+        assigned.day = day;
+        assigned.start = 600;
+        assigned.minutes = 45;
+        assigned.mechanicId = "m1";
+        assigned.bay = 1;
+        assigned.vehicle = "Audi Q7";
+        assigned.client = "Test client";
+        assigned.work = "Service";
+        const QString extras = QStringLiteral(" | Джерело: телефон | UID: test-214");
+        const QString saved = encode(assigned) + extras;
+        PlanningRepository repo;
+        QString error;
+        repo.setDayMap(day, {{8,raw}, {10,saved}, {12,encode(assigned).replace("10:00-10:45","12:00-12:45")}});
+        repo.setDayReminderActive(day,true);
+        Entry moved;
+        const auto legacy = decode(day, 8, raw);
+        QVERIFY2(moveTime(legacy, 555, &moved, &error), qPrintable(error));
+        QCOMPARE(moved.work, raw);
+        QCOMPARE(moved.usesDayEditor, legacy.usesDayEditor);
+        QCOMPARE(moved.minutes, 0);
+        QCOMPARE(moved.bay, 0);
+        QVERIFY(moved.mechanicId.isEmpty());
+        auto map = repo.getDayMap(day);
+        QVERIFY(!map.contains(8));
+        QCOMPARE(decode(day,9,map.value(9)).start,555);
+        QVERIFY(!moveTime(legacy, 570, nullptr, &error));
+        QCOMPARE(repo.getDayMap(day), map);
+        QVERIFY2(moveTime(moved, 480, &moved, &error), qPrintable(error));
+        QCOMPARE(repo.getDayMap(day).value(8), raw);
+        const auto original = decode(day, 10, saved);
+        map = repo.getDayMap(day);
+        QVERIFY(!moveTime(original, 720, nullptr, &error));
+        QCOMPARE(repo.getDayMap(day), map);
+        QVERIFY2(moveTime(original, 615, &moved, &error), qPrintable(error));
+        QCOMPARE(moved.raw, QString(saved).replace("10:00-10:45","10:15-11:00"));
+        QCOMPARE(repo.getDayMap(day).value(10), moved.raw);
+        QCOMPARE(moved.minutes, assigned.minutes);
+        QCOMPARE(moved.client, assigned.client);
+        QCOMPARE(moved.mechanicId, assigned.mechanicId);
+        QCOMPARE(moved.bay, assigned.bay);
+        QVERIFY(repo.isDayReminderActive(day));
+    }
+    void dispatchUnassignedMouseDrag() {
+        QSqlQuery sql(db);
+        QVERIFY(sql.exec("CREATE TABLE planning_calendar(day TEXT PRIMARY KEY,note TEXT)"));
+        const QDate today = QDate::currentDate();
+        PlanningRepository repo;
+        const QString raw = QStringLiteral("Oil service");
+        repo.setDayMap(today, {{8, raw}});
+        PlanningPage page(nullptr, true);
+        page.resize(1000, 680);
+        page.show();
+        auto* grid = page.findChild<QTableWidget*>("dispatchSchedule");
+        QVERIFY(grid);
+        for (auto* b : page.findChildren<QPushButton*>())
+            if (b->text() == QStringLiteral("День")) { b->click(); break; }
+        auto* card = grid->findChild<QPushButton*>("dispatchAppointment");
+        QVERIFY(card);
+        grid->scrollToItem(grid->item(grid->rowCount()-1,1));
+        QCoreApplication::processEvents();
+        const QPoint press(3, card->height()/2);
+        const int y = card->mapTo(grid->viewport(), press).y();
+        const QPoint target(grid->columnViewportPosition(6)+2, y);
+        QVERIFY(grid->viewport()->rect().contains(target));
+        const auto gesture = [&](bool cancel) {
+            const QPoint destination = card->mapFromGlobal(grid->viewport()->mapToGlobal(target));
+            QTest::mousePress(card, Qt::LeftButton, {}, press);
+            QMouseEvent move(QEvent::MouseMove, QPointF(destination), QPointF(card->mapToGlobal(destination)),
+                             Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(card, &move);
+            if (cancel) QTest::keyClick(card, Qt::Key_Escape);
+            QTest::mouseRelease(card, Qt::LeftButton, {}, destination);
+        };
+        gesture(true);
+        QCOMPARE(repo.getDayMap(today).value(8), raw);
+        gesture(false);
+        QTRY_VERIFY(repo.getDayMap(today).contains(9));
+        const auto stored = PlanningDispatch::decode(today, 9, repo.getDayMap(today).value(9));
+        QCOMPARE(stored.start, 555);
+        QCOMPARE(stored.work, raw);
+        QVERIFY(stored.mechanicId.isEmpty());
+        QCOMPARE(stored.bay, 0);
+        QVERIFY(!repo.getDayMap(today).contains(8));
+    }
     void workshopDispatchQueueAndResources() {
         using namespace PlanningDispatch;
         QSqlQuery sql(db);
@@ -6138,6 +6230,32 @@ private slots:
         QVERIFY(!grid->findChildren<QPushButton*>("dispatchAppointment").isEmpty());
         QVERIFY(click(QStringLiteral("День")));QVERIFY(grid->columnCount()>=41);
         if(!capture.isEmpty())QVERIFY(page.grab().save(capture+"/day.png"));
+        QPushButton* appointment = nullptr;
+        for (auto* b : grid->findChildren<QPushButton*>("dispatchAppointment"))
+            if (b->text().contains("Audi Q7")) appointment = b;
+        QVERIFY(appointment);
+        appointment->click();
+        const auto beforeEdit = repo.getDayMap(day);
+        bool cancelled = false;
+        QTimer::singleShot(30, &page, [&] {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            auto cleanup = qScopeGuard([&] { dialog->reject(); });
+            QCOMPARE(dialog->windowTitle(), QStringLiteral("Змінити запис"));
+            auto* fields = dialog->findChild<QFrame*>("bookingFields");
+            auto* buttons = dialog->findChild<QDialogButtonBox*>();
+            QVERIFY(fields && buttons);
+            QVERIFY(fields->findChild<QCheckBox*>());
+            QVERIFY(dialog->screen()->availableGeometry().contains(dialog->frameGeometry()));
+            QVERIFY(buttons->button(QDialogButtonBox::Save)->isVisibleTo(dialog));
+            QVERIFY(buttons->button(QDialogButtonBox::Cancel)->isVisibleTo(dialog));
+            if (!capture.isEmpty()) QVERIFY(dialog->grab().save(capture + "/edit.png"));
+            buttons->button(QDialogButtonBox::Cancel)->click();
+            cancelled = true;
+        });
+        QVERIFY(click(QStringLiteral("Змінити запис")));
+        QVERIFY(cancelled);
+        QCOMPARE(repo.getDayMap(day), beforeEdit);
         QVERIFY(click(QStringLiteral("Місяць")));QCOMPARE(grid->columnCount(),7);QVERIFY(grid->rowCount()>=4);
         if(!capture.isEmpty())QVERIFY(page.grab().save(capture+"/month.png"));
     }
@@ -6259,6 +6377,14 @@ private slots:
             QVERIFY(dialog);
             const auto close = qScopeGuard([&]{if(dialog->isVisible())dialog->reject();});
             QCOMPARE(dialog->objectName(), QString("purchasePaymentDialog"));
+            auto* scroll = dialog->findChild<QScrollArea*>("paymentScroll");
+            auto* balance = dialog->findChild<QLabel*>("paymentRemaining");
+            QVERIFY(scroll && balance);
+            QCoreApplication::processEvents();
+            if (dialog->screen()->availableGeometry().height() >= 700) {
+                QTRY_COMPARE(scroll->verticalScrollBar()->maximum(), 0);
+                QVERIFY(scroll->viewport()->rect().contains(QRect(balance->mapTo(scroll->viewport(), QPoint()), balance->size())));
+            }
             dialog->findChild<QCheckBox*>("partialPayment")->setChecked(true);
             auto* value = dialog->findChild<QDoubleSpinBox*>("partialPaymentAmount");
             QVERIFY(value); value->setValue(57);
@@ -7340,7 +7466,15 @@ private slots:
         auto* search=page.findChild<QLineEdit*>("debtAnalysisSearch");
         auto* report=page.findChild<QTextBrowser*>("debtAnalysisReport");
         QVERIFY(views && source && search && report); QCOMPARE(views->count(),4);
-        QCOMPARE(views->currentIndex(),3);views->setCurrentIndex(0);
+        QCOMPARE(views->currentIndex(),0);
+        for (int mode = 1; mode < views->count(); ++mode) {
+            views->setCurrentIndex(mode);
+            page.refresh();
+            QCOMPARE(views->currentIndex(),mode);
+            page.hide();
+            page.show();
+            QCOMPARE(views->currentIndex(),0);
+        }
         auto* expenses=page.findChild<QLabel*>("debtAnalysisExpenses"); QVERIFY(expenses);
         QTRY_VERIFY(expenses->text().contains(QString::fromUtf8("сукупні")));
         QVERIFY(report->toPlainText().contains(QString::fromUtf8("Постачальники та зобов'язання")));

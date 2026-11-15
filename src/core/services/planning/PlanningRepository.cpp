@@ -169,8 +169,20 @@ Entry decode(QDate day,int hour,const QString& text)
 {
     Entry e; e.day=day; e.hour=hour; e.start=hour*60; e.raw=text;
     e.cancelled=text.contains(QStringLiteral("❌")) || text.contains(QStringLiteral("✕"));
-    const auto fields=text.split('|');
-    e.work=text;
+    QString payload = text;
+    static const QRegularExpression movedStart(QStringLiteral(R"( \| Початок запису: (\d{2}:\d{2})$)"));
+    const auto match = movedStart.match(payload);
+    if (match.hasMatch()) {
+        const QTime start = QTime::fromString(match.captured(1), "HH:mm");
+        if (start.isValid()) {
+            e.start = start.hour() * 60 + start.minute();
+            payload.truncate(match.capturedStart());
+        }
+    }
+    e.usesDayEditor = (payload.contains('|') || payload.contains("[Online]", Qt::CaseInsensitive))
+        && !payload.contains(QStringLiteral(" | Запис СТО | "));
+    const auto fields=payload.split('|');
+    e.work=payload;
     if(fields.size()>=9) {
         e.plate=fields[0].trimmed(); e.vehicle=fields[1].trimmed();
         e.client=fields[3].trimmed(); e.work=fields[5].trimmed(); e.mechanic=fields[6].trimmed();
@@ -221,7 +233,7 @@ QList<Entry> queue(QString* error)
         if(!limited || (!id.isEmpty() && e.mechanicId==id))out.append(e);}
     return out;
 }
-bool save(const Entry& before,const Entry& after,QString* error)
+static bool storeEntry(const Entry& before,const Entry& after,const QString& raw,QString* error)
 {
     auto db=Database::db();
     auto fail=[&](QString text){if(error)*error=text;return false;};
@@ -229,11 +241,6 @@ bool save(const Entry& before,const Entry& after,QString* error)
     const auto mine=AccessControlService::currentMasterId(db);
     if(AccessControlService::currentActorIsMaster() && (mine.isEmpty() || after.mechanicId!=mine || (!before.raw.isEmpty() && decode(before.day,before.hour,before.raw).mechanicId!=mine)))
         return fail(QStringLiteral("Доступні лише власні записи."));
-    for(const auto& field:{after.plate,after.vehicle,after.client,after.work,after.mechanic,after.mechanicId})
-        if(field.contains('|') || field.contains('\n') || field.contains('\r'))return fail(QStringLiteral("Вилучіть роздільник або перенесення рядка."));
-    if(after.vehicle.trimmed().isEmpty() || after.work.trimmed().isEmpty() || after.bay<0 || after.bay>3 || (after.day.isValid() && (!after.bay || after.mechanicId.isEmpty()))
-        || after.minutes<15 || after.minutes%15 || after.start%15 || after.start<480 || after.start+after.minutes>1080)
-        return fail(QStringLiteral("Перевірте авто, роботу, механіка та час у межах 08:00–18:00."));
     if(!ensureQueue(db,error))return false;
     if(!db.transaction())return fail(db.lastError().text());
     auto abort=[&](QString text){db.rollback();return fail(text);};
@@ -258,7 +265,7 @@ bool save(const Entry& before,const Entry& after,QString* error)
         q.addBindValue(before.queueId);q.addBindValue(before.raw);
         if(!q.exec())return abort(q.lastError().text());if(q.numRowsAffected()!=1)return abort(stale);
     }
-    const auto raw=encode(after);
+
     if(after.day.isValid()){
         auto& m=maps[after.day];
         for(auto it=m.cbegin();it!=m.cend();++it)for(const auto& item:it.value().split(QStringLiteral(" || "),Qt::SkipEmptyParts))
@@ -266,6 +273,8 @@ bool save(const Entry& before,const Entry& after,QString* error)
         auto& slot=m[after.start/60];
         if(AccessControlService::currentActorIsMaster() && !slot.isEmpty() && !ownPlanningEntry(slot,ownPlanningName()))
             return abort(QStringLiteral("Ця година вже має призначення іншого працівника."));
+        if (slot.split(QStringLiteral(" || "), Qt::SkipEmptyParts).contains(raw))
+            return abort(QStringLiteral("У цей час уже є ідентичний запис."));
         if(!slot.isEmpty())slot+=QStringLiteral(" || ");slot+=raw;
     }else{
         QSqlQuery q(db);q.prepare("INSERT INTO planning_dispatch_queue(uid,entry) VALUES(?,?)");
@@ -308,6 +317,45 @@ bool save(const Entry& before,const Entry& after,QString* error)
             before.queueId,{},0,"planning_queue_save",QStringLiteral("Змінено чергу майстерні"),{"planning_dispatch_queue"}));
     return true;
 }
+bool save(const Entry& before, const Entry& after, QString* error)
+{
+    auto fail = [&](const QString& text) { if (error) *error = text; return false; };
+    for(const auto& field:{after.plate,after.vehicle,after.client,after.work,after.mechanic,after.mechanicId})
+        if(field.contains('|') || field.contains('\n') || field.contains('\r'))return fail(QStringLiteral("Вилучіть роздільник або перенесення рядка."));
+    if(after.vehicle.trimmed().isEmpty() || after.work.trimmed().isEmpty() || after.bay<0 || after.bay>3 || (after.day.isValid() && (!after.bay || after.mechanicId.isEmpty()))
+        || after.minutes<15 || after.minutes%15 || after.start%15 || after.start<480 || after.start+after.minutes>1080)
+        return fail(QStringLiteral("Перевірте авто, роботу, механіка та час у межах 08:00–18:00."));
+    return storeEntry(before, after, encode(after), error);
+}
+
+bool moveTime(const Entry& entry, int start, Entry* moved, QString* error)
+{
+    auto fail = [&](const QString& text) { if (error) *error = text; return false; };
+    const auto before = decode(entry.day, entry.hour, entry.raw);
+    if (!before.day.isValid() || before.raw.isEmpty() || before.cancelled || !entry.queueId.isEmpty()
+        || start % 15 || start < 480 || start + qMax(15, before.minutes) > 1080)
+        return fail(QStringLiteral("Оберіть доступний час на сітці планування."));
+    const QTime time(start / 60, start % 60);
+    QString raw = before.raw;
+    if (before.minutes > 0) {
+        static const QRegularExpression interval(QStringLiteral(R"((?:^|\|)\s*Інтервал:\s*(\d{2}:\d{2})-(\d{2}:\d{2})(?=\s*(?:\||$)))"));
+        auto matches = interval.globalMatch(raw);
+        if (!matches.hasNext()) return fail(QStringLiteral("Не вдалося визначити інтервал запису."));
+        const auto match = matches.next();
+        if (matches.hasNext()) return fail(QStringLiteral("У записі кілька інтервалів часу."));
+        raw.replace(match.capturedStart(2), 5, time.addSecs(before.minutes * 60).toString("HH:mm"));
+        raw.replace(match.capturedStart(1), 5, time.toString("HH:mm"));
+    } else {
+        static const QRegularExpression suffix(QStringLiteral(R"( \| Початок запису: \d{2}:\d{2}$)"));
+        raw.remove(suffix);
+        if (start % 60) raw += QStringLiteral(" | Початок запису: ") + time.toString("HH:mm");
+    }
+    auto after = decode(before.day, start / 60, raw);
+    if (!storeEntry(before, after, raw, error)) return false;
+    if (moved) *moved = after;
+    return true;
+}
+
 }
 
 QString PlanningRepository::getNote(const QDate& day) const

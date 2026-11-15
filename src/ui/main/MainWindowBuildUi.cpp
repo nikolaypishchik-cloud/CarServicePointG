@@ -82,7 +82,7 @@ void MainWindow::buildUi()
     btnNewOrder->setMaximumHeight(33);
     btnNewOrder->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
-    auto* btnCurrent = mkMenuButton(QString::fromUtf8("Наряди"), m_menu, topMenuContent, true);
+    auto* btnCurrent = mkMenuButton(QString::fromUtf8("Поточні наряди"), m_menu, topMenuContent, true);
     btnCurrent->setObjectName(QStringLiteral("sb_btn_orders"));
     btnCurrent->setFixedHeight(33 + qRound(3.0 * logicalDpiY() / 25.4));
     btnCurrent->setStyleSheet(QStringLiteral(
@@ -92,6 +92,7 @@ void MainWindow::buildUi()
         "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #ffffef,stop:0.15 #fff25f,stop:0.48 #ffe530,stop:0.50 #f5bf00,stop:1 #d49b00);}"
         "QPushButton#sb_btn_orders:checked{border-color:#fff3a0;border-radius:6px;}"
         "QPushButton#sb_btn_orders:pressed{background:#ecb800;border-color:white;}"));
+    auto* btnHistory = mkMenuButton(QString::fromUtf8("Завершені наряди"), m_menu, topMenuContent);
     auto* btnParts   = mkMenuButton(QString::fromUtf8("Замовлення запчастин"), m_menu, topMenuContent);
     auto* btnReports = mkMenuButton(QString::fromUtf8("Звіти"), m_menu, topMenuContent);
     auto* btnCrm     = mkMenuButton(QString::fromUtf8("Клієнти"), m_menu, topMenuContent);
@@ -119,6 +120,7 @@ void MainWindow::buildUi()
     topMenuL->addWidget(btnVehicleIntake);
     topMenuL->addWidget(btnNewOrder);
     topMenuL->addWidget(btnCurrent);
+    topMenuL->addWidget(btnHistory);
     topMenuL->addWidget(btnParts);
     topMenuL->addWidget(btnReports);
     topMenuL->addWidget(btnCrm);
@@ -174,6 +176,17 @@ void MainWindow::buildUi()
     m_stack = new QStackedWidget(m_content);
     m_stack->setObjectName("pages");
     connect(m_stack,&QStackedWidget::currentChanged,this,[this,cL](int index) {
+        if (index == 9) {
+            cL->setContentsMargins(0, 14, 0, 0);
+            cL->setSpacing(qRound(1.5 * logicalDpiY() / 25.4));
+            return;
+        }
+        const bool intake = index == 12;
+        cL->setContentsMargins(14, 14, 14, intake ? 0 : 14);
+        if (intake) {
+            cL->setSpacing(0);
+            return;
+        }
         cL->setSpacing(index==5?qMax(1,qRound(0.5*logicalDpiY()/25.4)):
                        index==6?qMax(1,qRound(logicalDpiY()/25.4)):12);
     });
@@ -232,53 +245,11 @@ void MainWindow::buildUi()
     m_stack->addWidget(m_placeholderWorkshopInventory); // 13
     m_stack->addWidget(m_placeholderPhoneSync); // 14
 
-    m_ordersNavigation = new QWidget(m_content);
-    m_ordersNavigation->setObjectName("ordersNavigation");
-    m_ordersNavigation->setAutoFillBackground(false);
-    m_ordersNavigation->setStyleSheet("QWidget#ordersNavigation { background: transparent; border: none; }");
-    auto* ordersLayout = new QHBoxLayout(m_ordersNavigation);
-    ordersLayout->setContentsMargins(0, 0, 0, 0);
-    auto* ordersGroup = new QButtonGroup(m_ordersNavigation);
-    for (const auto& entry : QList<QPair<int, QString>>{
-             {1, QString::fromUtf8("Поточні наряди")},
-             {3, QString::fromUtf8("Завершені наряди")}}) {
-        auto* button = new SidebarMenuButton(entry.second, m_ordersNavigation);
-        button->setCheckable(true);
-        button->setFixedHeight(33);
-        button->setMinimumWidth(160);
-        button->setCursor(Qt::PointingHandCursor);
-        ordersGroup->addButton(button, entry.first);
-        ordersLayout->addWidget(button);
-        connect(button, &QPushButton::clicked, this, [this, index = entry.first] { gotoPage(index); });
-        connect(m_stack, &QStackedWidget::currentChanged, button, [button, index = entry.first](int active) {
-            button->setChecked(active == index);
-        });
-        const QString permission = entry.first == 1 ? QStringLiteral("nav.current_orders")
-            : entry.first == 3 ? QStringLiteral("nav.history") : QStringLiteral("nav.reports");
-        m_accessButtons.insert(QStringLiteral("orders.tab.%1").arg(entry.first), button);
-        button->setChecked(entry.first == 1);
-        button->setProperty("ordersPermission", permission);
-    }
-    auto* settlement = new QLabel(tr("Оберіть наряд для розрахунку"), m_ordersNavigation);
-    settlement->setObjectName("currentOrderSettlement");
-    settlement->setTextFormat(Qt::PlainText);
-    settlement->setAlignment(Qt::AlignCenter);
-    settlement->setFixedHeight(33);
-    settlement->setStyleSheet("QLabel#currentOrderSettlement {background:#284957;color:#ffffff;"
-                              "border:1px solid #698491;border-radius:8px;font-family:'Times New Roman';font-weight:bold;}");
-    ordersLayout->addWidget(settlement, 1);
-    connect(m_stack, &QStackedWidget::currentChanged, settlement, [settlement](int index) {
-        settlement->setVisible(index == 1);
-    });
-    cL->addWidget(m_ordersNavigation);
-
     // Materialize the initial Current Orders page eagerly so the main window
     // opens on the real first tab instead of a placeholder flash. Heavy page
     // prewarm of secondary tabs is scheduled later, after the shell is visible.
     ensurePage(1);
-    connect(m_pageCurrent, &CurrentOrdersPage::settlementChanged, settlement, &QLabel::setText);
     m_stack->setCurrentIndex(1);
-    settlement->show();
     cL->addWidget(m_stack, 1);
 
     rootL->addWidget(m_sidebar);
@@ -315,13 +286,11 @@ void MainWindow::buildUi()
 
     // Navigation
     connect(btnPlanning, &QPushButton::clicked, this, [this]() { gotoPage(0); });
-    connect(btnCurrent, &QPushButton::clicked, this, [this]() {
-        for (int index : {1, 3}) if (canAccessPage(index)) { gotoPage(index); break; }
-    });
-    connect(m_stack, &QStackedWidget::currentChanged, this, [this, btnCurrent](int index) {
-        const bool orders = index == 1 || index == 3;
-        m_ordersNavigation->setVisible(orders);
-        if (orders) btnCurrent->setChecked(true);
+    connect(btnCurrent, &QPushButton::clicked, this, [this] { gotoPage(1); });
+    connect(btnHistory, &QPushButton::clicked, this, [this] { gotoPage(3); });
+    connect(m_stack, &QStackedWidget::currentChanged, this, [btnCurrent, btnHistory](int index) {
+        if (index == 1) btnCurrent->setChecked(true);
+        if (index == 3) btnHistory->setChecked(true);
     });
     connect(btnParts,    &QPushButton::clicked, this, [this]() { gotoPage(4); });
     connect(btnReports,  &QPushButton::clicked, this, [this]() { gotoPage(5); });
@@ -336,12 +305,12 @@ void MainWindow::buildUi()
 
     connect(btnNewOrder, &QPushButton::clicked, this, &MainWindow::openNewOrder);
 
-    const auto ordersButtons = m_accessButtons;
     m_accessButtons = {
         {QStringLiteral("nav.planning"), btnPlanning},
         {QStringLiteral("nav.intake"), btnVehicleIntake},
         {QStringLiteral("nav.new_order"), btnNewOrder},
         {QStringLiteral("nav.current_orders"), btnCurrent},
+        {QStringLiteral("nav.history"), btnHistory},
         {QStringLiteral("nav.parts"), btnParts},
         {QStringLiteral("nav.reports"), btnReports},
         {QStringLiteral("nav.clients"), btnCrm},
@@ -351,6 +320,5 @@ void MainWindow::buildUi()
         {QStringLiteral("nav.settings"), btnSettings},
         {QStringLiteral("mobile.pair"), btnPhoneSync}
     };
-    for (auto it = ordersButtons.cbegin(); it != ordersButtons.cend(); ++it) m_accessButtons.insert(it.key(), it.value());
     applyAccessControl();
 }

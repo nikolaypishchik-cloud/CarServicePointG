@@ -135,7 +135,13 @@ void ReportsPage::payReportOrder()
     const auto& debts=summary.debts;
     const auto& invoices=summary.invoices;
     QStringList choices,keys;
-    if(!debts.isEmpty()) {choices.append(tr("Сплатити за наряд"));keys.append(QString());}
+    if (!debts.isEmpty()) {
+        if (openOrderPartsPayment(this, number)) {
+            markDirty();
+            queueRefreshAll();
+        }
+        return;
+    }
     for(const auto& invoice:invoices)if(invoice.orders.contains(number) && !invoice.paid()) {
         choices.append(tr("Накладна %1 · %2").arg(invoice.number,invoice.supplier));keys.append(invoice.key);
     }
@@ -156,8 +162,9 @@ void ReportsPage::payReportOrder()
     const auto selected=choices.size()>1?chooser.textValue():choices.first();
     const int selectedIndex=choices.indexOf(selected);
     if(selectedIndex<0)return;
-    if(!keys.value(selectedIndex).isEmpty()){m_invoicesPage->payInvoiceByKey(keys.value(selectedIndex));markDirty();queueRefreshAll();return;}
-    if(!openOrderPartsPayment(this,number))return;
+    const auto invoiceKey = keys.value(selectedIndex);
+    if (invoiceKey.isEmpty()) return;
+    m_invoicesPage->payInvoiceByKey(invoiceKey);
     markDirty();queueRefreshAll();
 }
 

@@ -1,6 +1,10 @@
 #include <QtTest>
 #include <QHeaderView>
 #include <QLineEdit>
+#include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QScreen>
 #include <QSettings>
 #include <QSpinBox>
 #include <QSqlDatabase>
@@ -48,6 +52,37 @@ private slots:
         QVERIFY(q.exec("CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT)"));
         QVERIFY(q.exec("CREATE TABLE planning_calendar(day TEXT PRIMARY KEY, note TEXT)"));
         ThemeManager::applySavedTheme();
+    }
+    void dispatchDayEditorStaysInsideItsPage() {
+        PlanningPage page(nullptr, true);
+        auto* editor = page.findChild<QFrame*>("planning_editor");
+        auto* slotsView = page.findChild<QScrollArea*>("planning_editor_scroll");
+        auto* close = page.findChild<QPushButton*>("planning_editor_close");
+        QPushButton* open = nullptr;
+        for (auto* button : page.findChildren<QPushButton*>())
+            if (button->text() == QStringLiteral("Записи дня")) open = button;
+        QVERIFY(editor && slotsView && close && open);
+        page.show();
+        const auto available = page.screen()->availableGeometry();
+        for (const auto& size : {QSize(840, 580), QSize(710, 390)}) {
+            page.resize(size);
+            const bool nearBottom = size.height() < 400;
+            page.move(available.left() + 24, nearBottom ? available.bottom() - 335 : available.top() + 32);
+            open->click();
+            QTRY_VERIFY(editor->isVisible());
+            QTest::qWait(300);
+            QVERIFY(page.rect().contains(editor->geometry()));
+            QVERIFY(available.contains(QRect(editor->mapToGlobal(QPoint()), editor->size())));
+            QVERIFY(close->isVisibleTo(editor));
+            auto* bar = slotsView->verticalScrollBar();
+            if (nearBottom) QVERIFY(bar->maximum() > 0);
+            bar->setValue(bar->maximum());
+            const auto edits = slotsView->findChildren<QLineEdit*>("planning_editor_edit");
+            QCOMPARE(edits.size(), 11);
+            QVERIFY(slotsView->viewport()->rect().contains(edits.last()->mapTo(slotsView->viewport(), edits.last()->rect().center())));
+            close->click();
+            QTRY_VERIFY(!editor->isVisible());
+        }
     }
     void yearFits_data() {
         QTest::addColumn<int>("fontSize");

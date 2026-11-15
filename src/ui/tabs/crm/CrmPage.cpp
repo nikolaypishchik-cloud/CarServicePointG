@@ -1,3 +1,5 @@
+#include <QtMath>
+#include <QTextLayout>
 #include "core/crm/CrmPageReadService.h"
 #include "core/crm/CrmPageApplicationService.h"
 #include "core/services/settings/UiStateSettingsService.h"
@@ -156,36 +158,53 @@ public:
         painter->setPen(QPen(border, 1.0));
         painter->drawPath(cardPath);
 
-        const QStringList lines = index.data(Qt::DisplayRole).toString().split(QLatin1Char('\n'));
-        QRect textRect = option.rect.adjusted(15, 9, -15, -9);
-
-        painter->setPen(selected ? QColor(255, 255, 255) : QColor(246, 249, 253));
-        painter->setFont(crmClientCardNameFont());
-        painter->drawText(QRect(textRect.left(), textRect.top(), textRect.width(), 22), Qt::AlignLeft | Qt::AlignVCenter, lines.value(0));
-
-        painter->setPen(QColor(216, 227, 239));
-        painter->setFont(crmClientCardInfoFont());
-        painter->drawText(QRect(textRect.left(), textRect.top() + 25, textRect.width(), 19), Qt::AlignLeft | Qt::AlignVCenter, lines.value(1));
-        const QRect vehicleRowRect(textRect.left(), textRect.top() + 46, textRect.width(), 19);
-        const QString vehicleLine = lines.value(2), vehicleSeparator = QString::fromUtf8(" • "); const int vehicleSeparatorIndex = vehicleLine.indexOf(vehicleSeparator);
-        if (vehicleSeparatorIndex >= 0) {
-            const QString vehiclePrefix = vehicleLine.left(vehicleSeparatorIndex) + QString::fromUtf8(" •"), vehicleName = vehicleLine.mid(vehicleSeparatorIndex + vehicleSeparator.size()).trimmed();
-            const QFontMetrics metrics(painter->font()); const int prefixWidth = qMin(metrics.horizontalAdvance(vehiclePrefix) + 8, vehicleRowRect.width());
-            const QRect prefixRect(vehicleRowRect.left(), vehicleRowRect.top(), prefixWidth, vehicleRowRect.height());
-            painter->drawText(prefixRect, Qt::AlignLeft | Qt::AlignVCenter, vehiclePrefix);
-            const QRect nameRect(vehicleRowRect.left() + prefixWidth, vehicleRowRect.top(), qMax(0, vehicleRowRect.width() - prefixWidth), vehicleRowRect.height());
-            painter->setPen(QColor(255, 83, 83));
-            painter->drawText(nameRect, Qt::AlignRight | Qt::AlignVCenter, metrics.elidedText(vehicleName, Qt::ElideLeft, nameRect.width()));
-        } else {
-            painter->drawText(vehicleRowRect, Qt::AlignLeft | Qt::AlignVCenter, vehicleLine);
-        }
+        layoutText(index, option.rect.width(), painter, option.rect.topLeft());
         painter->restore();
     }
 
-    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override {
-        QSize size = QStyledItemDelegate::sizeHint(option, index);
-        size.setHeight(78);
-        return size;
+    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override
+    {
+        const auto* table = qobject_cast<const QTableWidget*>(parent());
+        const int width = table ? table->columnWidth(index.column()) : option.rect.width();
+        return QSize(width, layoutText(index, width, nullptr, {}));
+    }
+
+private:
+    static int layoutText(const QModelIndex& index, int width, QPainter* painter, QPoint origin)
+    {
+        const QStringList fields = index.data().toString().split(QLatin1Char('\n'));
+        const int available = qMax(1, width - 30);
+        qreal y = 9;
+        for (int i = 0; i < fields.size(); ++i) {
+            QTextLayout layout(fields.at(i), i == 0 ? crmClientCardNameFont() : crmClientCardInfoFont());
+            QTextOption options;
+            options.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+            layout.setTextOption(options);
+            const QString separator = QStringLiteral(" • ");
+            const int split = fields.at(i).indexOf(separator);
+            if (i == 2 && split >= 0) {
+                QTextLayout::FormatRange vehicle;
+                vehicle.start = split + separator.size();
+                vehicle.length = fields.at(i).size() - vehicle.start;
+                vehicle.format.setForeground(QColor(255, 83, 83));
+                layout.setFormats({vehicle});
+            }
+            layout.beginLayout();
+            while (true) {
+                auto line = layout.createLine();
+                if (!line.isValid()) break;
+                line.setLineWidth(available);
+                line.setPosition(QPointF(0, y));
+                y += line.height();
+            }
+            layout.endLayout();
+            if (painter) {
+                painter->setPen(i == 0 ? QColor(246, 249, 253) : QColor(216, 227, 239));
+                layout.draw(painter, QPointF(origin) + QPointF(15, 0));
+            }
+            y += 3;
+        }
+        return qMax(78, qCeil(y + 6));
     }
 };
 
@@ -311,6 +330,10 @@ void prepareClientCardsTable(QTableWidget* table)
     table->setFocusPolicy(Qt::StrongFocus);
     table->setFont(crmClientCardFont());
     table->setItemDelegate(new CrmClientCardDelegate(table));
+    table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    table->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    QObject::connect(table->horizontalHeader(), &QHeaderView::sectionResized,
+                     table, &QTableWidget::resizeRowsToContents);
     table->setStyleSheet(QStringLiteral(
         "QTableWidget#crmClientCardsTable{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
         "stop:0 rgba(38,45,54,0.82),stop:0.18 rgba(66,76,88,0.48),stop:1 rgba(16,20,26,0.92));"
@@ -522,8 +545,9 @@ CrmPage::CrmPage(QWidget* parent)
     setAttribute(Qt::WA_StyledBackground, true);
     setStyleSheet(QStringLiteral("background: transparent; border: none; color:#f7fbff;"));
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(12, 12, 12, 12);
-    root->setSpacing(12);
+    const int side = qMax(1, qRound(logicalDpiX() / 25.4));
+    root->setContentsMargins(side, 0, side, qRound(1.5 * logicalDpiY() / 25.4));
+    root->setSpacing(qMax(1, qRound(logicalDpiY() / 25.4)));
 
     auto* header = new QHBoxLayout();
     auto* title = new QLabel(QString::fromUtf8("CRM: клієнти та авто"), this);
@@ -568,7 +592,7 @@ CrmPage::CrmPage(QWidget* parent)
     m_clients = new QTableWidget(this);
     prepareClientCardsTable(m_clients);
     left->addWidget(m_clients, 1);
-    body->addWidget(clientsPanel, 23);
+    body->addWidget(clientsPanel, 27);
 
     auto* right = new QVBoxLayout();
     right->setSpacing(0);
@@ -706,7 +730,7 @@ CrmPage::CrmPage(QWidget* parent)
     right->addWidget(m_clientCard, 1);
 
     body->addLayout(right, 52);
-    body->addWidget(finances,25);
+    body->addWidget(finances, 21);
     root->addLayout(body, 1);
 
     m_searchDebounce = new QTimer(this);
@@ -1019,7 +1043,6 @@ void CrmPage::refreshClients()
                         seenClientUids.insert(uid);
                     }
                     m_clients->setItem(row, 0, item);
-                    m_clients->setRowHeight(row, 78);
                 }
             }
             if (m_clients->rowCount() == 0) {
@@ -1030,12 +1053,8 @@ void CrmPage::refreshClients()
                 empty->setTextAlignment(Qt::AlignCenter);
                 empty->setData(Qt::FontRole, crmClientCardFont());
                 m_clients->setItem(row, 0, empty);
-                m_clients->setRowHeight(row, 86);
             }
-            m_clients->resizeColumnToContents(0);
-            if (m_clients->horizontalHeader()) {
-                m_clients->horizontalHeader()->setStretchLastSection(true);
-            }
+            m_clients->resizeRowsToContents();
             m_populatingClients = false;
         }
         selectClientByUid(previousUid, SelectionReason::RefreshRestore, true);
@@ -1144,9 +1163,8 @@ void CrmPage::loadClientDetails(const QString& clientUid)
                 row(tr("Отримано за журналом"),CrmFinancialService::money(financial.receivedCents)) +
                 row(tr("Розрахунковий залишок"),QStringLiteral("<a href='debt' style='color:#71dce4'>%1</a>").arg(CrmFinancialService::money(financial.outstandingCents))) +
                 row(tr("Переплата за журналом"),CrmFinancialService::money(financial.overpaidCents)) + "</table>");
-            m_paymentNotice->setText(tr("Історичні клієнтські оплати не обліковувалися. Залишок потребує звірки; оплати постачальникам не враховуються.") +
-                (financial.ledgerAvailable ? QString() : tr(" Журнал клієнтських оплат відсутній.")));
-            m_paymentNotice->show();
+            m_paymentNotice->setText(tr("Журнал клієнтських оплат відсутній."));
+            m_paymentNotice->setVisible(!financial.ledgerAvailable);
             m_showOrders->setText(tr("Наряди: %1     Переглянути історію →").arg(count));
             m_showOrders->show();
         }

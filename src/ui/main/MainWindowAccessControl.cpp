@@ -105,11 +105,8 @@ void MainWindow::applyAccessControl()
     for (auto it = m_accessButtons.cbegin(); it != m_accessButtons.cend(); ++it) {
         if (!it.value()) continue;
         bool allowed = hasPermission(it.key());
-        if (it.key().startsWith(QStringLiteral("orders.tab."))) {
-            allowed = canAccessPage(it.key().mid(11).toInt());
-        } else if (it.key() == QStringLiteral("nav.current_orders")) {
-            allowed = canAccessPage(1) || canAccessPage(3) || canAccessPage(15);
-        }
+        if (it.key() == QStringLiteral("nav.current_orders")) allowed = canAccessPage(1);
+        if (it.key() == QStringLiteral("nav.history")) allowed = canAccessPage(3);
         it.value()->setVisible(allowed);
         it.value()->setEnabled(allowed);
     }

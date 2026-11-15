@@ -349,6 +349,8 @@ void PlanningPage::buildUi()
         // if opacity is 0 at end, ensure it's hidden (close animation)
         if (m_editorOpacity && m_editorOpacity->opacity() <= 0.001) {
             m_editor->hide();
+        } else {
+            m_editor->setGeometry(editorTargetRect());
         }
     });
     auto* edRoot = new QVBoxLayout(m_editor);
@@ -476,7 +478,12 @@ void PlanningPage::buildUi()
         slotsL->addWidget(r.edit, row, 1);
         m_rows.push_back(r);
     }
-    edRoot->addWidget(slotsHost, 1);
+    auto* slotScroll = new QScrollArea(m_editor);
+    slotScroll->setObjectName("planning_editor_scroll");
+    slotScroll->setWidgetResizable(true);
+    slotScroll->setFrameShape(QFrame::NoFrame);
+    slotScroll->setWidget(slotsHost);
+    edRoot->addWidget(slotScroll, 1);
     // connections
     connect(m_btnToday, &QPushButton::clicked, this, [this]() {
         setMonth(QDate::currentDate());

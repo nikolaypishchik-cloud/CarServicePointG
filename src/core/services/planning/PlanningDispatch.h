@@ -8,9 +8,11 @@ struct Entry {
     int hour=0, start=0, minutes=0, bay=0;
     QString raw, vehicle, plate, client, work, mechanic, mechanicId, queueId;
     bool cancelled=false;
+    bool usesDayEditor=false;
 };
 Entry decode(QDate day,int hour,const QString& text);
 QString encode(const Entry& entry);
+bool moveTime(const Entry& entry, int start, Entry* moved, QString* error);
 bool overlaps(const Entry& a,const Entry& b);
 QList<Entry> queue(QString* error);
 bool save(const Entry& before,const Entry& after,QString* error);

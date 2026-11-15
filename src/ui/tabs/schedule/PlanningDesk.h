@@ -1,8 +1,11 @@
 #pragma once
 #include <QWidget>
+#include <QPointer>
 #include <functional>
 #include "core/services/planning/PlanningDispatch.h"
 class QDateEdit;
+class QTimer;
+class QRubberBand;
 class QComboBox;
 class QLineEdit;
 class QLabel;
@@ -16,6 +19,8 @@ public:
     void selectDate(QDate day);
 private:
     void render();
+    void updateDragTarget(QPoint global);
+    void cancelDrag();
     void showEntry(int index);
     void edit(PlanningDispatch::Entry entry);
     void selectPeriod(int index);
@@ -29,6 +34,16 @@ private:
     QLabel* title;
     QTableWidget* grid;
     QLabel* details;
+    QTimer* dragScroll;
+    QPoint pressPosition;
+    int firstMinute = 480;
+    int dropMinute = -1;
+    QPointer<QPushButton> draggedCard;
+    QRubberBand* dropIndicator = nullptr;
+    QPoint dragPosition;
+    PlanningDispatch::Entry draggedEntry;
+    int scrollDirection = 0;
+    int grabColumnOffset = 0;
     QPushButton *modify,*openOrder,*spares,*editDay;
     QListWidget *waiting,*attention;
     QList<PlanningDispatch::Entry> entries,queued;

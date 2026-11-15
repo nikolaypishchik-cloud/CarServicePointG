@@ -327,8 +327,14 @@ bool choosePurchasePayment(QWidget* parent, const PurchaseDebt& debt, bool newPu
     QTimer::singleShot(0,&dialog,[&] {
         const int margin=qRound(dialog.logicalDpiY()*10/25.4);
         const auto frame=dialog.frameGeometry();
+        int wantedHeight = dialog.height();
+        if (group) {
+            const int bodyWidth = scroll->viewport()->width();
+            const int bodyHeight = qMax(body->sizeHint().height(), body->heightForWidth(bodyWidth));
+            wantedHeight += qMax(0, bodyHeight - scroll->viewport()->height());
+        }
         dialog.resize(qMin(dialog.width(),available.width()-2*margin),
-                      qMin(dialog.height(),available.height()-2*margin-(frame.height()-dialog.height())));
+                      qMin(wantedHeight,available.height()-2*margin-(frame.height()-dialog.height())));
         dialog.move(available.center().x()-dialog.frameGeometry().width()/2,
                     available.center().y()-dialog.frameGeometry().height()/2);
     });

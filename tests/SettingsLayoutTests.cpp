@@ -6,6 +6,8 @@
 #include "core/services/settings/PersonnelEmploymentHistory.h"
 #include "core/services/settings/PersonnelSettingsService.h"
 #include "ui/tabs/intake/VehicleIntakePage.h"
+#include <QLabel>
+#include <QLayout>
 #include <QStackedWidget>
 #include <QPushButton>
 #include "core/crm/VehicleIntakeService.h"
@@ -25,6 +27,7 @@
 #include <QPdfWriter>
 #include <QTextBrowser>
 #include <QTabWidget>
+#include <QLayout>
 #include <QStackedWidget>
 #include <QScrollBar>
 #include "ui/tabs/statistics/StatsPage.h"
@@ -176,6 +179,13 @@ private slots:
         q.addBindValue("test-act.pdf");q.addBindValue(uid);QVERIFY(q.exec());
         page.resize(1320,850); page.show(); table->selectRow(0);
         auto* steps=page.findChild<QStackedWidget*>("intakeSteps"); QVERIFY(steps);
+        auto* next = page.findChild<QPushButton*>("intakeContinue");
+        QVERIFY(next);
+        for (const int width : {980, 1320}) {
+            page.resize(width, 850);
+            QTRY_COMPARE(next->geometry().right(), next->parentWidget()->contentsRect().right());
+            QCOMPARE(page.layout()->contentsMargins().bottom(), qMax(1, qRound(page.logicalDpiY() / 25.4)));
+        }
         page.findChild<QLineEdit*>("intakeOrder")->setText("TEST-ORDER");
         page.findChild<QLineEdit*>("intakePhone")->setText("0501234567");
         page.findChild<QComboBox*>("intakeMaster")->setEditText("Test master");
@@ -454,6 +464,17 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(rowFor("selection-a") >= 0 && rowFor("selection-b") >= 0, 10000);
         const int alpha = rowFor("selection-a"), beta = rowFor("selection-b");
         QVERIFY(alpha >= 0 && beta >= 0);
+        page.resize(1250, 800);
+        page.show();
+        QCoreApplication::processEvents();
+        auto* card = clients->item(alpha, 0);
+        const QString original = card->text();
+        const int shortHeight = clients->rowHeight(alpha);
+        card->setText(QString(120, QLatin1Char('W')) + "\n+380123456789\nАвто: 1 • " +
+                      QString(140, QLatin1Char('M')));
+        QTRY_VERIFY(clients->rowHeight(alpha) > shortHeight);
+        card->setText(original);
+        QTRY_COMPARE(clients->rowHeight(alpha), shortHeight);
         QPushButton* addNote = nullptr;
         for (auto* button : page.findChildren<QPushButton*>())
             if (button->text() == QString::fromUtf8("Додати нотатку")) addNote = button;
@@ -464,6 +485,20 @@ private slots:
             page.resize(1420,800);page.show();QTest::qWait(50);
             QVERIFY(page.grab().save(path));
         }
+        QLabel* ledgerNotice = nullptr;
+        for (auto* label : page.findChildren<QLabel*>())
+            if (label->text() == QStringLiteral("Журнал клієнтських оплат відсутній.")) ledgerNotice = label;
+        QVERIFY(ledgerNotice);
+        const bool hadLedger = db.tables().contains("client_payments");
+        if (hadLedger)
+            QVERIFY(q.exec("ALTER TABLE main.client_payments RENAME TO ui13_saved_payments"));
+        clients->setCurrentCell(beta, 0);
+        QVERIFY(!ledgerNotice->isHidden());
+        QVERIFY(q.exec("CREATE TABLE main.client_payments(order_uid TEXT, amount_cents INTEGER)"));
+        clients->setCurrentCell(alpha, 0);
+        QVERIFY(ledgerNotice->isHidden());
+        QVERIFY(q.exec("DROP TABLE main.client_payments"));
+        if (hadLedger) QVERIFY(q.exec("ALTER TABLE main.ui13_saved_payments RENAME TO client_payments"));
         // Simulate a missing client after the list was loaded, without touching
         // production paths or weakening the application's read checks.
         QVERIFY(q.exec("DELETE FROM crm_clients WHERE client_uid='selection-b'"));

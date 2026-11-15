@@ -60,6 +60,9 @@ public:
                                 const QDate& today, const QString& supplierFilter = {}, int detailPage = 0,
                                 const QMap<QString,SupplierDebtReconciliation>& reconciliations = {},
                                 const QHash<QString,InvoiceEvidence>& evidence = {}, int view = -1);
+protected:
+    void showEvent(QShowEvent* event) override;
+
 private:
     QVector<PurchaseDebt> filteredDebts() const;
     void render();

@@ -214,10 +214,12 @@ void VehicleIntakePage::buildUi()
     setStyleSheet(pageStyleSheet());
 
     auto* root = new QVBoxLayout(this);
-    root->setContentsMargins(12, 12, 12, 12);
-    root->setSpacing(10);
+    const int oneMillimetre = qMax(1, qRound(logicalDpiY() / 25.4));
+    root->setContentsMargins(12, 0, 12, oneMillimetre);
+    root->setSpacing(oneMillimetre);
 
     auto* heading = new QHBoxLayout;
+    heading->addStrut(qRound(8 * logicalDpiY() / 25.4) - oneMillimetre);
     auto* title = new QLabel(this);
     title->setStyleSheet("font:700 23px 'Segoe UI';color:#f5f8fc;");
     auto* stepLabel = new QLabel(this);
@@ -499,7 +501,6 @@ void VehicleIntakePage::buildUi()
     first->addStretch();
     auto* cancel = addButton(first,tr("Скасувати"));
     auto* next = addButton(first,tr("Прийняти та продовжити"));
-    first->addStretch();
     auto* second = footerRow();
     auto* back = addButton(second,tr("Назад"));
     auto* save = addButton(second,tr("Зберегти"));

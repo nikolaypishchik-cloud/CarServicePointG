@@ -16,6 +16,7 @@
 #include <QTextBrowser>
 #include <QComboBox>
 #include <QSignalBlocker>
+#include <QShowEvent>
 #include <QDialog>
 #include <QScrollArea>
 #include <QDoubleSpinBox>
@@ -453,6 +454,11 @@ InstallationPeriod installationPeriod(const PartRowSnapshot& part,const QDate& o
 #include "ui/tabs/reports/SupplierDebtOverview.h"
 #include "core/services/ElitStartupSync.h"
 
+void PurchaseDebtAnalysisPage::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    if (!event->spontaneous()) m_views->setCurrentIndex(0);
+}
+
 PurchaseDebtAnalysisPage::PurchaseDebtAnalysisPage(QWidget* parent) : QWidget(parent) {
     setObjectName("purchaseDebtAnalysisPage");
     setAttribute(Qt::WA_StyledBackground,true);
@@ -483,7 +489,7 @@ PurchaseDebtAnalysisPage::PurchaseDebtAnalysisPage(QWidget* parent) : QWidget(pa
     for(const auto& title:{"Огляд","Потребує дії","Реєстр"}) m_views->addTab(QString::fromUtf8(title));
     m_views->setExpanding(false);
     m_views->addTab(QString::fromUtf8("Накладні та звірка"));
-    m_views->setCurrentIndex(3);
+    m_views->setCurrentIndex(0);
     layout->addWidget(m_views);
     auto* toolbar = new QHBoxLayout;
     m_supplier = new QComboBox(this);

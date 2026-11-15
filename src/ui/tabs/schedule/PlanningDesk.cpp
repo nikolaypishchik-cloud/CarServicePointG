@@ -36,15 +36,30 @@ PlanningDesk::PlanningDesk(QWidget* parent,std::function<void(QDate)> openDayEdi
     auto* bar=new QHBoxLayout;root->addLayout(bar);title=new QLabel;title->setStyleSheet("color:white;font-weight:bold");bar->addWidget(title,1);
     group=new QComboBox;group->addItems({"За постами","За механіками"});bar->addWidget(group);
     auto* center=new QHBoxLayout;root->addLayout(center,1);grid=new QTableWidget;grid->setObjectName("dispatchSchedule");
+    dropIndicator = new QRubberBand(QRubberBand::Rectangle, grid->viewport());
+    dropIndicator->setAttribute(Qt::WA_TransparentForMouseEvents);
+    dragScroll = new QTimer(this);
+    dragScroll->setInterval(70);
+    connect(dragScroll, &QTimer::timeout, this, [this] {
+        auto* bar = grid->horizontalScrollBar();
+        bar->setValue(bar->value() + scrollDirection * bar->singleStep());
+        updateDragTarget(dragPosition);
+    });
     grid->horizontalHeader()->setMinimumSectionSize(16);grid->verticalHeader()->hide();grid->setEditTriggers(QAbstractItemView::NoEditTriggers);grid->setSelectionMode(QAbstractItemView::NoSelection);
     grid->setStyleSheet("QTableWidget{background:white;color:#172735;gridline-color:#d3dde5;} QHeaderView::section{background:#e5edf3;color:#172735;padding:2px;}");
     center->addWidget(grid,4);
-    auto* detail=new QVBoxLayout;center->addLayout(detail,1);details=new QLabel;details->setObjectName("dispatchInfo");details->setWordWrap(true);details->setTextFormat(Qt::PlainText);details->setAlignment(Qt::AlignTop);detail->addWidget(details,1);
+    auto* detail=new QVBoxLayout;center->addLayout(detail,1);
+    auto* detailTitle = new QLabel(QStringLiteral("Картка запису"));
+    auto titleFont = detailTitle->font();
+    titleFont.setBold(true);
+    detailTitle->setFont(titleFont);
+    detail->addWidget(detailTitle);
+    details=new QLabel;details->setObjectName("dispatchInfo");details->setWordWrap(true);details->setTextFormat(Qt::PlainText);details->setAlignment(Qt::AlignTop);detail->addWidget(details,1);
     modify=new QPushButton("Змінити запис");detail->addWidget(modify);
     editDay=new QPushButton("Записи дня");detail->addWidget(editDay);
     connect(editDay,&QPushButton::clicked,this,[this]{openDayEditor_(selected>=0?entries[selected].day:day->date());});
     connect(modify,&QPushButton::clicked,this,[this]{if(selected<0)return;const auto& e=entries[selected];
-        if((e.raw.contains('|') || e.raw.contains("[Online]",Qt::CaseInsensitive)) && !e.raw.contains(QStringLiteral(" | Запис СТО | ")))openDayEditor_(e.day);
+        if(e.usesDayEditor) openDayEditor_(e.day);
         else edit(e);});
     openOrder=new QPushButton("Останній наряд авто");detail->addWidget(openOrder);
     auto selectedPlate=[this]{return selected<0?QString():PlanningPageSupport::extractPlanningPlateNorm(entries[selected].plate.isEmpty()?entries[selected].raw:entries[selected].plate);};
@@ -90,7 +105,98 @@ void PlanningDesk::refresh(){
     }
     QString error;queued=PlanningDispatch::queue(&error);render();if(!error.isEmpty())details->setText(error);
 }
+void PlanningDesk::cancelDrag()
+{
+    dragScroll->stop();
+    dropIndicator->hide();
+    if (draggedCard) {
+        draggedCard->setDown(false);
+        draggedCard->unsetCursor();
+    }
+    draggedCard.clear();
+    dropMinute = -1;
+}
+
+void PlanningDesk::updateDragTarget(QPoint global)
+{
+    dragPosition = global;
+    const auto point = grid->viewport()->mapFromGlobal(global);
+    const auto bounds = grid->viewport()->rect();
+    const int column = grid->columnAt(point.x()) - grabColumnOffset;
+    const int row = grid->rowAt(point.y());
+    const bool valid = bounds.contains(point) && column > 0 && row > 0;
+    dropMinute = valid ? firstMinute + (column - 1) * 15 : -1;
+    if (valid) {
+        dropIndicator->setGeometry(grid->columnViewportPosition(column), grid->rowViewportPosition(row),
+                                   grid->columnWidth(column), grid->rowHeight(row));
+        dropIndicator->show();
+        dropIndicator->raise();
+    } else dropIndicator->hide();
+    scrollDirection = !bounds.contains(point) ? 0 : point.x() < 32 ? -1 : point.x() >= bounds.width() - 32 ? 1 : 0;
+    if (!scrollDirection) dragScroll->stop();
+    else if (!dragScroll->isActive()) dragScroll->start();
+}
+
 bool PlanningDesk::eventFilter(QObject* object,QEvent* event){
+    const auto type = event->type();
+    if (object->property("dispatchEntryIndex").isValid()) {
+        auto* card = static_cast<QPushButton*>(object);
+        if (type == QEvent::MouseButtonPress) {
+            auto* mouse = static_cast<QMouseEvent*>(event);
+            if (mouse->button() == Qt::LeftButton) {
+                cancelDrag();
+                pressPosition = mouse->position().toPoint();
+            }
+        } else if (type == QEvent::MouseMove) {
+            auto* mouse = static_cast<QMouseEvent*>(event);
+            if (mouse->buttons().testFlag(Qt::LeftButton) && !draggedCard && card->isDown() &&
+                (mouse->position().toPoint() - pressPosition).manhattanLength() >= QApplication::startDragDistance()) {
+                const int i = card->property("dispatchEntryIndex").toInt();
+                if (i < 0 || i >= entries.size()) return true;
+                draggedCard = card;
+                draggedEntry = entries[i];
+                grabColumnOffset = grid->columnAt(card->mapTo(grid->viewport(), pressPosition).x())
+                    - ((draggedEntry.start - firstMinute) / 15 + 1);
+                card->setCursor(Qt::ClosedHandCursor);
+            }
+            if (draggedCard == card) {
+                updateDragTarget(mouse->globalPosition().toPoint());
+                return true;
+            }
+        } else if (draggedCard == card) {
+            if (type == QEvent::KeyPress && static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape) {
+                cancelDrag();
+                return true;
+            }
+            if (type == QEvent::Hide || type == QEvent::UngrabMouse || type == QEvent::WindowDeactivate)
+                cancelDrag();
+            else if (type == QEvent::MouseButtonRelease) {
+                auto* mouse = static_cast<QMouseEvent*>(event);
+                if (mouse->button() != Qt::LeftButton) return true;
+                updateDragTarget(mouse->globalPosition().toPoint());
+                const auto original = draggedEntry;
+                const int start = dropMinute;
+                cancelDrag();
+                if (start >= 0 && start != original.start) {
+                    QTimer::singleShot(0, this, [this, original, start] {
+                        QString error;
+                        Entry moved;
+                        if (!PlanningDispatch::moveTime(original, start, &moved, &error)) {
+                            QMessageBox::warning(this, tr("Планування"), error);
+                            return;
+                        }
+                        refresh();
+                        for (int i = 0; i < entries.size(); ++i)
+                            if (entries[i].hour == moved.hour && entries[i].day == moved.day && entries[i].raw == moved.raw) {
+                                showEntry(i);
+                                break;
+                            }
+                    });
+                }
+                return true;
+            }
+        }
+    }
     if((event->type()==QEvent::MouseButtonRelease && static_cast<QMouseEvent*>(event)->button()==Qt::LeftButton) || (event->type()==QEvent::KeyPress && static_cast<QKeyEvent*>(event)->key()==Qt::Key_Return)){if(auto* cell=qobject_cast<PlanningDayCell*>(object)){
         const auto d=cell->date();QTimer::singleShot(0,this,[this,d]{selectDate(d);});return true;}}
     return QWidget::eventFilter(object,event);
@@ -99,10 +205,11 @@ void PlanningDesk::showEntry(int i){selected=i;modify->setEnabled(i>=0);
     const bool hasPlate=i>=0 && !PlanningPageSupport::extractPlanningPlateNorm(entries[i].plate.isEmpty()?entries[i].raw:entries[i].plate).isEmpty();
     openOrder->setEnabled(hasPlate && AccessControlService::currentUserHasPermission("nav.current_orders"));
     spares->setEnabled(hasPlate && AccessControlService::currentUserHasPermission("nav.inventory"));
-    if(i<0){details->setText("Картка запису\n\nОберіть запис у розкладі.");return;}
-    const auto& e=entries[i];details->setText(QStringLiteral("Картка запису\n\n%1\n%2\n\n%3 · %4\n%5\nМеханік: %6\n\nКлієнт: %7\nРоботи: %8")
+    if(i<0){details->setText("Оберіть запис у розкладі.");return;}
+    const auto& e=entries[i];details->setText(QStringLiteral("%1\n%2\n\n%3 · %4\n%5\nМеханік: %6\n\nКлієнт: %7\nРоботи: %8")
         .arg(e.vehicle,e.plate,e.day.toString("dd.MM.yy"),interval(e),e.bay?resource(e,false):"Пост не вказано",e.mechanic.isEmpty()?"не вказано":e.mechanic,e.client.isEmpty()?"не вказано":e.client,e.work));}
 void PlanningDesk::render(){
+    cancelDrag();
     const auto query=search->text().trimmed();auto visible=[&](const Entry& e){return description(e).contains(query,Qt::CaseInsensitive);};
     grid->clearSpans();grid->clear();grid->setRowCount(0);waiting->clear();attention->clear();
     for(int i=0;i<queued.size();++i)if(visible(queued[i])){auto* item=new QListWidgetItem(description(queued[i]),waiting);item->setData(Qt::UserRole,i);}
@@ -138,6 +245,7 @@ void PlanningDesk::render(){
         else for(const auto& master:StaffAccountService::orderingMasters())resources<<master.second;
         for(const auto& e:entries){auto key=resource(e,byMaster);if(key.isEmpty())key="Без призначення";if(!resources.contains(key))resources<<key;}
         int begin=480,end=1080;for(const auto& e:entries){begin=qMin(begin,e.start/60*60);end=qMax(end,e.start+qMax(e.minutes,60));}
+        firstMinute = begin;
         int slotsCount=(end-begin+14)/15;grid->setColumnCount(slotsCount+1);grid->horizontalHeader()->setSectionResizeMode(QHeaderView::Fixed);
         grid->setColumnWidth(0,118);grid->insertRow(0);grid->setRowHeight(0,30);grid->setItem(0,0,new QTableWidgetItem("Ресурс"));
         for(int i=0;i<slotsCount;++i){
@@ -151,6 +259,8 @@ void PlanningDesk::render(){
                 if(lane==ends.size()){ends.append(-1);grid->insertRow(firstRow+lane);}ends[lane]=col+span;
                 auto* item=new QTableWidgetItem(interval(e)+"\n"+description(e));item->setToolTip(description(e));item->setBackground(QColor(flagged.contains(i)?"#f9ded8":"#d9ebf4"));item->setData(Qt::UserRole,i);grid->setItem(firstRow+lane,col,item);if(span>1)grid->setSpan(firstRow+lane,col,1,span);
                 auto* card=new QPushButton(interval(e)+"\n"+(e.vehicle.isEmpty()?e.work:e.vehicle)+"\n"+(byMaster?resource(e,false):e.mechanic));
+                card->setProperty("dispatchEntryIndex", i);
+                card->installEventFilter(this);
                 card->setToolTip(description(e));card->setAccessibleName(description(e));card->setObjectName("dispatchAppointment");
                 card->setStyleSheet(QStringLiteral("QPushButton{background:%1;color:#182c39;border:1px solid #a3b7c3;border-left:3px solid %2;border-radius:5px;text-align:left;padding:3px;font:10pt 'Segoe UI';} QPushButton:focus{border:2px solid #177a98;}")
                     .arg(flagged.contains(i)?"#fbe4df":"#e0edf3",flagged.contains(i)?"#b64e40":"#477e96"));
@@ -164,7 +274,34 @@ void PlanningDesk::render(){
 }
 void PlanningDesk::edit(Entry original){
     QDialog dlg(this);dlg.setWindowTitle(original.raw.isEmpty()?"Записати авто":"Змінити запис");
-    QFormLayout form(&dlg);
+    dlg.setObjectName("planningBookingDialog");
+    dlg.setStyleSheet(QStringLiteral(R"(
+        QDialog#planningBookingDialog { background: #142b38; }
+        QFrame#bookingFields { background: #294450; border: 1px solid #75adba; border-radius: 10px; }
+        QFrame#bookingFields QLabel, QFrame#bookingFields QCheckBox { color: #f3f8fa; background: transparent; }
+        QFrame#bookingFields QLineEdit, QFrame#bookingFields QComboBox, QFrame#bookingFields QAbstractSpinBox {
+            background: #edf2f5; color: #152632; border: 1px solid #b8cdd3; border-radius: 6px; padding: 4px 7px;
+        }
+        QFrame#bookingFields QAbstractSpinBox:disabled { background: #cfdbdf; color: #52626a; }
+        QDialog#planningBookingDialog QDialogButtonBox QPushButton {
+            color: #f6fafb; border: 1px solid #75adba; border-radius: 6px; padding: 6px 18px;
+            background: qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #3e5e6c,stop:1 #172e3a);
+        }
+    )"));
+    auto* outer = new QVBoxLayout(&dlg);
+    auto* scroll = new QScrollArea(&dlg);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setWidgetResizable(true);
+    auto* fields = new QFrame(scroll);
+    fields->setObjectName("bookingFields");
+    scroll->setWidget(fields);
+    outer->addWidget(scroll, 1);
+    QFormLayout form(fields);
+    form.setContentsMargins(16, 14, 16, 14);
+    form.setHorizontalSpacing(18);
+    form.setVerticalSpacing(8);
+    form.setRowWrapPolicy(QFormLayout::DontWrapRows);
+    form.setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
     auto* car=new QLineEdit(original.vehicle);auto* plate=new QLineEdit(original.plate);auto* work=new QLineEdit(original.work);auto* client=new QLineEdit(original.client);
     auto* queuedOnly=new QCheckBox("До черги без часу");queuedOnly->setChecked(!original.queueId.isEmpty());
     auto* when=new QDateEdit(original.day.isValid()?original.day:day->date());when->setCalendarPopup(true);when->setDisplayFormat("dd.MM.yyyy");
@@ -178,7 +315,7 @@ void PlanningDesk::edit(Entry original){
     form.addRow("Автомобіль",car);form.addRow("Держномер",plate);form.addRow("Клієнт",client);form.addRow("Робота",work);
     form.addRow(queuedOnly);form.addRow("Дата",when);form.addRow("Початок",at);form.addRow("Тривалість",duration);form.addRow("Пост",bay);form.addRow("Механік",master);
     auto scheduleFields=[=](bool queue){when->setDisabled(queue);at->setDisabled(queue);};scheduleFields(queuedOnly->isChecked());connect(queuedOnly,&QCheckBox::toggled,&dlg,scheduleFields);
-    QDialogButtonBox buttons(QDialogButtonBox::Save|QDialogButtonBox::Cancel);buttons.button(QDialogButtonBox::Save)->setText("Зберегти");buttons.button(QDialogButtonBox::Cancel)->setText("Скасувати");form.addRow(&buttons);
+    QDialogButtonBox buttons(QDialogButtonBox::Save|QDialogButtonBox::Cancel);buttons.button(QDialogButtonBox::Save)->setText("Зберегти");buttons.button(QDialogButtonBox::Cancel)->setText("Скасувати");outer->addWidget(&buttons);
     connect(&buttons,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
     connect(&buttons,&QDialogButtonBox::accepted,&dlg,[&]{
         Entry e;e.day=queuedOnly->isChecked()?QDate():when->date();e.start=queuedOnly->isChecked()?480:at->time().hour()*60+at->time().minute();
@@ -186,5 +323,19 @@ void PlanningDesk::edit(Entry original){
         e.minutes=duration->value();e.bay=bay->currentIndex()+1;e.mechanicId=master->currentData().toString();e.mechanic=e.mechanicId.isEmpty()?QString():master->currentText();
         QString error;if(!PlanningDispatch::save(original,e,&error)){QMessageBox::warning(&dlg,"Планування",error);return;}
         dlg.accept();if(e.day.isValid()){selectDate(e.day);for(int i=0;i<entries.size();++i)if(entries[i].raw==PlanningDispatch::encode(e)){showEntry(i);break;}}else refresh();
-    });dlg.exec();
+    });
+    dlg.ensurePolished();
+    const auto available = dlg.screen()->availableGeometry().size();
+    const auto wanted = QSize(qMax(460, fields->sizeHint().width() + 44),
+                              fields->sizeHint().height() + buttons.sizeHint().height() + 48);
+    dlg.resize(wanted.boundedTo(available - QSize(32, 64)));
+    QTimer::singleShot(0, &dlg, [this, &dlg] {
+        const QRect workArea = dlg.screen()->availableGeometry();
+        QRect frame = dlg.frameGeometry();
+        frame.moveCenter(mapToGlobal(rect().center()));
+        frame.moveLeft(qBound(workArea.left(), frame.left(), qMax(workArea.left(), workArea.right() - frame.width() + 1)));
+        frame.moveTop(qBound(workArea.top(), frame.top(), qMax(workArea.top(), workArea.bottom() - frame.height() + 1)));
+        dlg.move(frame.topLeft());
+    });
+    dlg.exec();
 }
