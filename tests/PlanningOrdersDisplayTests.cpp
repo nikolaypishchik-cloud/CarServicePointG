@@ -67,21 +67,23 @@ private slots:
         for (const auto& size : {QSize(840, 580), QSize(710, 390)}) {
             page.resize(size);
             const bool nearBottom = size.height() < 400;
-            page.move(available.left() + 24, nearBottom ? available.bottom() - 335 : available.top() + 32);
-            open->click();
-            QTRY_VERIFY(editor->isVisible());
-            QTest::qWait(300);
-            QVERIFY(page.rect().contains(editor->geometry()));
-            QVERIFY(available.contains(QRect(editor->mapToGlobal(QPoint()), editor->size())));
-            QVERIFY(close->isVisibleTo(editor));
-            auto* bar = slotsView->verticalScrollBar();
-            if (nearBottom) QVERIFY(bar->maximum() > 0);
-            bar->setValue(bar->maximum());
-            const auto edits = slotsView->findChildren<QLineEdit*>("planning_editor_edit");
-            QCOMPARE(edits.size(), 11);
-            QVERIFY(slotsView->viewport()->rect().contains(edits.last()->mapTo(slotsView->viewport(), edits.last()->rect().center())));
-            close->click();
-            QTRY_VERIFY(!editor->isVisible());
+            for (int x : {available.left() + 24, available.right() - page.width() + 36}) {
+                page.move(x, nearBottom ? available.bottom() - 335 : available.top() + 32);
+                open->click();
+                QTRY_VERIFY(editor->isVisible());
+                QTest::qWait(300);
+                QVERIFY(page.rect().contains(editor->geometry()));
+                QVERIFY(available.contains(QRect(editor->mapToGlobal(QPoint()), editor->size())));
+                QVERIFY(close->isVisibleTo(editor));
+                auto* bar = slotsView->verticalScrollBar();
+                if (nearBottom) QVERIFY(bar->maximum() > 0);
+                bar->setValue(bar->maximum());
+                const auto edits = slotsView->findChildren<QLineEdit*>("planning_editor_edit");
+                QCOMPARE(edits.size(), 11);
+                QVERIFY(slotsView->viewport()->rect().contains(edits.last()->mapTo(slotsView->viewport(), edits.last()->rect().center())));
+                close->click();
+                QTRY_VERIFY(!editor->isVisible());
+            }
         }
     }
     void yearFits_data() {
