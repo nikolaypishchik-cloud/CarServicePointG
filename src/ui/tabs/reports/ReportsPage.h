@@ -11,6 +11,7 @@
 #include "core/services/ReportsDataLoader.h"
 #include "core/services/ReportsPdfRenderer.h"
 
+class QVBoxLayout;
 class QDateEdit;
 class QLabel;
 class QScrollArea;
@@ -103,6 +104,7 @@ private:
     void refreshExpenses(bool repeatPrevious = false);
     void applyExpensesSnapshot(const ExpensesSnapshot& snapshot, bool repeatPrevious = false);
     void refreshTotalExpenses();
+    void buildExpensePeriodControls(QWidget* page, QVBoxLayout* layout);
     void buildAdditionalExpensesForm(QWidget* page);
     void addAdditionalExpense();
     void deleteAdditionalExpense();

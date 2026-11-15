@@ -1130,6 +1130,64 @@ private slots:
         QVERIFY(q.exec("SELECT COUNT(*),SUM(amount_cents) FROM additional_expenses"));
         QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 1); QCOMPARE(q.value(1).toInt(), 500);
     }
+    void totalExpensePeriodNavigation() {
+        QVERIFY(AdditionalExpenseService::add(db, QDate(2024,2,29), "Rent", "Leap day", 12.34));
+        QVERIFY(AdditionalExpenseService::add(db, QDate(2024,3,1), "Rent", "Next month", 5.01));
+        ReportsPage page;
+        page.show();
+        auto* tabs = page.findChild<QTabWidget*>();
+        QVERIFY(tabs);
+        tabs->setCurrentIndex(6);
+        auto* from = page.findChild<QDateEdit*>("dashboardFrom");
+        auto* to = page.findChild<QDateEdit*>("dashboardTo");
+        auto* month = page.findChild<QPushButton*>("totalExpensePeriod1");
+        auto* quarter = page.findChild<QPushButton*>("totalExpensePeriod3");
+        auto* year = page.findChild<QPushButton*>("totalExpensePeriod12");
+        auto* custom = page.findChild<QPushButton*>("totalExpensePeriod0");
+        auto* previous = page.findChild<QPushButton*>("totalExpensePreviousPeriod");
+        auto* next = page.findChild<QPushButton*>("totalExpenseNextPeriod");
+        QVERIFY(from && to && month && quarter && year && custom && previous && next);
+        auto* total = page.findChild<QLabel*>("reportMetricValue0");
+        auto* search = page.findChild<QLineEdit*>("totalExpenseSearch");
+        QVERIFY(total && search);
+        from->setDate(QDate(2024,2,15));
+        month->click();
+        QCOMPARE(from->date(), QDate(2024,2,1));
+        QCOMPARE(to->date(), QDate(2024,2,29));
+        QTRY_COMPARE_WITH_TIMEOUT(total->text(), QStringLiteral("12.34 грн"), 10000);
+        search->setText("day");
+        next->click();
+        QCOMPARE(to->date(), QDate(2024,3,31));
+        QTRY_COMPARE_WITH_TIMEOUT(total->text(), QStringLiteral("0 грн"), 10000);
+        QCOMPARE(search->text(), QStringLiteral("day"));
+        search->clear();
+        QTRY_COMPARE_WITH_TIMEOUT(total->text(), QStringLiteral("5.01 грн"), 10000);
+        quarter->click();
+        QCOMPARE(from->date(), QDate(2024,1,1));
+        previous->click();
+        QCOMPARE(from->date(), QDate(2023,10,1));
+        QCOMPARE(to->date(), QDate(2023,12,31));
+        year->click();
+        next->click();
+        QCOMPARE(from->date(), QDate(2024,1,1));
+        QCOMPARE(to->date(), QDate(2024,12,31));
+        from->setDate(QDate(2024,12,29));
+        QVERIFY(custom->isChecked());
+        next->click();
+        QCOMPARE(from->date(), QDate(2025,1,1));
+        QCOMPARE(to->date(), QDate(2025,1,3));
+        previous->click();
+        QCOMPARE(from->date(), QDate(2024,12,29));
+        QCOMPARE(to->date(), QDate(2024,12,31));
+        from->setDate(from->minimumDate());
+        year->click();
+        QVERIFY(!previous->isEnabled());
+        from->setDate(from->maximumDate());
+        month->click();
+        QCOMPARE(to->date(), to->maximumDate());
+        QVERIFY(!next->isEnabled());
+    }
+
     void totalExpenseFiltersKeepAmountsAndIdentityTogether() {
         const QDate day = QDate::currentDate();
         QSqlQuery q(db);

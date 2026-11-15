@@ -1,5 +1,6 @@
 #include "ui/tabs/reports/ReportsPageModulePrelude.h"
 #include "core/services/AdditionalExpenseService.h"
+#include <QButtonGroup>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QScrollArea>
@@ -8,6 +9,80 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QInputDialog>
+
+namespace {
+QPair<QDate, QDate> expensePeriodRange(QDate start, QDate end, int months, int direction)
+{
+    if (months == 0) {
+        if (end < start) return {};
+        const qint64 offset = direction * (start.daysTo(end) + 1);
+        return {start.addDays(offset), end.addDays(offset)};
+    }
+    const int firstMonth = 1 + ((start.month() - 1) / months) * months;
+    const QDate first = QDate(start.year(), firstMonth, 1).addMonths(direction * months);
+    const QDate lastMonth = first.addMonths(months - 1);
+    return {first, QDate(lastMonth.year(), lastMonth.month(), lastMonth.daysInMonth())};
+}
+}
+
+void ReportsPage::buildExpensePeriodControls(QWidget* page, QVBoxLayout* layout)
+{
+    auto* row = new QHBoxLayout;
+    row->addWidget(new QLabel(QStringLiteral("Швидкий період"), page));
+    auto* modes = new QButtonGroup(page);
+    auto addMode = [&](const QString& label, int months) {
+        auto* button = new QPushButton(label, page);
+        button->setObjectName(QStringLiteral("totalExpensePeriod%1").arg(months));
+        button->setCheckable(true);
+        modes->addButton(button, months);
+        row->addWidget(button);
+    };
+    addMode(QStringLiteral("Місяць"), 1);
+    addMode(QStringLiteral("Квартал"), 3);
+    addMode(QStringLiteral("Рік"), 12);
+    addMode(QStringLiteral("Довільний"), 0);
+    modes->button(0)->setChecked(true);
+    row->addStretch(1);
+    auto* previous = new QPushButton(QStringLiteral("‹"), page);
+    auto* next = new QPushButton(QStringLiteral("›"), page);
+    previous->setObjectName("totalExpensePreviousPeriod");
+    next->setObjectName("totalExpenseNextPeriod");
+    previous->setAccessibleName(QStringLiteral("Попередній період"));
+    next->setAccessibleName(QStringLiteral("Наступний період"));
+    previous->setToolTip(previous->accessibleName());
+    next->setToolTip(next->accessibleName());
+    row->addWidget(previous);
+    row->addWidget(next);
+    layout->insertLayout(2, row);
+
+    auto available = [this](const QPair<QDate,QDate>& range) {
+        return range.first.isValid() && range.second.isValid() && range.first >= m_from->minimumDate()
+            && range.second <= m_to->maximumDate();
+    };
+    auto updateArrows = [this, available, previous, next, modes] {
+        auto adjacent = [this, modes](int step) {
+            return expensePeriodRange(m_from->date(), m_to->date(), modes->checkedId(), step);
+        };
+        previous->setEnabled(available(adjacent(-1)));
+        next->setEnabled(available(adjacent(1)));
+    };
+    auto apply = [this, available, modes, updateArrows](int months, int step) {
+        const auto range = expensePeriodRange(m_from->date(), m_to->date(), months, step);
+        if (available(range)) {
+            m_from->setDate(range.first);
+            m_to->setDate(range.second);
+            modes->button(months)->setChecked(true);
+        }
+        updateArrows();
+    };
+    auto manual = [=] { modes->button(0)->setChecked(true); updateArrows(); };
+    connect(m_from, &QDateEdit::dateChanged, page, manual);
+    connect(m_to, &QDateEdit::dateChanged, page, manual);
+    connect(modes, &QButtonGroup::idClicked, page, [=](int months) { apply(months, 0); });
+    connect(previous, &QPushButton::clicked, page, [=] { apply(modes->checkedId(), -1); });
+    connect(next, &QPushButton::clicked, page, [=] { apply(modes->checkedId(), 1); });
+    updateArrows();
+}
 
 void ReportsPage::buildAdditionalExpensesForm(QWidget* page)
 {
@@ -105,6 +180,7 @@ void ReportsPage::buildAdditionalExpensesForm(QWidget* page)
     filters->addWidget(m_totalExpenseCategory, 1);
     filters->addWidget(m_totalExpenseSource, 1);
     qobject_cast<QVBoxLayout*>(page->layout())->insertLayout(1, filters);
+    buildExpensePeriodControls(page, qobject_cast<QVBoxLayout*>(page->layout()));
     connect(m_totalExpenseSearch, &QLineEdit::textChanged, this, &ReportsPage::filterTotalExpenses);
     connect(m_totalExpenseCategory, &QComboBox::currentIndexChanged, this, &ReportsPage::filterTotalExpenses);
     connect(m_totalExpenseSource, &QComboBox::currentIndexChanged, this, &ReportsPage::filterTotalExpenses);
