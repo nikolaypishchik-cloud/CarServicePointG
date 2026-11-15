@@ -92,6 +92,27 @@ class ProfileSnapshotTests(unittest.TestCase):
         target = m.restore(self.backup, self.base / 'restored')
         self.assertEqual(set(m.inventory(target)), set(m.inventory(self.profile)))
 
+    def test_native_backup_keeps_indexed_hash_after_relocation(self):
+        store = self.profile / 'custom-backup-folder'
+        stored = store / '2026-05-24/snapshot_2026-05-24_21-33-09_347__save__order.db'
+        stored.parent.mkdir(parents=True)
+        historical_value = (self.profile / 'attachments/invoice.pdf').as_posix()
+        with closing(sqlite3.connect(stored)) as conn:
+            conn.execute('CREATE TABLE settings(path TEXT)')
+            conn.execute('INSERT INTO settings VALUES(?)', (historical_value,))
+            conn.commit()
+        index = {'entries': [{'snapshotPath': stored.as_posix(), 'hashSha256': m.digest(stored)}]}
+        (store / 'index.json').write_text(json.dumps(index), encoding='utf-8')
+        m.snapshot(self.profile, self.backup)
+        target = self.base / 'restored'
+        m.restore(self.backup, target)
+        item = json.loads((target / store.name / 'index.json').read_text(encoding='utf-8'))['entries'][0]
+        copy = target / stored.relative_to(self.profile)
+        self.assertEqual(Path(item['snapshotPath']), copy)
+        self.assertEqual(m.digest(copy), item['hashSha256'])
+        with closing(sqlite3.connect(copy)) as conn:
+            self.assertEqual(conn.execute('SELECT path FROM settings').fetchone(), (historical_value,))
+
     def test_refuses_existing_destination(self):
         m.snapshot(self.profile,self.backup)
         with self.assertRaises(FileExistsError):m.restore(self.backup,self.profile)

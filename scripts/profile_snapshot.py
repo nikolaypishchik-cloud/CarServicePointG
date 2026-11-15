@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import shutil
 import sqlite3
@@ -61,6 +62,14 @@ def inventory(root: Path, directories: set[str] | None = None) -> dict[str, Path
 def is_attachment(name: str) -> bool:
     # Attachment directories may be nested beneath an application profile.
     return any(part.casefold() == 'attachments' for part in PurePosixPath(name).parts[:-1])
+
+
+def is_native_backup(name: str) -> bool:
+    # BackupSnapshotService publishes these immutable files under backupDayDir().
+    path = PurePosixPath(name)
+    return bool(re.fullmatch(r'\d{4}-\d{2}-\d{2}', path.parent.name)
+                and re.fullmatch(r'snapshot_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_\d{3}__.+__.+\.db',
+                                 path.name, re.IGNORECASE))
 
 
 def database(path: Path) -> bool:
@@ -115,20 +124,22 @@ def snapshot(profile_root, destination, *, _step=lambda phase: None):
     directories = set()
     source = inventory(root, directories)
     databases = {name for name, path in source.items() if not is_attachment(name) and database(path)}
+    native_backups = {name for name in databases if is_native_backup(name)}
+    live_databases = databases - native_backups
     for name in source:
         if not is_attachment(name) and Path(name).suffix.lower() in {'.db', '.sqlite', '.sqlite3'} and name not in databases:
             raise ValueError(f'Encrypted or unsupported DB requires its native backup provider: {name}')
-    sidecars = {name + suffix for name in databases for suffix in ('-wal', '-shm', '-journal')}
+    sidecars = {name + suffix for name in live_databases for suffix in ('-wal', '-shm', '-journal')}
     stage = target.with_name(target.name + '.partial-' + uuid.uuid4().hex)
     stage.mkdir()
     (stage / 'files').mkdir()
     # Staging is deliberately retained on failure; it is never a valid snapshot.
     with ExitStack() as stack:
-        for name in sorted(databases):
+        for name in sorted(live_databases):
             guard = connect(source[name], 'rw')
             stack.callback(guard.close)
             guard.execute('BEGIN IMMEDIATE')
-        before = {name: digest(path) for name, path in source.items() if name not in databases | sidecars}
+        before = {name: digest(path) for name, path in source.items() if name not in live_databases | sidecars}
         _step('locked')
         for name in sorted(directories):
             (stage / 'files' / name).mkdir()
@@ -139,7 +150,7 @@ def snapshot(profile_root, destination, *, _step=lambda phase: None):
             copy = stage / 'files' / name
             copy.parent.mkdir(parents=True, exist_ok=True)
             kind = 'sqlite' if name in databases else 'file'
-            if kind == 'sqlite':
+            if name in live_databases:
                 started = time.monotonic()
                 def progress(status, remaining, total):
                     if time.monotonic() - started > 60:
@@ -155,7 +166,7 @@ def snapshot(profile_root, destination, *, _step=lambda phase: None):
                 version = integrity(copy)
             else:
                 shutil.copyfile(path, copy)
-                version = None
+                version = integrity(copy) if name in native_backups else None
                 if digest(copy) != before[name]:
                     raise ValueError(f'File changed during snapshot: {name}')
             entries.append(dict(path=name, kind=kind, size=copy.stat().st_size,
@@ -281,7 +292,7 @@ def relocate_profile(stage, old_root, target):
 
     changes = 0
     for name, path in inventory(stage).items():
-        if is_attachment(name):
+        if is_attachment(name) or is_native_backup(name):
             continue
         if database(path):
             with closing(connect(path, 'rw')) as conn:
