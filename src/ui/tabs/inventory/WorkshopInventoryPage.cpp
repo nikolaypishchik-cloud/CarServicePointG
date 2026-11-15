@@ -349,15 +349,12 @@ void WorkshopInventoryPage::buildUi()
     m_balanceTable->setObjectName("inventoryBalances");
     balanceTabs->addTab(balances, QString::fromUtf8("Залишки"));
     balanceTabs->addTab(acquisitions, QString::fromUtf8("Придбання"));
-    connect(balanceButton, &QPushButton::clicked, this, [this, purchasesPage, balanceTabs] {
-        m_dirty = true;
+    connect(balanceButton, &QPushButton::clicked, this, &WorkshopInventoryPage::openBalance);
+    connect(this, &WorkshopInventoryPage::openBalance, purchasesPage, [this, purchasesPage, balanceTabs] {
+        markDirty();
         refresh();
         balanceTabs->setCurrentIndex(0);
-        const QRect available = screen()->availableGeometry();
-        purchasesPage->resize(qRound(available.width() * 0.64),
-                              qRound(available.height() * 0.63));
-        purchasesPage->move(available.center() - purchasesPage->rect().center());
-        purchasesPage->exec();
+        showInventoryBalanceDialog(*purchasesPage);
     });
     connect(m_balanceMaterial, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
         m_dirty = true;

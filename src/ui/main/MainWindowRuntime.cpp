@@ -500,7 +500,8 @@ void MainWindow::applyAdaptiveShellMetrics()
         m_topPill->setMaximumHeight(h);
     }
     if (m_topRightSpacer) {
-        const int w = qBound(180, qRound(avail.width() * 0.19), AdaptiveUi::px(this, 360));
+        const int w = qMax(m_topRightSpacer->layout()->sizeHint().width(),
+                           qBound(180, qRound(avail.width() * 0.19), AdaptiveUi::px(this, 360)));
         m_topRightSpacer->setMinimumWidth(w);
         m_topRightSpacer->setMaximumWidth(w);
     }

@@ -4403,6 +4403,39 @@ private slots:
         verifyInsets();
     }
 
+    void headerBalancePreservesPage() {
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        auto* button = window.findChild<QToolButton*>("headerInventoryBalance");
+        auto* pages = window.findChild<QStackedWidget*>("pages");
+        QVERIFY(button && pages);
+        QVERIFY(button->isEnabled());
+        QDialog* first = nullptr;
+        for (int index : {1, 3, 9}) {
+            pages->setCurrentIndex(index);
+            QCoreApplication::processEvents();
+            QWidget* origin = pages->currentWidget();
+            bool correctDialog = false;
+            QTimer::singleShot(0, &window, [&] {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                if (!dialog) return;
+                auto* tabs = dialog->findChild<QTabWidget*>("inventoryBalanceTabs");
+                correctDialog = dialog->objectName() == QStringLiteral("workshopInventoryPurchasesTab")
+                    && tabs && tabs->tabText(tabs->currentIndex()) == QStringLiteral("Залишки")
+                    && pages->currentWidget() == origin && (!first || first == dialog);
+                first = dialog;
+                dialog->reject();
+            });
+            button->click();
+            QVERIFY(correctDialog);
+            QCOMPARE(pages->currentWidget(), origin);
+        }
+        ActivityAuditService::setCurrentActor({"master","Master","master","test"});
+        button->click();
+        QVERIFY(!first->isVisible());
+    }
+
     void pendingFinanceHeaderActions() {
         MainWindow window;
         window.resize(1280, 800);

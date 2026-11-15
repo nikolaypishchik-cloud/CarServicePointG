@@ -111,6 +111,8 @@ void MainWindow::applyAccessControl()
         it.value()->setEnabled(allowed);
     }
 
+    if (m_headerBalance) m_headerBalance->setEnabled(canAccessPage(13));
+
     // The sidebar reserves one slot for account-specific configuration.
     // Users allowed to open Settings use that slot; self phone pairing is
     // deliberately exposed only when Settings is unavailable to the user.

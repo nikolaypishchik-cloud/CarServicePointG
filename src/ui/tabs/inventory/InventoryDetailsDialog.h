@@ -1,6 +1,7 @@
 #pragma once
 #include "core/services/PurchasePaymentService.h"
 #include <QDialog>
+#include <QScreen>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QLabel>
@@ -55,5 +56,18 @@ inline void showInventoryDetails(QWidget* parent,
     }
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     root->addWidget(buttons);
+    dialog.exec();
+}
+
+inline void showInventoryBalanceDialog(QDialog& dialog)
+{
+    if (dialog.isVisible()) {
+        dialog.raise();
+        dialog.activateWindow();
+        return;
+    }
+    const QRect available = dialog.screen()->availableGeometry();
+    dialog.resize(qRound(available.width() * 0.64), qRound(available.height() * 0.63));
+    dialog.move(available.center() - dialog.rect().center());
     dialog.exec();
 }

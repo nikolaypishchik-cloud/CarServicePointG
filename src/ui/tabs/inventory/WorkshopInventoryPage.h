@@ -26,6 +26,7 @@ public:
     void focusPurchase(qint64 purchaseId);
 
 signals:
+    void openBalance();
     void requestRefreshAll();
 
 protected:

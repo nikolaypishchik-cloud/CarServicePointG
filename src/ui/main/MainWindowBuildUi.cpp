@@ -203,6 +203,39 @@ void MainWindow::buildUi()
     headerActions->setContentsMargins(0, 0, 0, 0);
     headerActions->setSpacing(8);
     headerActions->addStretch();
+    auto* balance = new QToolButton(m_topRightSpacer);
+    m_headerBalance = balance;
+    balance->setObjectName("headerInventoryBalance");
+    balance->setText(tr("Залишки"));
+    balance->setAccessibleName(balance->text());
+    balance->setToolTip(tr("Відкрити залишки складу"));
+    balance->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    balance->setAutoRaise(true);
+    balance->setStyleSheet(QStringLiteral(
+        "QToolButton { background: transparent; color: #edf5fa; padding: 0 4px; border: 1px solid transparent; }"
+        "QToolButton:hover, QToolButton:focus { border-color: #81cad5; }"
+        "QToolButton:disabled { color: #aab9c5; }"));
+    balance->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    QPixmap balanceImage(64, 64);
+    balanceImage.fill(Qt::transparent);
+    {
+        QPainter painter(&balanceImage);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(QColor("#55dce5"), 3.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawEllipse(QRectF(4, 36, 24, 9));
+        painter.drawLine(4, 40, 4, 51);
+        painter.drawLine(28, 40, 28, 51);
+        painter.drawArc(QRectF(4, 46, 24, 10), 180 * 16, 180 * 16);
+        painter.drawEllipse(QRectF(23, 8, 29, 29));
+        painter.drawLine(48, 34, 60, 47);
+    }
+    balance->setIcon(QIcon(balanceImage));
+    balance->setIconSize(QSize(22, 22));
+    connect(balance, &QToolButton::clicked, this, [this] {
+        if (canAccessPage(13) && ensurePage(13) && m_pageWorkshopInventory)
+            m_pageWorkshopInventory->openBalance();
+    });
+    headerActions->addWidget(balance);
     for (bool exchangeRate : {true, false}) {
         auto* button = new QToolButton(m_topRightSpacer);
         button->setObjectName(exchangeRate ? "headerExchangeRate" : "headerStatements");

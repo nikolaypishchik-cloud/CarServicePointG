@@ -95,6 +95,7 @@ private:
     QWidget* m_sidebar = nullptr;
     QWidget* m_content = nullptr;
     QWidget* m_topPill = nullptr;
+    QAbstractButton* m_headerBalance = nullptr;
     QWidget* m_topRightSpacer = nullptr;
 
     QStackedWidget* m_stack = nullptr;
