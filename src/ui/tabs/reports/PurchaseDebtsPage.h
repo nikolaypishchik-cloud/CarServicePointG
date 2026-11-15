@@ -41,6 +41,7 @@ private:
     std::shared_ptr<std::atomic_bool> m_cancel;
     bool m_refreshQueued = false;
     QVector<PurchaseDebt> m_debts;
+    QTextBrowser* m_reconciliationResult;
     QString m_debtScope;
     QLineEdit* m_search;
     QComboBox* m_period;

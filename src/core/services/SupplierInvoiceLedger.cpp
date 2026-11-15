@@ -405,6 +405,10 @@ bool hasRemoteBalances(const Ledger& ledger) {
 Summary summarize(const Ledger& ledger,const QVector<PurchaseDebt>& debts,
                   const QMap<QString,SupplierDebtReconciliation>& reconciliations) {
     Summary result;
+    result.fetchedAt = ledger.snapshot.fetchedAt;
+    result.storedDocuments = ledger.snapshot.documents.size();
+    for (const auto& doc : ledger.snapshot.documents)
+        if (doc.missingFromLatest) ++result.missingFromLatest;
     const auto local=SupplierDebtReconciliationService::effectiveTotals(debts,reconciliations);
     result.remote=hasRemoteBalances(ledger);result.unresolved=ledger.hasUnresolved;
     if(!result.remote) {result.totals=local;result.count=debts.size();}

@@ -75,6 +75,24 @@ protected:
 }
 
 namespace {
+QString reconciliationResult(const SupplierDebtReadService::Snapshot& data) {
+    if (data.restricted) return {};
+    QStringList lines;
+    for (const auto& fact : data.reconciliations) {
+        const QString when = fact.checkedAt.isEmpty() ? QObject::tr("дату не збережено") : fact.checkedAt;
+        lines << QObject::tr("%1 · %2 · за обліком на дату звірки %3 грн · за звіркою %4 грн")
+            .arg(fact.supplier, when, FormatUtils::money(fact.computedCents / 100.0, 2),
+                 FormatUtils::money(fact.actualCents / 100.0, 2));
+    }
+    if (data.ledger.fetchedAt.isValid()) {
+        lines << QObject::tr("Еліт · %1 · збережено накладних: %2 · відсутні в останньому списку: %3")
+            .arg(data.ledger.fetchedAt.toLocalTime().toString("dd.MM.yy HH:mm:ss"))
+            .arg(data.ledger.storedDocuments).arg(data.ledger.missingFromLatest);
+    }
+    if (lines.isEmpty()) lines << QObject::tr("Збережених результатів звірки немає.");
+    return QObject::tr("Результат звірки") + "\n" + lines.join('\n');
+}
+
 QString sharedDebtSummary(const QVector<PurchaseDebt>& debts,int gap,
                           const QMap<QString,SupplierDebtReconciliation>& facts,
                           const SupplierInvoiceLedger::Summary& result) {
@@ -122,8 +140,14 @@ PurchaseDebtsPage::PurchaseDebtsPage(QWidget* parent) : QWidget(parent) {
     m_reconcile->setObjectName("reconcileSupplierDebts"); toolbar->addWidget(m_reconcile);
     m_reconcile->setVisible(SupplierDebtReconciliationService::canReconcile());
     layout->addLayout(toolbar);
-    auto* filters = new QHBoxLayout;
-    m_search = new QLineEdit(this);
+    auto* filterBar = new QWidget(this);
+    filterBar->setObjectName("purchaseDebtFilters");
+    filterBar->setAttribute(Qt::WA_StyledBackground, true);
+    filterBar->setStyleSheet("#purchaseDebtFilters {background:#e5edf5; border-radius:5px;}"
+                             "#purchaseDebtFilters QLabel {color:#192631; background:transparent;}");
+    auto* filters = new QHBoxLayout(filterBar);
+    filters->setContentsMargins(8, 4, 8, 4);
+    m_search = new QLineEdit(filterBar);
     m_search->setPlaceholderText(tr("Постачальник, наряд, запчастина"));
     m_search->setClearButtonEnabled(true);
     m_period = new QComboBox(this);
@@ -135,7 +159,7 @@ PurchaseDebtsPage::PurchaseDebtsPage(QWidget* parent) : QWidget(parent) {
     filters->addWidget(m_supplier);
     m_period->setAccessibleName(tr("Період придбання"));
     m_supplier->setAccessibleName(tr("Постачальник"));
-    layout->addLayout(filters);
+    layout->addWidget(filterBar);
     connect(m_search, &QLineEdit::textChanged, this, &PurchaseDebtsPage::renderDebts);
     connect(m_period, &QComboBox::currentIndexChanged, this, &PurchaseDebtsPage::renderDebts);
     connect(m_supplier, &QComboBox::currentIndexChanged, this, &PurchaseDebtsPage::renderDebts);
@@ -149,8 +173,16 @@ PurchaseDebtsPage::PurchaseDebtsPage(QWidget* parent) : QWidget(parent) {
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_table->horizontalHeader()->setSectionResizeMode(3,QHeaderView::Stretch);
     m_table->setStyleSheet("QTableView { background:#ffffff; color:#111827; gridline-color:#cbd5e1; selection-background-color:#dce8fb; selection-color:#111827; }"
-                          "QHeaderView::section { background:#e5edf5; color:#111827; padding:10px; }");
+                          "QHeaderView::section { background:#e5edf5; color:#111827; padding:8px 4px; }");
     layout->addWidget(m_table,1);
+    m_reconciliationResult = new QTextBrowser(this);
+    m_reconciliationResult->setObjectName("debtReconciliationResult");
+    m_reconciliationResult->setAccessibleName(tr("Результат звірки"));
+    m_reconciliationResult->setStyleSheet("#debtReconciliationResult {background:#293541; color:#ffffff;"
+                                          "border:1px solid #788999; border-radius:6px; padding:3px;}");
+    m_reconciliationResult->setMaximumHeight(m_reconciliationResult->fontMetrics().lineSpacing() * 4 + 12);
+    m_reconciliationResult->hide();
+    layout->addWidget(m_reconciliationResult);
     connect(refreshButton,&QPushButton::clicked,this,[this](){refresh();});
     connect(m_reconcile,&QPushButton::clicked,this,[this](){reconcileDebts();});
     connect(m_table,&QTableView::clicked,this,[this](const QModelIndex& index){
@@ -172,6 +204,8 @@ void PurchaseDebtsPage::refresh() {
     m_reconcile->setVisible(SupplierDebtReconciliationService::canReconcile());
     m_table->clearSpans(); m_model->setSnapshot(m_model->headers(),{});
     m_debts.clear();
+    m_reconciliationResult->clear();
+    m_reconciliationResult->hide();
     if (m_debtScope != AccessControlService::currentScopeKey()) {
         const QSignalBlocker period(m_period), supplier(m_supplier), search(m_search);
         m_period->clear();
@@ -192,12 +226,13 @@ void PurchaseDebtsPage::refresh() {
     const auto scopeKey=AccessControlService::currentScopeKey();
     const auto scope=AccessControlService::currentOrderScope();
     const int gap=qCeil(logicalDpiX()*7.0/25.4);
-    struct Result { QVector<PurchaseDebt> debts; QString summary,error; };
+    struct Result { QVector<PurchaseDebt> debts; QString summary, reconciliation, error; };
     auto result=std::make_shared<Result>();
     auto cancel=std::make_shared<std::atomic_bool>(false); m_cancel=cancel;
     auto* worker=AsyncThreadScope::startWorker(this,"purchase_debts",cancel,[result,cancel,readTask,gap] {
         const auto data=readTask(*cancel);
         result->debts=data.debts;result->error=data.error;
+        if (data.error.isEmpty() && !cancel->load()) result->reconciliation = reconciliationResult(data);
         if(data.error.isEmpty() && !cancel->load())result->summary=data.restricted
             ? PurchaseDebtsPage::summaryHtml(data.debts,gap)
             : sharedDebtSummary(data.debts,gap,data.reconciliations,data.ledger);
@@ -210,6 +245,10 @@ void PurchaseDebtsPage::refresh() {
         if(scopeKey!=AccessControlService::currentScopeKey()) { refresh(); return; }
         if(cancel->load()) result->error=QString::fromUtf8("Завантаження боргів скасовано.");
         applyDebts(result->debts,result->summary,result->error);
+        if (result->error.isEmpty() && !result->reconciliation.isEmpty()) {
+            m_reconciliationResult->setPlainText(result->reconciliation);
+            m_reconciliationResult->show();
+        }
     });
     worker->start();
 }

@@ -50,6 +50,8 @@ struct Summary {
     int count = 0;
     bool remote = false, unresolved = false;
     QSet<QString> manualSuppliers;
+    QDateTime fetchedAt;
+    int storedDocuments = 0, missingFromLatest = 0;
 };
 Summary summarize(const Ledger& ledger, const QVector<PurchaseDebt>& debts,
                   const QMap<QString,SupplierDebtReconciliation>& reconciliations);

@@ -2630,6 +2630,16 @@ private slots:
         const auto name=ledger.entries[0].supplier;
         auto summary=SupplierInvoiceLedger::summary(db,debts,{},&error);QVERIFY(error.isEmpty());
         QVERIFY(summary.remote);QCOMPARE(summary.totals.value(name),qint64(10000));
+        PurchaseDebtsPage debtPage;
+        debtPage.refresh();
+        QTRY_VERIFY_WITH_TIMEOUT(!debtPage.property("debtDataLoading").toBool(), 30000);
+        auto* reconciliation = debtPage.findChild<QTextBrowser*>("debtReconciliationResult");
+        QVERIFY(reconciliation && !reconciliation->isHidden());
+        const QString observed = reconciliation->toPlainText();
+        QVERIFY(observed.contains(result.fetchedAt.toLocalTime().toString("dd.MM.yy HH:mm:ss")));
+        QVERIFY(observed.contains(QStringLiteral("збережено накладних: 1")));
+        QVERIFY(observed.contains(QStringLiteral("відсутні в останньому списку: 0")));
+        QCOMPARE(PurchasePaymentService::balances(db, &error), payments);
         int count=0;double amount=0;
         QVERIFY(MainWindowMetricsService::loadUnpaidPurchasesSummary(count,amount));
         QCOMPARE(amount,100.0);QCOMPARE(count,1);
@@ -8264,6 +8274,24 @@ private slots:
         QVERIFY2(SupplierDebtReconciliationService::save(db,{row},&error),qPrintable(error));
         const auto saved=SupplierDebtReconciliationService::load(db,&error);
         QCOMPARE(saved.value("Store").actualCents,23050LL);
+        PurchaseDebtsPage page;
+        page.show();
+        page.refresh();
+        QTRY_VERIFY_WITH_TIMEOUT(!page.property("debtDataLoading").toBool(), 30000);
+        auto* result = page.findChild<QTextBrowser*>("debtReconciliationResult");
+        QVERIFY(result && result->isVisible());
+        const QString text = result->toPlainText();
+        QVERIFY(text.contains(saved.value("Store").checkedAt));
+        QVERIFY(text.contains(FormatUtils::money(230.50, 2)) && text.contains(FormatUtils::money(200, 2)));
+        page.m_search->setText("unmatched");
+        QCOMPARE(result->toPlainText(), text);
+        const QString capture = qEnvironmentVariable("CS_DEBT_RESULT_CAPTURE");
+        if (!capture.isEmpty()) {
+            page.m_search->clear();
+            page.resize(1050, 550);
+            QCoreApplication::processEvents();
+            QVERIFY(page.grab().save(capture));
+        }
         QVERIFY(saved.value("Store").differs()); QVERIFY(!saved.value("Store").revision.isEmpty());
         QCOMPARE(PurchasePaymentService::detail(db,"part",1,"order-a").paidCents,before.paidCents);
         QCOMPARE(PurchasePaymentService::detail(db,"part",1,"order-a").totalCents,before.totalCents);
@@ -8278,6 +8306,10 @@ private slots:
         ActivityAuditService::setCurrentActor({"master","Master","master","test"});
         QVERIFY(!SupplierDebtReconciliationService::save(db,{row},&error));
         QVERIFY(SupplierDebtReconciliationService::load(db).isEmpty());
+        page.refresh();
+        QVERIFY(result->isHidden() && result->toPlainText().isEmpty());
+        QTRY_VERIFY_WITH_TIMEOUT(!page.property("debtDataLoading").toBool(), 30000);
+        QVERIFY(result->isHidden() && result->toPlainText().isEmpty());
         QVERIFY(!SupplierDebtReconciliationService::canReconcile());
     }
     void supplierReconciliationDialogSavesEditedAmount() {
