@@ -1286,6 +1286,52 @@ private slots:
         QCOMPARE(total->text(), QStringLiteral("79.71 грн"));
     }
 
+    void repeatedExpenseDeleteKeepsNeighbour() {
+        const QDate day = QDate::currentDate();
+        qint64 target = 0, neighbour = 0;
+        QVERIFY(AdditionalExpenseService::add(db, day, "Other", "Same description", 5.25, &target));
+        QVERIFY(AdditionalExpenseService::add(db, day, "Other", "Same description", 5.25, &neighbour));
+        ReportsPage page;
+        page.show();
+        auto* tabs = page.findChild<QTabWidget*>();
+        QVERIFY(tabs);
+        tabs->setCurrentIndex(6);
+        auto* table = page.findChild<QTableView*>("additionalExpensesTable");
+        auto* remove = page.findChild<QPushButton*>("deleteAdditionalExpense");
+        QVERIFY(table && remove);
+        auto* model = table->model();
+        QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 3, 10000);
+        const int selected = model->index(1,0).data(Qt::UserRole).toLongLong() == target ? 1 : 2;
+        table->setCurrentIndex(model->index(selected,0));
+        QVERIFY(remove->isEnabled());
+        bool duplicatePrompt = false;
+        QTimer::singleShot(0, [&] {
+            auto* first = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+            QVERIFY(first);
+            QTimer::singleShot(0, &page, [&, first] {
+                auto* second = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+                if (second && second != first) {
+                    duplicatePrompt = true;
+                    second->button(QMessageBox::No)->click();
+                }
+            });
+            remove->click();
+            first->button(QMessageBox::Yes)->click();
+        });
+        remove->click();
+        QVERIFY(!duplicatePrompt);
+        QVERIFY(!remove->isEnabled());
+        remove->click();
+        QTRY_COMPARE_WITH_TIMEOUT(model->rowCount(), 2, 10000);
+        QCOMPARE(model->index(1,0).data(Qt::UserRole).toLongLong(), neighbour);
+        QSqlQuery q(db);
+        QVERIFY(q.exec("SELECT id, amount_cents FROM additional_expenses"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toLongLong(), neighbour);
+        QCOMPARE(q.value(1).toLongLong(), 525);
+        QVERIFY(!q.next());
+    }
+
     void formAddFilterDeleteAndLayout() {
         ReportsPage page;
         page.resize(1400, 850);
@@ -1320,6 +1366,8 @@ private slots:
         date->setDate(QDate::currentDate().addDays(-40));
         amount->setValue(145.75);
         QVERIFY(dialog->grab().save(dir.filePath("additional-expenses-dialog.png")));
+        dialogButtons->button(QDialogButtonBox::Save)->click();
+        QVERIFY(!dialog->isVisible());
         dialogButtons->button(QDialogButtonBox::Save)->click();
         });
         QTest::mouseClick(add, Qt::LeftButton);

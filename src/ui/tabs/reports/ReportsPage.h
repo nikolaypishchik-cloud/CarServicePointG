@@ -187,6 +187,7 @@ private:
     QComboBox* m_expenseCategory = nullptr;
     QLineEdit* m_expenseDescription = nullptr;
     QDoubleSpinBox* m_expenseAmount = nullptr;
+    bool m_additionalExpenseActionActive = false;
     QPushButton* m_addExpenseButton = nullptr;
     QPushButton* m_deleteExpenseButton = nullptr;
     ReportsTableSupport::ReportsSnapshotTableModel* m_totalExpensesModel = nullptr;

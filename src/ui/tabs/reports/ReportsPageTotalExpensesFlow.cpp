@@ -2,6 +2,7 @@
 #include "core/services/AdditionalExpenseService.h"
 #include <QButtonGroup>
 #include <QShortcut>
+#include <QScopedValueRollback>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QScrollArea>
@@ -222,6 +223,7 @@ void ReportsPage::buildAdditionalExpensesForm(QWidget* page)
     connect(m_totalExpenseSource, &QComboBox::currentIndexChanged, this, &ReportsPage::filterTotalExpenses);
     m_totalExpensesTable->setObjectName("additionalExpensesTable");
     connect(m_addExpenseButton, &QPushButton::clicked, form, [this, form]() {
+        if (form->isVisible()) return;
         updateExpenseCategories();
         m_expenseDate->setDate(QDate::currentDate());
         m_expenseDescription->clear();
@@ -297,6 +299,9 @@ void ReportsPage::updateExpenseCategories()
 
 void ReportsPage::addAdditionalExpense()
 {
+    auto* dialog = qobject_cast<QDialog*>(m_expenseDate->window());
+    if (!dialog || !dialog->isVisible() || m_additionalExpenseActionActive) return;
+    QScopedValueRollback<bool> active(m_additionalExpenseActionActive, true);
     m_expenseAmount->interpretText();
     QString error;
     if (!AdditionalExpenseService::add( m_expenseDate->date(),
@@ -310,7 +315,7 @@ void ReportsPage::addAdditionalExpense()
     if (m_expenseDate->date() > m_to->date()) m_to->setDate(m_expenseDate->date());
     m_expenseDescription->clear();
     m_expenseAmount->setValue(0);
-    if (auto* dialog=qobject_cast<QDialog*>(m_expenseDate->window())) dialog->accept();
+    dialog->accept();
     markDirty();
     scheduleRefresh(0);
     queueRefreshAll(0);
@@ -318,6 +323,11 @@ void ReportsPage::addAdditionalExpense()
 
 void ReportsPage::deleteAdditionalExpense()
 {
+    const int tab = static_cast<int>(ReportTab::TotalExpenses);
+    const QString key = ReportsAsyncSupport::buildTabKey(tab, m_from->date(), m_to->date());
+    if (activeTab() != ReportTab::TotalExpenses || m_tabKeys.value(tab) != key
+        || !m_deleteExpenseButton->isEnabled() || m_additionalExpenseActionActive) return;
+    QScopedValueRollback<bool> active(m_additionalExpenseActionActive, true);
     const int row = m_totalExpensesTable->currentIndex().row();
     const qint64 id = m_totalExpensesModel->cellUserValue(row, 0).toLongLong();
     if (id <= 0) return;
@@ -326,10 +336,12 @@ void ReportsPage::deleteAdditionalExpense()
                 .arg(m_totalExpensesModel->cellText(row, 2), m_totalExpensesModel->cellText(row, 4)),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) return;
     QString error;
-    if (!AdditionalExpenseService::remove( id, &error)) {
+    if (!AdditionalExpenseService::remove(id, &error)) {
         QMessageBox::warning(this, QString::fromUtf8("Витрати"), error);
         return;
     }
+    m_totalExpensesTable->setCurrentIndex(QModelIndex());
+    m_deleteExpenseButton->setEnabled(false);
     markDirty();
     scheduleRefresh(0);
     queueRefreshAll(0);
