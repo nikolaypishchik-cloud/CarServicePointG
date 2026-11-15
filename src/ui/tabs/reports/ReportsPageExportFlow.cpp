@@ -2,6 +2,7 @@
 // Compiled as a separate P2 implementation module; include-order dependencies are isolated in the module prelude.
 
 #include "ui/tabs/reports/ReportsPageModulePrelude.h"
+#include <QComboBox>
 #include "ui/tabs/reports/ReportsPdfPresentation.h"
 #include "ui/tabs/orders/CurrentOrdersCoordinator.h"
 #include "ui/common/dialogs/OrderDialog.h"
@@ -286,6 +287,8 @@ void ReportsPage::refreshPayroll()
 
     setTabDescription(ReportTab::Payroll, QString::fromUtf8("Зарплата — нарахування майстрів та адміна у межах вибраного періоду."));
     setTabAuxStats(ReportTab::Payroll, QString());
+    m_payrollSearch->setEnabled(false);
+    m_payrollEmployee->setEnabled(false);
     updateStats({QString::fromUtf8("Завантаження зарплати…")});
     ReportsAsyncSupport::showLoadingRow(m_payrollTable, m_payrollModel, QString::fromUtf8("Завантаження…"));
 

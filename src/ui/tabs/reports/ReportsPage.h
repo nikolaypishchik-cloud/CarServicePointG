@@ -191,6 +191,10 @@ private:
     QPushButton* m_addExpenseButton = nullptr;
     QPushButton* m_deleteExpenseButton = nullptr;
     ReportsTableSupport::ReportsSnapshotTableModel* m_totalExpensesModel = nullptr;
+    PayrollSnapshot m_payrollSnapshot;
+    QComboBox* m_payrollEmployee = nullptr;
+    QLineEdit* m_payrollSearch = nullptr;
+    void filterPayrollRows();
     QTableView* m_payrollTable = nullptr;
     ReportsTableSupport::ReportsSnapshotTableModel* m_payrollModel = nullptr;
     QHash<int, QString> m_tabKeys;

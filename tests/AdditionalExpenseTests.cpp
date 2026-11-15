@@ -866,6 +866,45 @@ private slots:
     void payrollReadFailuresAndRecovery() {
         QString error;QVERIFY2(PayrollReadFixture::run(&error),qPrintable(error));
     }
+    void payrollFiltersDistinguishNamesakes() {
+        QString error;
+        QVERIFY2(PayrollIdentityFixture::run(db, &error), qPrintable(error));
+        QSqlQuery query(db);
+        QVERIFY(query.exec("UPDATE masters SET name='Master' WHERE id='n'"));
+        ReportsPage page;
+        page.show();
+        auto* tabs = page.findChild<QTabWidget*>();
+        QVERIFY(tabs);
+        auto* employee = page.findChild<QComboBox*>("payrollEmployee");
+        auto* search = page.findChild<QLineEdit*>("payrollSearch");
+        QVERIFY(employee && search);
+        const auto dates = page.findChildren<QDateEdit*>();
+        QVERIFY(dates.size() >= 2);
+        dates[0]->setDate(QDate(2026, 1, 1));
+        dates[1]->setDate(QDate(2026, 1, 31));
+        for (int i = 0; i < tabs->count(); ++i)
+            if (tabs->tabText(i) == QStringLiteral("Зарплата")) tabs->setCurrentIndex(i);
+        auto* table = tabs->currentWidget()->findChild<QTableView*>();
+        auto* stats = page.findChild<QLabel*>("reportsStatsLabel");
+        QVERIFY(table && stats);
+        QTRY_VERIFY_WITH_TIMEOUT(employee->findData("n") >= 0, 10000);
+        const int first = employee->findData("m");
+        const int second = employee->findData("n");
+        QVERIFY(first >= 0 && employee->itemText(first) != employee->itemText(second));
+        for (const int index : {first, second}) {
+            employee->setCurrentIndex(index);
+            QCOMPARE(table->model()->rowCount(), 1);
+            const QString expected = FormatUtils::money(index == first ? 0.05 : 0.02, 2);
+            QCOMPARE(table->model()->index(0, 4).data().toString(), expected);
+            QVERIFY(stats->text().contains(expected));
+        }
+        search->setText("absent");
+        QVERIFY(stats->text().contains(FormatUtils::money(0, 2)));
+        search->setText("mAsT");
+        employee->setCurrentIndex(0);
+        QCOMPARE(table->model()->rowCount(), 2);
+        QVERIFY(stats->text().contains(FormatUtils::money(0.07, 2)));
+    }
     void payrollUiRecoversAfterReadFailure() {
         QString error;QVERIFY2(PayrollReadFixture::schema(db,&error),qPrintable(error));
         QVERIFY2(PayrollReadFixture::populate(db,&error),qPrintable(error));

@@ -2,6 +2,7 @@
 // Compiled as a separate P2 implementation module; include-order dependencies are isolated in the module prelude.
 
 #include "ui/tabs/reports/ReportsPageModulePrelude.h"
+#include <QComboBox>
 #include "ui/tabs/reports/PurchaseDebtsPage.h"
 #include "ui/tabs/reports/InvoicesPage.h"
 #include "ui/tabs/reports/PartsRegisterView.h"
@@ -385,7 +386,20 @@ void ReportsPage::buildUi()
     m_dashboard->setExpenseControls(expenseControls);
     expenseControls->hide();
     m_tabs->addTab(totalExpensesPage, QString::fromUtf8("Сукупні витрати"));
-    m_tabs->addTab(makeTab(m_payrollTable, m_payrollModel), QString::fromUtf8("Зарплата"));
+    auto* payrollPage = makeTab(m_payrollTable, m_payrollModel);
+    auto* payrollFilters = new QHBoxLayout;
+    m_payrollSearch = new QLineEdit(payrollPage);
+    m_payrollSearch->setObjectName("payrollSearch");
+    m_payrollSearch->setPlaceholderText(tr("Пошук співробітника"));
+    m_payrollEmployee = new QComboBox(payrollPage);
+    m_payrollEmployee->setObjectName("payrollEmployee");
+    m_payrollEmployee->setAccessibleName(tr("Співробітник"));
+    payrollFilters->addWidget(m_payrollSearch, 1);
+    payrollFilters->addWidget(m_payrollEmployee);
+    static_cast<QVBoxLayout*>(payrollPage->layout())->insertLayout(0, payrollFilters);
+    connect(m_payrollSearch, &QLineEdit::textChanged, this, &ReportsPage::filterPayrollRows);
+    connect(m_payrollEmployee, &QComboBox::currentIndexChanged, this, &ReportsPage::filterPayrollRows);
+    m_tabs->addTab(payrollPage, tr("Зарплата"));
     m_debtsPage = new PurchaseDebtsPage(this);
     m_debtsPage->paymentChanged = [this]() { markDirty(); queueRefreshAll(); };
     m_tabs->addTab(m_debtsPage, QString::fromUtf8("Борги"));

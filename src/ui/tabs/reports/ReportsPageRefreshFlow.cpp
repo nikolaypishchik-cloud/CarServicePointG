@@ -3,6 +3,7 @@
 // Compiled as a separate P2 implementation module; include-order dependencies are isolated in the module prelude.
 
 #include "ui/tabs/reports/ReportsPageModulePrelude.h"
+#include <QComboBox>
 #include "ui/tabs/reports/PartsRegisterView.h"
 #include "ui/tabs/reports/PurchaseDebtsPage.h"
 #include "ui/tabs/reports/InvoicesPage.h"
@@ -577,8 +578,49 @@ void ReportsPage::refreshOutsource()
 
 void ReportsPage::applyPayrollSnapshot(const PayrollSnapshot& snapshot)
 {
-    ReportsTableSupport::applyPayrollSnapshot(m_payrollTable, m_payrollModel, snapshot);
-    setTabStats(ReportTab::Payroll, snapshot.stats);
+    m_payrollSnapshot = snapshot;
+    if (!snapshot.error.isEmpty()) {
+        ReportsTableSupport::applyPayrollSnapshot(m_payrollTable, m_payrollModel, snapshot);
+        setTabStats(ReportTab::Payroll, snapshot.stats);
+        return;
+    }
+    const QSignalBlocker block(m_payrollEmployee);
+    const QString selected = m_payrollEmployee->currentData().toString();
+    const QString label = m_payrollEmployee->currentText();
+    m_payrollEmployee->clear();
+    m_payrollEmployee->addItem(tr("Усі співробітники"), QString());
+    QHash<QString, int> nameCounts;
+    for (const auto& row : snapshot.rows) ++nameCounts[row.masterName];
+    for (const auto& row : snapshot.rows) {
+        const QString name = nameCounts.value(row.masterName) > 1
+            ? tr("%1 (ID %2)").arg(row.masterName, row.masterId) : row.masterName;
+        m_payrollEmployee->addItem(name, row.masterId);
+    }
+    if (!selected.isEmpty() && m_payrollEmployee->findData(selected) < 0)
+        m_payrollEmployee->addItem(label, selected);
+    m_payrollEmployee->setCurrentIndex(m_payrollEmployee->findData(selected));
+    m_payrollSearch->setEnabled(true);
+    m_payrollEmployee->setEnabled(true);
+    filterPayrollRows();
+}
+
+void ReportsPage::filterPayrollRows()
+{
+    if (!m_payrollSearch->isEnabled()) return;
+    const QString search = m_payrollSearch->text().trimmed();
+    const QString employee = m_payrollEmployee->currentData().toString();
+    PayrollSnapshot filtered;
+    qint64 totalCents = 0;
+    for (const auto& row : m_payrollSnapshot.rows) {
+        if ((!employee.isEmpty() && employee != row.masterId)
+            || !row.masterName.contains(search, Qt::CaseInsensitive)) continue;
+        filtered.rows.append(row);
+        totalCents += qRound64(row.accruedValue * 100);
+    }
+    ReportsTableSupport::applyPayrollSnapshot(m_payrollTable, m_payrollModel, filtered);
+    setTabStats(ReportTab::Payroll, {tr("Співробітників:  %1").arg(filtered.rows.size()),
+                                     tr("Нараховано:  %1  грн.").arg(FormatUtils::money(totalCents / 100.0, 2))});
+    applyCachedTabUi(ReportTab::Payroll);
 }
 
 void ReportsPage::refreshExpenses(bool repeatPrevious)
