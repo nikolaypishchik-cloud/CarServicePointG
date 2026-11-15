@@ -122,6 +122,23 @@ PurchaseDebtsPage::PurchaseDebtsPage(QWidget* parent) : QWidget(parent) {
     m_reconcile->setObjectName("reconcileSupplierDebts"); toolbar->addWidget(m_reconcile);
     m_reconcile->setVisible(SupplierDebtReconciliationService::canReconcile());
     layout->addLayout(toolbar);
+    auto* filters = new QHBoxLayout;
+    m_search = new QLineEdit(this);
+    m_search->setPlaceholderText(tr("Постачальник, наряд, запчастина"));
+    m_search->setClearButtonEnabled(true);
+    m_period = new QComboBox(this);
+    m_supplier = new QComboBox(this);
+    filters->addWidget(m_search, 1);
+    filters->addWidget(new QLabel(tr("Період"), this));
+    filters->addWidget(m_period);
+    filters->addWidget(new QLabel(tr("Постачальник"), this));
+    filters->addWidget(m_supplier);
+    m_period->setAccessibleName(tr("Період придбання"));
+    m_supplier->setAccessibleName(tr("Постачальник"));
+    layout->addLayout(filters);
+    connect(m_search, &QLineEdit::textChanged, this, &PurchaseDebtsPage::renderDebts);
+    connect(m_period, &QComboBox::currentIndexChanged, this, &PurchaseDebtsPage::renderDebts);
+    connect(m_supplier, &QComboBox::currentIndexChanged, this, &PurchaseDebtsPage::renderDebts);
     m_table=new QTableView(this); m_model=new ReportsTableSupport::ReportsSnapshotTableModel(m_table);m_table->setModel(m_model); m_table->setObjectName("purchaseDebtsTable");
     m_model->setSnapshot({QString::fromUtf8("Дата"),QString::fromUtf8("Тип"),QString::fromUtf8("Наряд"),
         QString::fromUtf8("Запчастина / матеріал"),QString::fromUtf8("Кількість"),QString::fromUtf8("Сума закупівлі"),
@@ -137,11 +154,13 @@ PurchaseDebtsPage::PurchaseDebtsPage(QWidget* parent) : QWidget(parent) {
     connect(refreshButton,&QPushButton::clicked,this,[this](){refresh();});
     connect(m_reconcile,&QPushButton::clicked,this,[this](){reconcileDebts();});
     connect(m_table,&QTableView::clicked,this,[this](const QModelIndex& index){
+        if (m_debtScope != AccessControlService::currentScopeKey()) { refresh(); return; }
         const auto key=m_model->index(index.row(),0);
         if(index.column()==3 && key.data(Qt::UserRole+1).toString()=="remote_invoice")
             openElitInvoicePdf(this,key.data(Qt::UserRole+2).toString());
     });
     connect(m_table,&QTableView::doubleClicked,this,[this](const QModelIndex& index){
+        if (m_debtScope != AccessControlService::currentScopeKey()) { refresh(); return; }
         const auto key=m_model->index(index.row(),0);
         if(!key.data(Qt::UserRole).isValid()) return;
         if(openPurchasePayment(this,key.data(Qt::UserRole+1).toString(),key.data(Qt::UserRole).toLongLong(),key.data(Qt::UserRole+2).toString())) {
@@ -152,6 +171,13 @@ PurchaseDebtsPage::PurchaseDebtsPage(QWidget* parent) : QWidget(parent) {
 void PurchaseDebtsPage::refresh() {
     m_reconcile->setVisible(SupplierDebtReconciliationService::canReconcile());
     m_table->clearSpans(); m_model->setSnapshot(m_model->headers(),{});
+    m_debts.clear();
+    if (m_debtScope != AccessControlService::currentScopeKey()) {
+        const QSignalBlocker period(m_period), supplier(m_supplier), search(m_search);
+        m_period->clear();
+        m_supplier->clear();
+        m_search->clear();
+    }
     m_status->setText(QString::fromUtf8("Завантаження боргів…"));
     setProperty("debtDataLoading",true);
     setProperty("debtLoadError",QString());
@@ -181,7 +207,7 @@ void PurchaseDebtsPage::refresh() {
         m_worker=nullptr;
         if(m_refreshQueued) { m_refreshQueued=false; refresh(); return; }
         setProperty("debtDataLoading",false);
-        if(scopeKey!=AccessControlService::currentScopeKey()) return;
+        if(scopeKey!=AccessControlService::currentScopeKey()) { refresh(); return; }
         if(cancel->load()) result->error=QString::fromUtf8("Завантаження боргів скасовано.");
         applyDebts(result->debts,result->summary,result->error);
     });
@@ -197,6 +223,39 @@ void PurchaseDebtsPage::applyDebts(const QVector<PurchaseDebt>& debts,const QStr
         return;
     }
     if(summaryChanged) summaryChanged(summary);
+    m_debts = debts;
+    m_debtScope = AccessControlService::currentScopeKey();
+    QMap<QString, QString> suppliers, months;
+    for (const auto& debt : debts) {
+        const QString supplier = debt.supplier.trimmed().isEmpty() ? tr("Без магазину") : debt.supplier;
+        suppliers.insert(supplier, supplier);
+        const QDate date = PartsQueryService::parseBusinessDate(debt.date);
+        months.insert(date.isValid() ? date.toString("yyyy-MM") : QStringLiteral("?"),
+                      date.isValid() ? date.toString("MM.yyyy") : tr("Дата невідома"));
+    }
+    auto fill = [](QComboBox* combo, const QString& all, const QMap<QString, QString>& options) {
+        const QSignalBlocker block(combo);
+        const QString selected = combo->currentData().toString();
+        const QString label = combo->currentText();
+        combo->clear();
+        combo->addItem(all, QString());
+        for (auto it = options.cbegin(); it != options.cend(); ++it) combo->addItem(it.value(), it.key());
+        if (!selected.isEmpty() && !options.contains(selected)) combo->addItem(label, selected);
+        combo->setCurrentIndex(combo->findData(selected));
+    };
+    fill(m_period, tr("Усі дати"), months);
+    fill(m_supplier, tr("Усі"), suppliers);
+    renderDebts();
+}
+
+void PurchaseDebtsPage::renderDebts() {
+    if (property("debtDataLoading").toBool() || !property("debtLoadError").toString().isEmpty()) return;
+    if (m_debtScope != AccessControlService::currentScopeKey()) { refresh(); return; }
+    const QString search = m_search->text().trimmed();
+    const QString store = m_supplier->currentData().toString();
+    const QString period = m_period->currentData().toString();
+    m_table->clearSpans();
+    int count = 0;
     QVector<ReportsTableSupport::ReportsSnapshotTableModel::Row> rows;
     qint64 total=0;
     QString group;
@@ -206,8 +265,15 @@ void PurchaseDebtsPage::applyDebts(const QVector<PurchaseDebt>& debts,const QStr
         if(groupRow>=0) rows[groupRow].cells[0].text=QString::fromUtf8("Магазин: %1 | Борг: %2 грн")
             .arg(group,FormatUtils::money(groupTotal/100.0,2));
     };
-    for(const auto& debt:debts) {
+    for(const auto& debt:m_debts) {
         const QString supplier=debt.supplier.trimmed().isEmpty() ? QString::fromUtf8("Без магазину") : debt.supplier;
+        const QDate date = PartsQueryService::parseBusinessDate(debt.date);
+        if (!store.isEmpty() && supplier != store) continue;
+        if (!period.isEmpty() && period != (date.isValid() ? date.toString("yyyy-MM") : QStringLiteral("?"))) continue;
+        if (!search.isEmpty() && !supplier.contains(search, Qt::CaseInsensitive)
+            && !debt.name.contains(search, Qt::CaseInsensitive)
+            && !(debt.orderNumber && QString::number(debt.orderNumber).contains(search))) continue;
+        ++count;
         if(groupRow<0 || group!=supplier) {
             finishGroup(); group=supplier; groupTotal=0; groupRow=rows.size();
             ReportsTableSupport::ReportsSnapshotTableModel::Row heading;heading.spanAllColumns=true;heading.background=QColor("#e5edf5");
@@ -215,7 +281,6 @@ void PurchaseDebtsPage::applyDebts(const QVector<PurchaseDebt>& debts,const QStr
         }
         total+=debt.remainingCents(); groupTotal+=debt.remainingCents();
         ReportsTableSupport::ReportsSnapshotTableModel::Row record;
-        const QDate date=PartsQueryService::parseBusinessDate(debt.date);
         const QStringList cells={date.isValid()?date.toString("dd.MM.yy"):debt.date,
             debt.source=="remote_invoice"?QString::fromUtf8("Накладна Еліт"):debt.source=="part"?QString::fromUtf8("Запчастина"):QString::fromUtf8("Матеріал"),
             debt.orderNumber ? QString::number(debt.orderNumber):QString(),debt.name,QString::number(debt.quantity),
@@ -236,8 +301,11 @@ void PurchaseDebtsPage::applyDebts(const QVector<PurchaseDebt>& debts,const QStr
     finishGroup();m_model->setSnapshot(m_model->headers(),rows);
     for(int row:m_model->spanRows())m_table->setSpan(row,0,1,9);
     m_table->resizeRowsToContents();
-    m_status->setText(debts.isEmpty()?QString::fromUtf8("Непогашених боргів немає."):
-        QString::fromUtf8("Усі непогашені придбання: %1 | Борг: %2 грн").arg(debts.size()).arg(FormatUtils::money(total/100.0,2)));
+    const bool filtered = !store.isEmpty() || !period.isEmpty() || !search.isEmpty();
+    if (!count) m_status->setText(filtered ? tr("За фільтрами боргів не знайдено.") : tr("Непогашених боргів немає."));
+    else m_status->setText((filtered ? tr("Відібрані придбання: %1 | Борг: %2 грн")
+                                    : tr("Усі непогашені придбання: %1 | Борг: %2 грн"))
+                           .arg(count).arg(FormatUtils::money(total / 100.0, 2)));
 }
 
 void PurchaseDebtsPage::reconcileDebts() {

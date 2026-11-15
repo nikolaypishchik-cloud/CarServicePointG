@@ -5900,6 +5900,44 @@ private slots:
         }
     }
 
+    void debtFiltersPreserveAmountsAndReadError() {
+        PurchaseDebtsPage page;
+        PurchaseDebt a;
+        a.supplier = "Alpha"; a.date = "2026-01-31"; a.name = "Valve"; a.orderNumber = 71;
+        a.id = 21; a.source = "part"; a.totalCents = 10000; a.paidCents = 1500;
+        PurchaseDebt b = a;
+        b.date = "01.02.26"; b.name = "Nut"; b.orderNumber = 72; b.id = 22;
+        PurchaseDebt c = b;
+        c.supplier = "Beta"; c.date.clear(); c.id = 23;
+        page.applyDebts({a, b, c}, {}, {});
+        auto* model = page.m_table->model();
+        QCOMPARE(model->rowCount(), 5);
+        page.m_supplier->setCurrentIndex(page.m_supplier->findData("Alpha"));
+        page.m_period->setCurrentIndex(page.m_period->findData("2026-02"));
+        QCOMPARE(model->rowCount(), 2);
+        QCOMPARE(model->index(1, 0).data(Qt::UserRole).toLongLong(), 22LL);
+        QCOMPARE(model->index(1, 5).data().toString(), FormatUtils::money(100, 2));
+        QCOMPARE(model->index(1, 6).data().toString(), FormatUtils::money(15, 2));
+        QVERIFY(page.m_status->text().contains(FormatUtils::money(85, 2)));
+        page.m_search->setText("71");
+        QCOMPARE(model->rowCount(), 0);
+        QVERIFY(page.m_status->text().contains(QStringLiteral("За фільтрами")));
+        page.m_period->setCurrentIndex(0);
+        QCOMPARE(model->index(1, 0).data(Qt::UserRole).toLongLong(), 21LL);
+        page.m_search->setText("vAlVe");
+        QCOMPARE(model->rowCount(), 2);
+        page.m_search->setText("bEtA");
+        page.m_supplier->setCurrentIndex(0);
+        page.m_period->setCurrentIndex(page.m_period->findData("?"));
+        QCOMPARE(model->index(1, 0).data(Qt::UserRole).toLongLong(), 23LL);
+        QVERIFY(model->index(1, 8).data().toString().isEmpty());
+        page.applyDebts({}, {}, "synthetic ledger error");
+        page.m_search->clear();
+        QCOMPARE(model->rowCount(), 0);
+        QVERIFY(page.m_status->text().contains("synthetic ledger error"));
+        page.applyDebts({a,b,c}, {}, {});
+        QCOMPARE(model->rowCount(), 2);
+    }
     void linkedOrderClickOpensMatchingUid() {
         QString error;
         QVERIFY2(StaffAccountService::ensureSchema(db,&error),qPrintable(error));

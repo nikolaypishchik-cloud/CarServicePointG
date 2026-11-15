@@ -40,6 +40,12 @@ private:
     QPointer<QThread> m_worker;
     std::shared_ptr<std::atomic_bool> m_cancel;
     bool m_refreshQueued = false;
+    QVector<PurchaseDebt> m_debts;
+    QString m_debtScope;
+    QLineEdit* m_search;
+    QComboBox* m_period;
+    QComboBox* m_supplier;
+    void renderDebts();
     QTableView* m_table;
     ReportsTableSupport::ReportsSnapshotTableModel* m_model;
     QLabel* m_status;
