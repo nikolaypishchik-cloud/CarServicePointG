@@ -578,6 +578,8 @@ private slots:
         QVERIFY(!table->isRowHidden(0));
         QVERIFY(table->isRowHidden(1));
         header.store = "Store B";
+        part.partName = "Air filter";
+        part.orderNumber = "832";
         snapshot.rows.append(header);
         snapshot.rows.append(part);
         ReportsTableSupport::applyPartsSnapshot(table, model, snapshot);
@@ -585,6 +587,24 @@ private slots:
         QVERIFY(table->isRowHidden(3));
         expand->click();
         for (int row = 0; row < model->rowCount(); ++row) QVERIFY(!table->isRowHidden(row));
+        auto* search = page.findChild<QLineEdit*>("partsReportSearch");
+        auto* empty = page.findChild<QLabel*>("partsSearchEmpty");
+        QVERIFY(search && empty);
+        for (const QString& term : {QStringLiteral("832"), QStringLiteral(" FILTER ")}) {
+            search->setText(term);
+            QVERIFY(table->isRowHidden(0) && table->isRowHidden(1));
+            QVERIFY(!table->isRowHidden(2) && !table->isRowHidden(3));
+        }
+        collapse->click();
+        ReportsTableSupport::applyPartsSnapshot(table, model, snapshot);
+        QVERIFY(table->isRowHidden(0) && !table->isRowHidden(2) && table->isRowHidden(3));
+        expand->click();
+        search->setText("missing");
+        QVERIFY(!empty->isHidden());
+        search->setText("inv-71");
+        QVERIFY(empty->isHidden());
+        for (int row = 0; row < model->rowCount(); ++row) QVERIFY(!table->isRowHidden(row));
+        search->clear();
         QCOMPARE(model->cellText(3, 3), QStringLiteral("INV-71"));
         QVERIFY(qvariant_cast<QFont>(model->index(3, 3).data(Qt::FontRole)).underline());
     }

@@ -280,21 +280,56 @@ void ReportsPage::buildUi()
     auto* expand = new QPushButton(tr("Розгорнути всі"), partsPage);
     collapse->setObjectName("partsCollapseAll");
     expand->setObjectName("partsExpandAll");
+    auto* search = new QLineEdit(partsPage);
+    search->setObjectName("partsReportSearch");
+    search->setAccessibleName(tr("Пошук у придбанні запчастин"));
+    search->setPlaceholderText(tr("Запчастина, наряд або накладна"));
+    search->setClearButtonEnabled(true);
+    groupActions->addWidget(search, 1);
     groupActions->addWidget(collapse);
     groupActions->addWidget(expand);
-    groupActions->addStretch();
+    auto* noMatches = new QLabel(tr("За цим запитом позицій не знайдено"), partsPage);
+    noMatches->setObjectName("partsSearchEmpty");
+    noMatches->hide();
+    partsLayout->insertWidget(0, noMatches);
     partsLayout->insertLayout(0, groupActions);
-    const auto setCollapsed = [this, collapse, expand](bool collapsed) {
+    const auto updateRows = [this, search, expand, noMatches] {
+        const QString query = search->text().trimmed();
+        const bool collapsed = expand->isEnabledTo(expand->parentWidget());
+        const int count = m_partsModel->rowCount();
+        bool groupMatches = false;
+        bool found = false;
+        for (int row = count - 1; row >= 0; --row) {
+            if (m_partsModel->rowSpansAllColumns(row)) {
+                // A single spanning row also carries loading and empty-result messages.
+                m_partsTable->setRowHidden(row, count > 1 && !groupMatches);
+                groupMatches = false;
+                continue;
+            }
+            const bool matches = query.isEmpty()
+                || m_partsModel->cellText(row, 1).contains(query, Qt::CaseInsensitive)
+                || m_partsModel->cellText(row, 2).contains(query, Qt::CaseInsensitive)
+                || m_partsModel->cellText(row, 3).contains(query, Qt::CaseInsensitive);
+            found |= matches;
+            groupMatches |= matches;
+            m_partsTable->setRowHidden(row, collapsed || !matches);
+        }
+        noMatches->setVisible(count > 1 && !found && !query.isEmpty());
+    };
+    const auto setCollapsed = [collapse, expand, updateRows](bool collapsed) {
         collapse->setEnabled(!collapsed);
         expand->setEnabled(collapsed);
-        for (int row = 0; row < m_partsModel->rowCount(); ++row)
-            m_partsTable->setRowHidden(row, collapsed && !m_partsModel->rowSpansAllColumns(row));
+        updateRows();
     };
     expand->setEnabled(false);
     connect(collapse, &QPushButton::clicked, this, [setCollapsed] { setCollapsed(true); });
     connect(expand, &QPushButton::clicked, this, [setCollapsed] { setCollapsed(false); });
-    connect(m_partsModel, &QAbstractItemModel::modelReset, this, [expand, setCollapsed] {
-        if (!expand->testAttribute(Qt::WA_ForceDisabled)) setCollapsed(true);
+    connect(search, &QLineEdit::textChanged, this, updateRows);
+    connect(m_partsModel, &QAbstractItemModel::modelReset, this, [search, expand, noMatches, updateRows] {
+        if (!search->text().trimmed().isEmpty() || expand->isEnabledTo(expand->parentWidget()))
+            updateRows();
+        else
+            noMatches->hide();
     });
     m_tabs->addTab(partsPage, QString::fromUtf8("Придбання запчастин"));
     m_tabs->addTab(makeTab(m_outsourceTable, m_outsourceModel), QString::fromUtf8("Аутсорс"));
