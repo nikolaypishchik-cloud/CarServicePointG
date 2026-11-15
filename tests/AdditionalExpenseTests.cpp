@@ -98,6 +98,34 @@ private slots:
         QCOMPARE(screen.partsQty, 1.0);
         QCOMPARE(screen.partsQty, pdf.partsQty);
     }
+    void adminPartsRejectAmbiguousHistoricalOwner() {
+        preparePartsPayrollPdfFixture();
+        QSqlQuery q(db);
+        QVERIFY(q.exec("CREATE TEMP TABLE router_work_orders AS SELECT * FROM main.router_work_orders"));
+        QVERIFY(q.exec("INSERT INTO temp.router_work_orders(number,order_uid,status,closed_at) "
+                       "VALUES(11,'archived-other','closed','2025-12-31')"));
+        QVERIFY(q.exec("CREATE TEMP TABLE router_work_order_parts AS SELECT * FROM main.router_work_order_parts"));
+        QVERIFY(q.exec("UPDATE temp.router_work_order_parts SET order_uid=NULL"));
+        QString screenError, pdfError;
+        const auto readScreen = [&] { return ReportsDataLoader::LocalSupport::collectAdminSalaryTotalsForReports(
+            db, "2026-01-01", "2026-01-31", &screenError); };
+        const auto readPdf = [&] { return ReportsPdfExpenseSupport::collectAdminSalaryTotals(
+            "2026-01-01","2026-01-31",&pdfError); };
+        auto screen = readScreen();
+        auto pdf = readPdf();
+        QVERIFY2(screenError.contains("11"), qPrintable(screenError));
+        QVERIFY2(pdfError.contains("11"), qPrintable(pdfError));
+        QCOMPARE(screen.partsQty, 0.0);
+        QCOMPARE(pdf.partsQty, 0.0);
+        QVERIFY(q.exec("DELETE FROM temp.router_work_orders WHERE order_uid='archived-other'"));
+        screenError.clear();
+        screen = readScreen();
+        pdf = readPdf();
+        QVERIFY2(screenError.isEmpty(), qPrintable(screenError));
+        QVERIFY2(pdfError.isEmpty(), qPrintable(pdfError));
+        QCOMPARE(qRound64(screen.purchaseTotal * 100), 3010);
+        QCOMPARE(qRound64(pdf.purchaseTotal * 100), 3010);
+    }
     void initTestCase() {
         QStandardPaths::setTestModeEnabled(true);
         QCoreApplication::setOrganizationName("CarServiceExpenseTests");

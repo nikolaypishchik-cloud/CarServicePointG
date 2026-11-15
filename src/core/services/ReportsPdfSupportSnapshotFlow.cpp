@@ -112,17 +112,21 @@ PartPeriodTotals collectClosedPartFinancialTotalsForReports(const QString& df, c
     q.prepare(QStringLiteral(
         "SELECT COALESCE(p.name,''), COALESCE(p.store,''), COALESCE(p.qty,1), COALESCE(p.amount,0), "
         "COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END), "
-        "COALESCE(p.purchase_price,0), COALESCE(p.markup_percent,0), COALESCE(p.manual_markup_override,0), COALESCE(p.pricing_calc_version,1) "
+        "COALESCE(p.purchase_price,0), COALESCE(p.markup_percent,0), COALESCE(p.manual_markup_override,0), COALESCE(p.pricing_calc_version,1), %1 "
         "FROM router_work_order_parts p "
         "JOIN router_work_orders wo ON ((NULLIF(TRIM(p.order_uid),'') IS NOT NULL AND wo.order_uid=p.order_uid) OR (NULLIF(TRIM(p.order_uid),'') IS NULL AND wo.number=p.order_number)) "
         "WHERE date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) >= date(?) "
         "AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) <= date(?) "
-        "AND wo.status='closed'"));
+        "AND wo.status='closed'").arg(ReportsDataLoader::LocalSupport::ambiguousPartOrderNumberSql(true)));
     q.addBindValue(df);
     q.addBindValue(dt);
     if(!q.exec()){if(error)*error=q.lastError().text();return {};}
     {
         while (q.next()) {
+            if (!q.value(9).isNull()) {
+                if (error) *error = QStringLiteral("Неоднозначний внутрішній номер наряду %1 для запчастини без UID.").arg(q.value(9).toString());
+                return {};
+            }
             const PartFinancials row = resolvePartFinancialsForReports(snapshot,
                                                                        q.value(0).toString(),
                                                                        q.value(1).toString(),

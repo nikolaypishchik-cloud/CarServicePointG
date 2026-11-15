@@ -50,6 +50,7 @@ double adminSalaryBaseForSource(const AdminSalaryTotals& totals, const QString& 
 PayrollPercentResolver makePayrollPercentResolverForReports(QSqlDatabase& db, QString* error);
 QMap<QString, QString> loadAdminSalarySourcesForReports(QSqlDatabase& db, QString* error);
 double periodExpensesTotalForReports(QSqlDatabase& db, const QString& df, const QString& dt, QString* error);
+QString ambiguousPartOrderNumberSql(bool hasPartUid);
 AdminSalaryTotals collectAdminSalaryTotalsForReports(QSqlDatabase& db, const QString& df, const QString& dt, QString* error);
 
 } // namespace ReportsDataLoader::LocalSupport

@@ -376,6 +376,15 @@ double periodExpensesTotalForReports(QSqlDatabase& db, const QString& df, const 
     return value;
 }
 
+QString ambiguousPartOrderNumberSql(bool hasPartUid)
+{
+    // Inspect all possible owners, including orders outside the payroll period.
+    const QString numberOnly = hasPartUid ? QStringLiteral("NULLIF(TRIM(p.order_uid),'') IS NULL AND ") : QString();
+    return QStringLiteral("CASE WHEN %1p.order_number IN "
+                          "(SELECT number FROM router_work_orders GROUP BY number HAVING COUNT(*)>1) "
+                          "THEN p.order_number END").arg(numberOnly);
+}
+
 AdminSalaryTotals collectAdminSalaryTotalsForReports(QSqlDatabase& db, const QString& df, const QString& dt, QString* error)
 {
     AdminSalaryTotals t;
@@ -390,16 +399,20 @@ AdminSalaryTotals collectAdminSalaryTotalsForReports(QSqlDatabase& db, const QSt
         QStringLiteral("SELECT "
                        "COALESCE(SUM(COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END)),0), "
                        "COALESCE(SUM(COALESCE(p.amount,0)),0), "
-                       "COALESCE(SUM(COALESCE(p.amount,0) - COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END)),0), COALESCE(SUM(COALESCE(p.qty,1)),0) "
+                       "COALESCE(SUM(COALESCE(p.amount,0) - COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END)),0), COALESCE(SUM(COALESCE(p.qty,1)),0), MAX(%2) "
                        "FROM router_work_order_parts p "
                        "JOIN router_work_orders wo ON (%1) "
                        "WHERE date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) >= date(?) "
                        "AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) <= date(?) "
-                       "AND wo.status='closed'").arg(owner));
+                       "AND wo.status='closed'").arg(owner, ambiguousPartOrderNumberSql(hasPartUid)));
     parts.addBindValue(df);
     parts.addBindValue(dt);
     if (!parts.exec() || !parts.next()) {if(error)*error=parts.lastError().text();return {};}
     {
+        if (!parts.value(4).isNull()) {
+            if (error) *error = QStringLiteral("Неоднозначний внутрішній номер наряду %1 для запчастини без UID.").arg(parts.value(4).toString());
+            return {};
+        }
         t.purchaseTotal += parts.value(0).toDouble();
         t.clientTotal += parts.value(1).toDouble();
         t.margin += parts.value(2).toDouble();
