@@ -465,6 +465,86 @@ private slots:
         QVERIFY(q.exec("DELETE FROM work_orders WHERE number=101 AND order_uid='crm-history'"));
 
     }
+    void crmLayoutBetweenBrandAndStatus() {
+        ActivityAuditService::setCurrentActor({"qa-owner","Owner","owner","crm-layout"});
+        auto db=Database::db();
+        QString error;
+        QVERIFY2(CrmClientService::ensureLocalSchema(db,&error),qPrintable(error));
+        QVERIFY(Database::setSetting("settings.booking.sync.enabled",false));
+        QVERIFY(Database::setSetting("settings.cloudsync.enabled",false));
+        const QString client=QStringLiteral("QA Підприємство з обслуговування комерційного транспорту");
+        const QString model=QStringLiteral("Transporter LongWheelbaseExtendedEdition для пасажирських перевезень");
+        QSqlQuery seed(db);
+        seed.prepare("INSERT INTO crm_clients(client_uid,full_name,phone) VALUES('qa-ui13',?,'0501234567')");
+        seed.addBindValue(client);QVERIFY(seed.exec());
+        seed.prepare("INSERT INTO crm_vehicles(vehicle_uid,client_uid,brand,model,plate,is_primary) VALUES('qa-ui13-car','qa-ui13','Volkswagen',?,'QA13',1)");
+        seed.addBindValue(model);QVERIFY(seed.exec());
+        auto cleanup=qScopeGuard([&]{
+            seed.exec("DELETE FROM crm_vehicles WHERE vehicle_uid='qa-ui13-car'");
+            seed.exec("DELETE FROM crm_clients WHERE client_uid='qa-ui13'");
+        });
+        MainWindow window;
+        window.statusBar()->showMessage("QA");
+        window.resize(1480,850);
+        window.show();
+        QPushButton* nav=nullptr;
+        for (auto* button : window.findChildren<QPushButton*>())
+            if (button->text()==QStringLiteral("Клієнти")) nav=button;
+        QVERIFY(nav && nav->isEnabled());
+        nav->click();
+        auto* pages=window.findChild<QStackedWidget*>("pages");
+        auto* top=window.findChild<QWidget*>("top_pill");
+        QVERIFY(pages && top);
+        QTRY_VERIFY(dynamic_cast<CrmPage*>(pages->currentWidget()));
+        auto* page=dynamic_cast<CrmPage*>(pages->currentWidget());
+        auto* table=page->findChild<QTableWidget*>("crmClientCardsTable");
+        auto* search=page->findChild<QLineEdit*>();
+        QVERIFY(table && search);
+        search->setText(client);
+        QTRY_VERIFY(table->rowCount()==1 && table->item(0,0) && table->item(0,0)->text().contains(client));
+        table->selectRow(0);
+        QTRY_VERIFY(table->item(0,0)->text().contains(model));
+        auto* root=page->layout();
+        auto* header=root->itemAt(0)->layout();
+        auto* actions=root->itemAt(1)->layout();
+        auto* body=root->itemAt(2)->layout();
+        QVERIFY(header && actions && body && body->count()==3);
+        auto* clients=body->itemAt(0)->widget();
+        auto* finances=body->itemAt(2)->widget();
+        QVERIFY(clients && finances);
+        const auto local=[&](QWidget* w){return QRect(w->mapTo(&window,QPoint()),w->size());};
+        for (int width : {1200,1480}) {
+            window.resize(width,850);
+            const int side=qRound(page->logicalDpiX()/25.4);
+            const int mm=qRound(page->logicalDpiY()/25.4);
+            const int outerGap=qRound(1.5*page->logicalDpiY()/25.4);
+            QCOMPARE(local(page).top()+header->geometry().top()-local(top).bottom()-1,outerGap);
+            QCOMPARE(actions->geometry().top()-header->geometry().bottom()-1,mm);
+            QCOMPARE(body->geometry().top()-actions->geometry().bottom()-1,mm);
+            QCOMPARE(local(clients).left()-local(page).left(),side);
+            QCOMPARE(local(page).right()-local(finances).right(),side);
+            QCOMPARE(local(window.statusBar()).top()-local(clients).bottom()-1,outerGap);
+            QVERIFY(clients->width()>finances->width());
+            const auto index=table->model()->index(0,0);
+            QStyleOptionViewItem option;
+            const int required=table->itemDelegateForIndex(index)->sizeHint(option,index).height();
+            QVERIFY(required>78);
+            QTRY_VERIFY(table->rowHeight(0)>=required);
+            for (auto* label : page->findChildren<QLabel*>())
+                QVERIFY(!label->isVisible() || !label->text().contains(QStringLiteral("Історичні клієнтські оплати не обліковувалися")));
+            QLabel* amounts=nullptr;
+            for (auto* label : finances->findChildren<QLabel*>())
+                if (label->textFormat()==Qt::RichText) amounts=label;
+            QVERIFY(amounts);
+            QTRY_VERIFY(amounts->isVisible() && amounts->text().contains(QStringLiteral("Розрахунковий залишок")));
+            QVERIFY(amounts->text().contains(QStringLiteral("Отримано за журналом")));
+            QVERIFY(amounts->text().contains(QStringLiteral("0,00 грн")));
+            qInfo()<<"CRM layout"<<window.width()<<clients->width()<<finances->width()<<table->rowHeight(0);
+            const auto output=qEnvironmentVariable("CS_CRM_LAYOUT_CAPTURE");
+            if (!output.isEmpty()) QVERIFY(window.grab().save(QDir(output).filePath(QString("window-%1.png").arg(width))));
+        }
+    }
+
     void crmReadBoundaryPreservesSnapshotOnQueryFailure() {
         ActivityAuditService::setCurrentActor({"qa-owner","Owner","owner","crm-read"});
         auto db=Database::db();QString error;
