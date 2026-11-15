@@ -44,6 +44,7 @@
 #include "core/services/ReportsDataLoader.h"
 #include "core/services/ReportsSyncSupport.h"
 #include "core/util/FormatUtils.h"
+#include "core/services/ReportsPdfPartsSupport.h"
 #include "ui/tabs/reports/ReportsPage.h"
 #include "ui/tabs/reports/ReportsTableSupport.h"
 #include "ui/theme/ThemeManager.h"
@@ -162,6 +163,33 @@ private slots:
         }
         QSqlDatabase::removeDatabase(connection);
         QCOMPARE(QSqlDatabase::connectionNames(), before);
+    }
+
+    void partsQuantityAndUnitPrice() {
+        preparePartsPayrollPdfFixture();
+        QSqlQuery q(db);
+        QVERIFY(q.exec("CREATE TABLE qty_fixture AS SELECT * FROM router_work_order_parts"));
+        QVERIFY(q.exec("DROP VIEW router_work_order_parts"));
+        QVERIFY(q.exec("CREATE VIEW router_work_order_parts AS SELECT * FROM qty_fixture"));
+        for (const QString& value : {QStringLiteral("NULL"), QStringLiteral("0"), QStringLiteral("0.5")}) {
+            QVERIFY(q.exec("UPDATE qty_fixture SET purchase_price=0,qty=" + value));
+            const auto report = ReportsDataLoader::buildPartsSnapshot(db.databaseName(), "2026-01-01", "2026-01-31", 0, 0, {}, {});
+            QVERIFY2(report.error.isEmpty(), qPrintable(report.error));
+            QCOMPARE(report.rows.size(), 2);
+            const auto expectedQty = value == "NULL" ? QStringLiteral("—") : FormatUtils::smartQty(value.toDouble());
+            QCOMPARE(report.rows.last().qty, expectedQty);
+            QString error;
+            const auto groups = ReportsPdfSupport::collectPartsPdfGroups("2026-01-01", "2026-01-31", &error);
+            QVERIFY2(error.isEmpty(), qPrintable(error));
+            QCOMPARE(groups.value("Shop").size(), 1);
+            const auto row = groups.value("Shop").first();
+            QCOMPARE(row.qty, expectedQty);
+            QCOMPARE(row.purchase, 30.10);
+            QCOMPARE(row.clientPrice, 45.25);
+            const auto cells = ReportsPdfPartsSupport::buildPartCells(row, 1, true, false);
+            QCOMPARE(cells.at(4), value == "0.5" ? FormatUtils::money(60.20, 2) : QStringLiteral("—"));
+            QCOMPARE(cells.at(5), expectedQty);
+        }
     }
 
     void partsPdfDependenciesScopeAndRepeat() {

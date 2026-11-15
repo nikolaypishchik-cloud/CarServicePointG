@@ -23,7 +23,7 @@ inline bool execute(QSqlDatabase db,QSqlQuery* query,QString* error,bool withIss
                 "COALESCE(p.store,''), COALESCE(p.name,''), COALESCE(p.part_number,''), "
                 "COALESCE(wo.plate,''), COALESCE(wo.car,''), COALESCE(wo.vin,''), "
                 "COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END), "
-                "COALESCE(p.qty,1), COALESCE(p.amount,0), COALESCE(p.purchase_price,0), COALESCE(p.markup_percent,0), COALESCE(p.manual_markup_override,0), COALESCE(a.invoice_number,''), COALESCE(a.file_path,''), COALESCE(a.invoice_date,''), COALESCE(p.pricing_calc_version,1), wo.order_uid%4 "
+                "p.qty, COALESCE(p.amount,0), COALESCE(p.purchase_price,0), COALESCE(p.markup_percent,0), COALESCE(p.manual_markup_override,0), COALESCE(a.invoice_number,''), COALESCE(a.file_path,''), COALESCE(a.invoice_date,''), COALESCE(p.pricing_calc_version,1), wo.order_uid%4 "
                 "FROM router_work_order_parts p "
                 "LEFT JOIN unique_owners owner ON owner.lookup=CASE WHEN COALESCE(p.order_uid,'')<>'' THEN 'u:'||p.order_uid ELSE 'n:'||p.order_number END "
                 "LEFT JOIN headers wo ON wo.number=owner.number AND wo.order_uid IS owner.order_uid "

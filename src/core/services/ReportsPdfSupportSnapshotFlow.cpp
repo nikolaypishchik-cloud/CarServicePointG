@@ -239,12 +239,12 @@ QMap<QString, QList<PartPdfRow>> collectPartsPdfGroups(const QString& df, const 
                                                                           q.value(15).toDouble(),
                                                                           q.value(16).toInt() != 0, q.value(20).toInt());
         r.purchase = financials.purchaseAmount;
-        r.purchaseUnitPrice = financials.purchasePrice > 0.0
-            ? financials.purchasePrice
-            : (qty > 0.0 ? FormatUtils::roundMoneyValue(financials.purchaseAmount / qty) : financials.purchaseAmount);
+        const double storedUnitPrice = q.value(14).toDouble();
+        r.purchaseUnitPrice = storedUnitPrice > 0.0 ? storedUnitPrice
+            : (qty > 0.0 ? FormatUtils::roundMoneyValue(financials.purchaseAmount / qty) : 0.0);
         r.invoiceNumber = normalizeInvoiceNumberForReports(rawInvoiceNumber);
         r.added = financials.added;
-        r.qty = FormatUtils::smartQty(qty);
+        r.qty = q.value(12).isNull() ? QStringLiteral("—") : FormatUtils::smartQty(qty);
         r.qtyValue = qty;
         r.clientPrice = financials.clientAmount;
         groups[r.store].append(r);

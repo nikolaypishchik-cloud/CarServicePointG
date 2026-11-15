@@ -279,6 +279,7 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 QString vin;
                 double purchase = 0.0;
                 double qty = 0.0;
+                bool quantityKnown = false;
                 double client = 0.0;
                 double net = 0.0;
                 bool isOil = false;
@@ -324,6 +325,7 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                     row.car = q.value(9).toString();
                     row.vin = q.value(10).toString();
                     row.purchase = q.value(11).toDouble();
+                    row.quantityKnown = !q.value(12).isNull();
                     row.qty = q.value(12).toDouble();
                     const double storedClientAmount = qMax(0.0, q.value(13).toDouble());
                     const bool recordedPrice = q.value(20).toInt() >= 3;
@@ -402,7 +404,7 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 out.invoiceDate = row.invoiceDate;
                 out.purchase = FormatUtils::formatNumberSpaces(row.purchase, 0);
                 out.net = FormatUtils::formatNumberSpaces(row.net, 0);
-                out.qty = FormatUtils::smartQty(row.qty);
+                out.qty = row.quantityKnown ? FormatUtils::smartQty(row.qty) : QStringLiteral("—");
                 out.client = FormatUtils::formatNumberSpaces(row.client, 0);
                 QStringList tip;
                 if (!row.partNumber.trimmed().isEmpty()) tip << QString::fromUtf8("OEM: %1").arg(row.partNumber.trimmed());

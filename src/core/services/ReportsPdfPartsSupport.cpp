@@ -76,20 +76,23 @@ QMap<QString, QList<ReportsPdfSupport::PartPdfRow>> groupMotorOilRowsBySection(c
 
 QStringList buildPartCells(const ReportsPdfSupport::PartPdfRow& row, int seq, bool oilMode, bool includeInvoiceColumn)
 {
-    const double displayedPurchasePrice = oilMode
-        ? (row.purchaseUnitPrice > 0.0 ? row.purchaseUnitPrice : (row.qtyValue > 0.0 ? row.purchase / row.qtyValue : row.purchase))
-        : row.purchase;
+    QString purchaseText = FormatUtils::money(row.purchase, 2);
+    if (oilMode) {
+        if (row.purchaseUnitPrice > 0.0) purchaseText = FormatUtils::money(row.purchaseUnitPrice, 2);
+        else if (row.qtyValue > 0.0) purchaseText = FormatUtils::money(row.purchase / row.qtyValue, 2);
+        else purchaseText = QStringLiteral("—");
+    }
     QStringList cells = {
         QString::number(seq),
         row.date,
         row.orderNumber,
         displayPartName(row.name),
-        FormatUtils::money(displayedPurchasePrice, 2)
+        purchaseText
     };
     if (!oilMode) {
         cells << FormatUtils::money(row.added, 2);
     }
-    cells << formatQty(row.qtyValue)
+    cells << (row.qty.isEmpty() ? formatQty(row.qtyValue) : row.qty)
           << FormatUtils::money(row.clientPrice, 2);
     if (!oilMode && includeInvoiceColumn) {
         cells << row.invoiceNumber;
