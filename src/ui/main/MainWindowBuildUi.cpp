@@ -203,19 +203,42 @@ void MainWindow::buildUi()
     headerActions->setContentsMargins(0, 0, 0, 0);
     headerActions->setSpacing(8);
     headerActions->addStretch();
-    auto* balance = new QToolButton(m_topRightSpacer);
+    auto makeModuleButton = [&](const QString& name, const QString& title, const QString& tip) {
+        auto* button = new QToolButton(m_topRightSpacer);
+        button->setObjectName(name);
+        button->setText(title);
+        button->setAccessibleName(title);
+        button->setToolTip(tip);
+        button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        button->setAutoRaise(true);
+        button->setStyleSheet(QStringLiteral(
+            "QToolButton { background: transparent; color: #edf5fa; padding: 0 4px; border: 1px solid transparent; }"
+            "QToolButton:hover, QToolButton:focus { border-color: #81cad5; }"
+            "QToolButton:disabled { color: #aab9c5; }"));
+        button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+        button->setIconSize(QSize(22, 22));
+        headerActions->addWidget(button);
+        return button;
+    };
+    auto* warehouse = makeModuleButton("headerWarehouse", tr("Склад"), tr("Відкрити склад СТО"));
+    m_headerWarehouse = warehouse;
+    QPixmap warehouseImage(64, 64);
+    warehouseImage.fill(Qt::transparent);
+    {
+        QPainter painter(&warehouseImage);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(QColor("#60bfff"), 3.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        for (int x : {4, 33}) {
+            painter.drawEllipse(QRectF(x, 9, 25, 10));
+            painter.drawLine(x, 14, x, 49);
+            painter.drawLine(x + 25, 14, x + 25, 49);
+            painter.drawArc(QRectF(x, 44, 25, 10), 180 * 16, 180 * 16);
+        }
+    }
+    warehouse->setIcon(QIcon(warehouseImage));
+    connect(warehouse, &QToolButton::clicked, this, &MainWindow::openHeaderWarehouse);
+    auto* balance = makeModuleButton("headerInventoryBalance", tr("Залишки"), tr("Відкрити залишки складу"));
     m_headerBalance = balance;
-    balance->setObjectName("headerInventoryBalance");
-    balance->setText(tr("Залишки"));
-    balance->setAccessibleName(balance->text());
-    balance->setToolTip(tr("Відкрити залишки складу"));
-    balance->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-    balance->setAutoRaise(true);
-    balance->setStyleSheet(QStringLiteral(
-        "QToolButton { background: transparent; color: #edf5fa; padding: 0 4px; border: 1px solid transparent; }"
-        "QToolButton:hover, QToolButton:focus { border-color: #81cad5; }"
-        "QToolButton:disabled { color: #aab9c5; }"));
-    balance->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     QPixmap balanceImage(64, 64);
     balanceImage.fill(Qt::transparent);
     {
@@ -230,12 +253,10 @@ void MainWindow::buildUi()
         painter.drawLine(48, 34, 60, 47);
     }
     balance->setIcon(QIcon(balanceImage));
-    balance->setIconSize(QSize(22, 22));
     connect(balance, &QToolButton::clicked, this, [this] {
         if (canAccessPage(13) && ensurePage(13) && m_pageWorkshopInventory)
             m_pageWorkshopInventory->openBalance();
     });
-    headerActions->addWidget(balance);
     for (bool exchangeRate : {true, false}) {
         auto* button = new QToolButton(m_topRightSpacer);
         button->setObjectName(exchangeRate ? "headerExchangeRate" : "headerStatements");

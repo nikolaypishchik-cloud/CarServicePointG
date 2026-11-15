@@ -264,6 +264,35 @@ QWidget* MainWindow::ensurePage(int idx)
     }
 }
 
+void MainWindow::openHeaderWarehouse()
+{
+    if (!canAccessPage(13)) return;
+    if (auto* active = QApplication::activeModalWidget()) {
+        if (active->objectName() == QStringLiteral("headerWarehouseWindow")) {
+            if (active->isMinimized()) active->showNormal();
+            active->raise();
+            active->activateWindow();
+        }
+        return;
+    }
+    if (m_stack->currentIndex() == 13) {
+        if (auto* page = ensurePage(13)) page->setFocus();
+        return;
+    }
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("headerWarehouseWindow"));
+    dialog.setWindowTitle(tr("Склад СТО"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* page = new WorkshopInventoryPage(&dialog);
+    layout->addWidget(page);
+    connectPageSignals(page);
+    page->refresh();
+    const QRect available = AdaptiveUi::availableRect(this);
+    dialog.resize(size().boundedTo(available.size()));
+    dialog.move(available.center() - dialog.rect().center());
+    dialog.exec();
+}
+
 void MainWindow::openInventoryPurchase(qint64 purchaseId)
 {
     if(!canAccessPage(13)) return;

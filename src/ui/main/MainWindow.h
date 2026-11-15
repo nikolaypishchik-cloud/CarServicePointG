@@ -53,6 +53,7 @@ public:
     QWidget* externalDisplaySettings(QWidget* parent);
 
 private slots:
+    void openHeaderWarehouse();
     void openInventoryPurchase(qint64 purchaseId);
     void gotoPage(int idx);
     void openNewOrder();
@@ -95,6 +96,7 @@ private:
     QWidget* m_sidebar = nullptr;
     QWidget* m_content = nullptr;
     QWidget* m_topPill = nullptr;
+    QAbstractButton* m_headerWarehouse = nullptr;
     QAbstractButton* m_headerBalance = nullptr;
     QWidget* m_topRightSpacer = nullptr;
 

@@ -111,6 +111,7 @@ void MainWindow::applyAccessControl()
         it.value()->setEnabled(allowed);
     }
 
+    if (m_headerWarehouse) m_headerWarehouse->setEnabled(canAccessPage(13));
     if (m_headerBalance) m_headerBalance->setEnabled(canAccessPage(13));
 
     // The sidebar reserves one slot for account-specific configuration.

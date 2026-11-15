@@ -4403,6 +4403,45 @@ private slots:
         verifyInsets();
     }
 
+    void headerWarehousePreservesPage() {
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        auto* button = window.findChild<QToolButton*>("headerWarehouse");
+        auto* pages = window.findChild<QStackedWidget*>("pages");
+        QVERIFY(button && button->isEnabled() && pages);
+        for (int index : {1, 3, 9}) {
+            pages->setCurrentIndex(index);
+            QCoreApplication::processEvents();
+            QWidget* origin = pages->currentWidget();
+            bool opened = false;
+            QTimer::singleShot(0, &window, [&] {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                if (!dialog) return;
+                button->click();
+                opened = dialog->objectName() == QStringLiteral("headerWarehouseWindow")
+                    && dialog->findChild<WorkshopInventoryPage*>()
+                    && window.findChildren<QDialog*>("headerWarehouseWindow").size() == 1
+                    && pages->currentWidget() == origin;
+                dialog->reject();
+            });
+            button->click();
+            QVERIFY(opened);
+            QCOMPARE(pages->currentWidget(), origin);
+        }
+        ActivityAuditService::setCurrentActor({"master","Master","master","test"});
+        bool deniedWindow = false;
+        QTimer::singleShot(0, &window, [&] {
+            if (auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget())) {
+                deniedWindow = true;
+                dialog->reject();
+            }
+        });
+        button->click();
+        QCoreApplication::processEvents();
+        QVERIFY(!deniedWindow);
+    }
+
     void headerBalancePreservesPage() {
         MainWindow window;
         window.resize(1280, 800);
