@@ -26,6 +26,10 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include "core/services/PartsRegisterPdf.h"
+#include <QAbstractTextDocumentLayout>
+#include <QSaveFile>
+#include <QTextDocument>
 #include <QTemporaryFile>
 #include <QFont>
 #include <QFontMetricsF>
@@ -204,6 +208,75 @@ bool renderPeriodPdf(const QDate& fromDate, const QDate& toDate, ExportResult* r
     return ok;
 }
 
+
+ExportResult renderPartsRegisterPdf(QDate from, QDate to, const PartsRegisterSelection& selection)
+{
+    ExportResult result;
+    result.reportKind = QStringLiteral("parts-register");
+    if (!ReportsPdfSupport::validateFinancialPdfSource(from, to, &result.errorText)) return result;
+    result.path = makeReportPdfPath(QStringLiteral("Придбання запчастин"), QStringLiteral("Усі позиції ") + reportDateRangeStem(from, to));
+    if (!ensurePdfOutputPath(result.path, &result.errorText)) return result;
+    QSaveFile file(result.path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        result.errorText = file.errorString();
+        return result;
+    }
+    QString html = QStringLiteral("<h2>Придбання запчастин — Усі позиції</h2><p>%1 — %2 · %3 · %4</p>")
+        .arg(from.toString("dd.MM.yyyy"), to.toString("dd.MM.yyyy"), selection.store.toHtmlEscaped(), selection.payment.toHtmlEscaped());
+    if (!selection.search.isEmpty()) html += QStringLiteral("<p>Пошук: %1</p>").arg(selection.search.toHtmlEscaped());
+    html += QStringLiteral("<table width='100%' border='1' cellspacing='0' cellpadding='3'><thead><tr>");
+    for (const auto& header : selection.headers) html += "<th>" + header.toHtmlEscaped() + "</th>";
+    html += "</tr></thead>";
+    for (const auto& row : selection.rows) {
+        html += "<tr>";
+        for (const auto& cell : row) html += "<td>" + cell.toHtmlEscaped() + "</td>";
+        html += "</tr>";
+    }
+    html += "</table>";
+    if (selection.rows.isEmpty()) html += QStringLiteral("<p>За вибраними умовами позицій немає</p>");
+    {
+        QPdfWriter pdf(&file);
+        pdf.setPageSize(QPageSize(QPageSize::A4));
+        pdf.setPageOrientation(QPageLayout::Landscape);
+        pdf.setPageMargins(QMarginsF(8, 8, 8, 8));
+        pdf.setResolution(144);
+        pdf.setTitle(QStringLiteral("Придбання запчастин — Усі позиції"));
+        QTextDocument document;
+        document.documentLayout()->setPaintDevice(&pdf);
+        document.setDefaultFont(QFont(QStringLiteral("Segoe UI"), 8));
+        document.setHtml(html);
+        document.setPageSize(QSizeF(pdf.width(), pdf.height()));
+        QPainter painter;
+        if (!painter.begin(&pdf)) {
+            result.errorText = QStringLiteral("Не вдалося розпочати запис PDF.");
+            return result;
+        }
+        const int pages = document.pageCount();
+        for (int page = 0; page < pages; ++page) {
+            if (page && !pdf.newPage()) {
+                result.errorText = QStringLiteral("Не вдалося створити сторінку PDF.");
+                return result;
+            }
+            const qreal top = qreal(page) * pdf.height();
+            painter.save();
+            painter.translate(0, -top);
+            document.drawContents(&painter, QRectF(0, top, pdf.width(), pdf.height()));
+            painter.restore();
+        }
+        if (!painter.end()) {
+            result.errorText = QStringLiteral("Не вдалося завершити запис PDF.");
+            return result;
+        }
+    }
+    if (!file.commit()) {
+        result.errorText = file.errorString();
+        return result;
+    }
+    result.fileSizeBytes = QFileInfo(result.path).size();
+    result.recordCount = selection.rows.size();
+    result.success = true;
+    return result;
+}
 
 bool renderPartsPdf(const QDate& fromDate, const QDate& toDate, ExportResult* result)
 {

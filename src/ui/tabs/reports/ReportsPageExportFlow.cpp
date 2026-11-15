@@ -24,6 +24,7 @@
 #include <QScreen>
 #include <algorithm>
 #include "ui/tabs/reports/InvoicesPage.h"
+#include "ui/tabs/reports/PartsRegisterView.h"
 
 namespace {
 class OrderReportPdfPreview final : public QScrollArea {
@@ -425,6 +426,13 @@ void ReportsPage::exportPartsPdf()
     if(m_tabKeys.value(static_cast<int>(ReportTab::Parts))!=key)return;
     const QDate fromDate = m_from->date();
     const QDate toDate = m_to->date();
+    if (m_partsRegister->isActive()) {
+        const auto selection = m_partsRegister->exportSelection();
+        runPdfExportTask(tr("Формування PDF усіх позицій…"), [fromDate, toDate, selection] {
+            return ReportsPdfRenderer::renderPartsRegisterPdf(fromDate, toDate, selection);
+        });
+        return;
+    }
     runPdfExportTask(QString::fromUtf8("Формування PDF звіту по запчастинах..."), [fromDate, toDate]() {
         ReportsPdfRenderer::ExportResult result;
         ReportsPdfRenderer::renderPartsPdf(fromDate, toDate, &result);

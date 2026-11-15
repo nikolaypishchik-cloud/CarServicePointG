@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/tabs/reports/ReportsTableSupport.h"
+#include "core/services/PartsRegisterPdf.h"
 #include <optional>
 #include <QComboBox>
 #include <QHeaderView>
@@ -44,6 +45,23 @@ public:
         table->setColumnWidth(5, qMax(160, table->columnWidth(5)));
         table->setColumnWidth(11, qMax(table->columnWidth(11),
             metrics.horizontalAdvance(tr("Немає підтверджених даних")) + 24));
+    }
+
+    bool isActive() const { return active; }
+
+    ReportsPdfRenderer::PartsRegisterSelection exportSelection() const {
+        ReportsPdfRenderer::PartsRegisterSelection selection;
+        selection.headers = model->headers();
+        selection.store = store->currentText();
+        selection.payment = payment->currentText();
+        selection.search = search;
+        for (int r = 0; r < model->rowCount(); ++r) {
+            if (table->isRowHidden(r)) continue;
+            QStringList cells;
+            for (int c = 0; c < model->columnCount(); ++c) cells.append(model->cellText(r, c));
+            selection.rows.append(cells);
+        }
+        return selection;
     }
 
     void setSearch(const QString& value) {

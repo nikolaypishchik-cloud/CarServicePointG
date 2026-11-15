@@ -190,6 +190,41 @@ private slots:
         QVERIFY(tip().contains(QStringLiteral("Оплата постачальнику: Немає підтверджених даних")));
     }
 
+    void filteredRegisterPdf() {
+        preparePartsPayrollPdfFixture();
+        PartsRegisterView view(nullptr);
+        PartsSnapshot snapshot;
+        for (int i = 0; i < 90; ++i) {
+            PartsSnapshotRow part;
+            part.orderNumber = "7";
+            part.oem = QStringLiteral("ITEM%1").arg(i, 3, 10, QChar('0'));
+            part.partName = "Filter <A&B>";
+            part.store = i == 1 ? "Other" : "Shop";
+            part.supplierPayment = i == 2 ? "Unpaid" : "Paid";
+            part.clientAmount = "45.25";
+            if (i == 3) part.partName = "Excluded";
+            snapshot.rows.append(part);
+        }
+        view.setSnapshot(snapshot);
+        view.setActive(true);
+        view.setSearch("filter");
+        const auto combos = view.findChildren<QComboBox*>();
+        QCOMPARE(combos.size(), 2);
+        combos[0]->setCurrentText("Shop");
+        combos[1]->setCurrentText("Paid");
+        auto* table = view.findChild<QTableView*>();
+        QVERIFY(table);
+        table->selectRow(0);
+        const auto selection = view.exportSelection();
+        QCOMPARE(selection.rows.size(), 87);
+        view.setSearch("different");
+        const auto result = ReportsPdfRenderer::renderPartsRegisterPdf(QDate(2026,1,1), QDate(2026,1,31), selection);
+        QVERIFY2(result.success, qPrintable(result.errorText));
+        QCOMPARE(result.recordCount, 87);
+        const auto capture = qEnvironmentVariable("CS_FILTERED_REGISTER_PDF");
+        if (!capture.isEmpty()) QVERIFY(QFile::copy(result.path, capture));
+    }
+
     void flatPartsRegister() {
         preparePartsPayrollPdfFixture();
         QSqlQuery q(db);
