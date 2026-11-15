@@ -283,6 +283,7 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 double purchase = 0.0;
                 double qty = 0.0;
                 bool quantityKnown = false;
+                bool clientAmountKnown = false;
                 double client = 0.0;
                 double net = 0.0;
                 bool isOil = false;
@@ -366,6 +367,7 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                         pricingInput.sourceType = QStringLiteral("report");
                         row.client = PartPricingEngine::calculate(pricingInput, policySnapshot).clientAmount;
                     }
+                    row.clientAmountKnown = !q.value(13).isNull() || (!recordedPrice && row.client > 0.0);
                     row.net = recordedPrice ? FormatUtils::roundMoneyValue(row.client - row.purchase)
                         : qMax(0.0, row.client - row.purchase);
                     row.isOil = PartMarkupPolicyService::isInventoryStore(rawStore) && !q.value(22).toBool()
@@ -428,6 +430,15 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 out.invoiceDate = row.invoiceDate;
                 out.purchase = FormatUtils::formatNumberSpaces(row.purchase, 0);
                 out.net = FormatUtils::formatNumberSpaces(row.net, 0);
+                out.installedAt = row.installedAt;
+                out.car = row.car;
+                out.plate = row.plate;
+                out.oem = row.partNumber;
+                out.manufacturer = row.manufacturer;
+                out.supplierPayment = row.supplierPayment;
+                if (row.clientAmountKnown) out.clientAmount = FormatUtils::money(row.client, 2);
+                if (row.clientAmountKnown && row.quantityKnown && row.qty > 0)
+                    out.clientUnitPrice = FormatUtils::money(row.client / row.qty, 2);
                 out.qty = row.quantityKnown ? FormatUtils::smartQty(row.qty) : QStringLiteral("—");
                 out.client = FormatUtils::formatNumberSpaces(row.client, 0);
                 QStringList tip;

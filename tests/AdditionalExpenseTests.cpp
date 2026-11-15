@@ -44,6 +44,7 @@
 #include "core/services/ReportsDataLoader.h"
 #include "core/services/ReportsSyncSupport.h"
 #include "core/util/FormatUtils.h"
+#include "ui/tabs/reports/PartsRegisterView.h"
 #include "core/services/PurchasePaymentService.h"
 #include "core/services/ReportsPdfPartsSupport.h"
 #include "ui/tabs/reports/ReportsPage.h"
@@ -187,6 +188,55 @@ private slots:
         QVERIFY(q.exec("DROP VIEW router_work_order_parts"));
         QVERIFY(q.exec("CREATE VIEW router_work_order_parts AS SELECT * FROM archived_report_parts"));
         QVERIFY(tip().contains(QStringLiteral("Оплата постачальнику: Немає підтверджених даних")));
+    }
+
+    void flatPartsRegister() {
+        preparePartsPayrollPdfFixture();
+        QSqlQuery q(db);
+        const QString today = QDate::currentDate().toString(Qt::ISODate);
+        q.prepare("UPDATE work_order_parts SET qty=0.5, part_number='OEM-71', ordered_at=?,paid=1 WHERE id=21");
+        q.addBindValue(today);
+        QVERIFY(q.exec());
+        q.prepare("INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,name,store,ordered_at,qty,purchase_amount,amount,paid,pricing_calc_version) "
+                  "VALUES(22,11,'pdf-order','other-item','Other item','Zulu',?,2,10,20,0,3)");
+        q.addBindValue(today);
+        QVERIFY(q.exec());
+        ReportsPage page;
+        auto* mode = page.findChild<QComboBox*>("partsReportMode");
+        auto* search = page.findChild<QLineEdit*>("partsReportSearch");
+        auto* table = page.findChild<QTableView*>("partsRegisterTable");
+        QVERIFY(mode && search && table);
+        auto* view = dynamic_cast<PartsRegisterView*>(table->parentWidget());
+        QVERIFY(view);
+        page.show();
+        auto* tabs = page.findChild<QTabWidget*>();
+        QVERIFY(tabs);
+        tabs->setCurrentWidget(mode->parentWidget());
+        page.refresh();
+        mode->setCurrentText(QStringLiteral("Усі позиції"));
+        QVERIFY(!view->isHidden());
+        QTRY_COMPARE_WITH_TIMEOUT(table->model()->rowCount(), 2, 10000);
+        auto* store = view->findChildren<QComboBox*>().value(0);
+        auto* payment = view->findChildren<QComboBox*>().value(1);
+        QVERIFY(store && payment);
+        store->setCurrentText("Zulu");
+        QVERIFY(table->isRowHidden(0) && !table->isRowHidden(1));
+        payment->setCurrentText(QStringLiteral("Сплачено"));
+        QVERIFY(table->isRowHidden(0) && table->isRowHidden(1));
+        store->setCurrentIndex(0);
+        QVERIFY(!table->isRowHidden(0) && table->isRowHidden(1));
+        payment->setCurrentIndex(0);
+        QCOMPARE(table->model()->index(0, 6).data().toString(), QStringLiteral("OEM-71"));
+        QCOMPARE(table->model()->index(0, 9).data().toString(), FormatUtils::money(90.50, 2));
+        QCOMPARE(table->model()->index(0, 10).data().toString(), FormatUtils::money(45.25, 2));
+        const QString capture = qEnvironmentVariable("CS_FLAT_REPORT_CAPTURE");
+        if (!capture.isEmpty()) QVERIFY(page.grab().save(capture));
+        search->setText("no match");
+        QVERIFY(table->isRowHidden(0));
+        search->setText("oem-71");
+        QVERIFY(!table->isRowHidden(0));
+        mode->setCurrentIndex(0);
+        QVERIFY(view->isHidden());
     }
 
     void partsQuantityAndUnitPrice() {

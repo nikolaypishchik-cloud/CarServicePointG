@@ -3,6 +3,7 @@
 // Compiled as a separate P2 implementation module; include-order dependencies are isolated in the module prelude.
 
 #include "ui/tabs/reports/ReportsPageModulePrelude.h"
+#include "ui/tabs/reports/PartsRegisterView.h"
 #include "ui/tabs/reports/PurchaseDebtsPage.h"
 #include "ui/tabs/reports/InvoicesPage.h"
 #include <QScrollArea>
@@ -495,6 +496,7 @@ void ReportsPage::refreshOrders()
 
 void ReportsPage::applyPartsSnapshot(const PartsSnapshot& snapshot)
 {
+    m_partsRegister->setSnapshot(snapshot);
     m_partsTileTitles=snapshot.tileTitles;m_partsTileBodies=snapshot.tileBodies;
     ReportsTableSupport::applyPartsSnapshot(m_partsTable, m_partsModel, snapshot);
     setTabAuxStats(ReportTab::Parts, snapshot.oilHtml);
@@ -523,6 +525,7 @@ void ReportsPage::refreshParts()
                       QString::fromUtf8("Придбання запчастин — автосортування за датою та номером наряду (новіші зверху)."));
     updateStats({QString::fromUtf8("Завантаження запчастин…")});
     setTabAuxStats(ReportTab::Parts, QString());
+    m_partsRegister->showLoading();
     ReportsAsyncSupport::showLoadingRow(m_partsTable, m_partsModel, QString::fromUtf8("Завантаження…"));
 
     ReportsAsyncSupport::startPartsLoad(this, asyncHandle, dbPath, df, dt, defaultParts, defaultOil, partsMap, oilMap, [this, generation, key](const PartsSnapshot& snapshot) {

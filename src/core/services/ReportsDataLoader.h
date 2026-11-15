@@ -59,6 +59,8 @@ struct PartsSnapshotRow {
     QString qty;
     QString client;
     QString tooltip;
+    QString installedAt, car, plate, oem, manufacturer, supplierPayment;
+    QString clientUnitPrice, clientAmount;
 };
 
 struct PartsSnapshot {

@@ -4,6 +4,7 @@
 #include "ui/tabs/reports/ReportsPageModulePrelude.h"
 #include "ui/tabs/reports/PurchaseDebtsPage.h"
 #include "ui/tabs/reports/InvoicesPage.h"
+#include "ui/tabs/reports/PartsRegisterView.h"
 #include <QScrollArea>
 #include <QTabBar>
 #include <QStackedWidget>
@@ -285,6 +286,11 @@ void ReportsPage::buildUi()
     search->setAccessibleName(tr("Пошук у придбанні запчастин"));
     search->setPlaceholderText(tr("Запчастина, наряд або накладна"));
     search->setClearButtonEnabled(true);
+    auto* mode = new QComboBox(partsPage);
+    mode->setObjectName("partsReportMode");
+    mode->setAccessibleName(tr("Режим придбання запчастин"));
+    mode->addItems({tr("Звіт"), tr("Усі позиції")});
+    groupActions->addWidget(mode);
     groupActions->addWidget(search, 1);
     groupActions->addWidget(collapse);
     groupActions->addWidget(expand);
@@ -293,7 +299,7 @@ void ReportsPage::buildUi()
     noMatches->hide();
     partsLayout->insertWidget(0, noMatches);
     partsLayout->insertLayout(0, groupActions);
-    const auto updateRows = [this, search, expand, noMatches] {
+    const auto updateRows = [this, search, expand, noMatches, mode] {
         const QString query = search->text().trimmed();
         const bool collapsed = expand->isEnabledTo(expand->parentWidget());
         const int count = m_partsModel->rowCount();
@@ -314,7 +320,7 @@ void ReportsPage::buildUi()
             groupMatches |= matches;
             m_partsTable->setRowHidden(row, collapsed || !matches);
         }
-        noMatches->setVisible(count > 1 && !found && !query.isEmpty());
+        noMatches->setVisible(mode->currentIndex() == 0 && count > 1 && !found && !query.isEmpty());
     };
     const auto setCollapsed = [collapse, expand, updateRows](bool collapsed) {
         collapse->setEnabled(!collapsed);
@@ -330,6 +336,19 @@ void ReportsPage::buildUi()
             updateRows();
         else
             noMatches->hide();
+    });
+    m_partsRegister = new PartsRegisterView(partsPage);
+    partsLayout->addWidget(m_partsRegister, 1);
+    m_partsRegister->hide();
+    connect(search, &QLineEdit::textChanged, m_partsRegister, &PartsRegisterView::setSearch);
+    connect(mode, &QComboBox::currentIndexChanged, this, [this, collapse, expand, search, updateRows](int index) {
+        const bool flat = index == 1;
+        m_partsTable->setVisible(!flat);
+        m_partsRegister->setActive(flat);
+        collapse->setVisible(!flat);
+        expand->setVisible(!flat);
+        search->setPlaceholderText(flat ? tr("Запчастина, OEM, авто або наряд") : tr("Запчастина, наряд або накладна"));
+        updateRows();
     });
     m_tabs->addTab(partsPage, QString::fromUtf8("Придбання запчастин"));
     m_tabs->addTab(makeTab(m_outsourceTable, m_outsourceModel), QString::fromUtf8("Аутсорс"));

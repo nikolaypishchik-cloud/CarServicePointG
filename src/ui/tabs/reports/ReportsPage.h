@@ -19,6 +19,7 @@ class QTableView;
 class QPushButton;
 class QWidget;
 class QLineEdit;
+class PartsRegisterView;
 class QComboBox;
 class QDoubleSpinBox;
 class QTimer;
@@ -137,6 +138,7 @@ private:
     QTableView* m_periodTable = nullptr;
     QTableView* m_ordersTable = nullptr;
     QTableView* m_partsTable = nullptr;
+    PartsRegisterView* m_partsRegister = nullptr;
     QTableView* m_outsourceTable = nullptr;
     ReportsTableSupport::ReportsSnapshotTableModel* m_periodModel = nullptr;
     ReportsTableSupport::ReportsSnapshotTableModel* m_ordersModel = nullptr;
