@@ -5953,6 +5953,51 @@ private slots:
         QVERIFY2(openError.isEmpty(),qPrintable(openError));
         QCOMPARE(internal,QStringLiteral("2"));
         QCOMPARE(uid,QStringLiteral("order-b"));
+        QVERIFY2(WorkshopInventoryService::ensureSchema(db,&error),qPrintable(error));
+        QVERIFY2(WorkshopSpareStockService::ensureSchema(db,&error),qPrintable(error));
+        const auto source = ReportsDataLoader::buildPartsSnapshot(db.databaseName(),"2026-09-01","2026-09-01",0,0,{},{});
+        QVERIFY2(source.error.isEmpty(),qPrintable(source.error));
+        QCOMPARE(source.rows.size(),3);
+        ReportsPage report;
+        report.show();
+        auto* mode = report.findChild<QComboBox*>("partsReportMode");
+        auto* tabs = report.findChild<QTabWidget*>();
+        auto* search = report.findChild<QLineEdit*>("partsReportSearch");
+        QVERIFY(mode && tabs && search);
+        const auto dates = report.findChildren<QDateEdit*>();
+        for (auto* date : dates) date->setDate(QDate(2026,9,1));
+        tabs->setCurrentWidget(mode->parentWidget());
+        mode->setCurrentText(QStringLiteral("За нарядами"));
+        search->setText("Second");
+        report.refresh();
+        auto* orders = report.findChild<QListWidget*>("partsRegisterOrders");
+        QVERIFY(orders);
+        QTRY_COMPARE_WITH_TIMEOUT(orders->count(),1,10000);
+        orders->setCurrentRow(0);
+        auto* open = report.findChild<QPushButton*>("partsRegisterOpenOrder");
+        QVERIFY(open && open->isVisible());
+        QString openedUid, openedNumber, routeError;
+        QTimer observe;
+        observe.setInterval(30);
+        connect(&observe, &QTimer::timeout, &page, [&] {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            if (!dialog) return;
+            if (auto* order = qobject_cast<OrderDialog*>(dialog)) {
+                openedUid = order->recoveryOrderUid();
+                openedNumber = order->recoveryEntityId();
+                dialog->done(QDialog::Rejected);
+            } else if (auto* warning = qobject_cast<QMessageBox*>(dialog)) {
+                routeError = warning->text();
+                warning->reject();
+            }
+        });
+        observe.start();
+        QTest::mouseClick(open, Qt::LeftButton);
+        observe.stop();
+        QVERIFY2(routeError.isEmpty(), qPrintable(routeError));
+        QCOMPARE(openedUid, QStringLiteral("order-b"));
+        QCOMPARE(openedNumber, QStringLiteral("2"));
+        QCOMPARE(mode->currentText(), QStringLiteral("За нарядами"));
     }
 
     void linkedInvoiceClickSelectsRegistryRow() {
