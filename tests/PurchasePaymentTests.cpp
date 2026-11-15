@@ -6046,8 +6046,30 @@ private slots:
         shop->setCurrentIndex(shop->findData("Beta"));
         QVERIFY(labelContains(tile, FormatUtils::money(75, 2)));
         QVERIFY(!labelContains(factTile, FormatUtils::money(249, 2)));
+        auto* strip = report.findChild<QWidget*>("reportSupplierCards");
+        QVERIFY(strip && strip->isVisible());
+        const auto cards = [&] { return strip->findChildren<QLabel*>("supplierDebtCard"); };
+        QCOMPARE(cards().size(), 1);
+        QCOMPARE(cards().first()->property("supplier").toString(), QStringLiteral("Beta"));
+        QVERIFY(cards().first()->text().contains(FormatUtils::money(75, 2)));
         shop->setCurrentIndex(0);
         QVERIFY(labelContains(tile, FormatUtils::money(275, 2)));
+        QCOMPARE(cards().size(), 2);
+        mode->setCurrentText(QStringLiteral("Усі позиції"));
+        QVERIFY(strip->isVisible());
+        QCOMPARE(cards().size(), 2);
+        search->setText("absent-OEM");
+        QCOMPARE(cards().size(), 2);
+        QVERIFY(labelContains(tile, FormatUtils::money(275, 2)));
+        for (auto* card : cards()) {
+            QTRY_VERIFY_WITH_TIMEOUT(card->isVisible() && !card->visibleRegion().isEmpty(), 5000);
+            QVERIFY(card->width() >= card->minimumSizeHint().width());
+        }
+        const auto capture = qEnvironmentVariable("CS_SUPPLIER_CARD_CAPTURE");
+        if (!capture.isEmpty()) QVERIFY(strip->parentWidget()->grab().save(capture));
+        mode->setCurrentIndex(0);
+        QVERIFY(!strip->isVisible());
+        QVERIFY(cards().isEmpty());
         QVERIFY2(q.exec("INSERT INTO staff_accounts(id,display_name,role,master_id) VALUES"
                         "('qa-master','QA Mechanic','master','qa-mechanic')"),qPrintable(q.lastError().text()));
         ActivityAuditService::setCurrentActor({"qa-master","QA Mechanic","master","test"});

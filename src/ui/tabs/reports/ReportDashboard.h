@@ -12,6 +12,8 @@
 #include <QSignalBlocker>
 #include <QRegularExpression>
 #include <QStyle>
+#include <QScrollArea>
+#include <QMap>
 #include <QVBoxLayout>
 #include <functional>
 
@@ -79,6 +81,20 @@ public:
             else card->setMinimumWidth(240);
             partsRow->addWidget(card,i<2?0:1);
         }
+        supplierStrip = new QScrollArea(m_parts);
+        supplierStrip->setObjectName("reportSupplierCards");
+        supplierStrip->setFrameShape(QFrame::NoFrame);
+        supplierStrip->setWidgetResizable(true);
+        supplierStrip->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        supplierStrip->setFixedHeight(tileHeight());
+        auto* stripBody = new QWidget;
+        supplierRow = new QHBoxLayout(stripBody);
+        supplierRow->setContentsMargins(0,0,0,0);
+        supplierRow->setSpacing(6);
+        supplierRow->setSizeConstraint(QLayout::SetMinimumSize);
+        supplierStrip->setWidget(stripBody);
+        partsRow->insertWidget(0, supplierStrip, 2);
+        supplierStrip->hide();
         m_row->addWidget(m_parts,4);m_parts->hide();
         m_actions=new QWidget(this);m_actions->setObjectName("reportActionsHost");m_actions->setStyleSheet("#reportActionsHost {background:transparent;border:none;}");auto* actions=new QHBoxLayout(m_actions);actions->setContentsMargins(0,0,0,0);actions->setSpacing(6);
         const QStringList titles={QString::fromUtf8("Сума"),QString::fromUtf8("Наряди"),QString::fromUtf8("Дії")};
@@ -159,10 +175,31 @@ public:
         m_row->addWidget(controls,2);
     }
     static bool supports(int tab){return tab>=0&&tab<=7;}
-    void parts(const QStringList& titles,const QStringList& bodies,bool debt=false){
+    void parts(const QStringList& titles,const QStringList& bodies,bool debt=false,
+               const QMap<QString,QString>& amounts={}){
+        if (amounts != supplierAmounts) {
+            supplierAmounts = amounts;
+            while (auto* item = supplierRow->takeAt(0)) {
+                delete item->widget();
+                delete item;
+            }
+            for (auto it = amounts.cbegin(); it != amounts.cend(); ++it) {
+                auto* card = new QLabel(supplierStrip->widget());
+                card->setObjectName("supplierDebtCard");
+                card->setProperty("supplier", it.key());
+                card->setAccessibleName(it.key() + " " + it.value());
+                card->setTextFormat(Qt::RichText);
+                card->setAlignment(Qt::AlignCenter);
+                card->setStyleSheet("QLabel#supplierDebtCard{border:1px solid #708795;border-radius:4px;padding:0 6px;}");
+                card->setText(it.key().toHtmlEscaped() + "<br/><b>" + it.value().toHtmlEscaped() + "</b>");
+                supplierRow->addWidget(card, 1);
+                card->show();
+            }
+        }
+        supplierStrip->setVisible(debt && !amounts.isEmpty());
         const QStringList defaults={QString::fromUtf8("Олива моторна"),QString::fromUtf8("Антифриз"),QString::fromUtf8("Запчастини · постачання"),QString::fromUtf8("Запчастини · використання")};
         for(int i=0;i<4;++i){
-            m_parts->layout()->itemAt(i)->widget()->setVisible(!debt || i<titles.size());
+            m_parts->layout()->itemAt(i+1)->widget()->setVisible(!debt || i<titles.size());
             m_partsIcons[i]->setVisible(!debt);
             m_partsTitles[i]->setText(titles.value(i,defaults[i]));
             auto* label=m_partsBodies[i];
@@ -390,6 +427,9 @@ private:
     QHBoxLayout *m_row=nullptr,*m_metricRow=nullptr;
     QWidget *m_metrics=nullptr,*m_actions=nullptr,*m_searchTile=nullptr;
     QWidget* m_parts=nullptr;
+    QScrollArea* supplierStrip=nullptr;
+    QHBoxLayout* supplierRow=nullptr;
+    QMap<QString,QString> supplierAmounts;
     QLabel *m_partsTitles[4]{},*m_partsBodies[4]{},*m_partsIcons[4]{};
     QLabel* m_dateIcon=nullptr;QFrame* m_dateRule=nullptr;
     QWidget* m_cards[4]{};QLabel* m_titles[4]{};QLabel* m_values[4]{};QLabel* m_icons[4]{};

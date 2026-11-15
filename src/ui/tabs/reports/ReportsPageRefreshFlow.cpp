@@ -397,7 +397,7 @@ void ReportsPage::updateDashboard()
     if (tab == 3) {
         if (m_partsRegister->isActive())
             m_dashboard->parts({tr("Борг за документами періоду"), tr("Остання звірка магазину")},
-                               m_partsRegister->debtTileBodies(), true);
+                               m_partsRegister->debtTileBodies(), true, m_partsRegister->supplierCardAmounts());
         else m_dashboard->parts(m_partsTileTitles, m_partsTileBodies);
     }
     m_dashboard->status(m_orderStatusFilter);

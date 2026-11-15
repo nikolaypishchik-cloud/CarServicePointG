@@ -75,6 +75,19 @@ public:
     }
 
     std::function<void()> orderEdited, storeChanged;
+    QMap<QString,QString> supplierCardAmounts() const {
+        QMap<QString,QString> result;
+        if (!debtState.isEmpty()) return result;
+        const auto selected = store->currentData().toString();
+        const auto add = [&](const QString& name, qint64 cents) {
+            result.insert(name, tr("%1 грн").arg(FormatUtils::money(cents / 100.0, 2)));
+        };
+        if (!selected.isEmpty()) add(selected, documentDebts.value(selected));
+        else for (auto it = documentDebts.cbegin(); it != documentDebts.cend(); ++it)
+            add(it.key(), it.value());
+        return result;
+    }
+
     QStringList debtTileBodies() const {
         if (!debtState.isEmpty()) return {debtState.toHtmlEscaped(), debtState.toHtmlEscaped()};
         const auto supplier = store->currentData().toString();
