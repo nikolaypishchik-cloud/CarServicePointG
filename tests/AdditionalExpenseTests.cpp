@@ -866,6 +866,33 @@ private slots:
     void payrollReadFailuresAndRecovery() {
         QString error;QVERIFY2(PayrollReadFixture::run(&error),qPrintable(error));
     }
+    void payrollMonthlyBoundariesAndPeriodTotals() {
+        QString error;
+        QVERIFY2(PayrollReadFixture::schema(db, &error), qPrintable(error));
+        QVERIFY2(PayrollReadFixture::populate(db, &error), qPrintable(error));
+        QSqlQuery query(db);
+        QVERIFY(query.exec("INSERT INTO expenses(period_from,period_to,cleaning) VALUES('2026-02-01','2026-02-10',20)"));
+        const auto result = ReportsDataLoader::buildPayrollSnapshot(db.databaseName(), "2026-01-01", "2026-02-12", true);
+        QVERIFY2(result.error.isEmpty(), qPrintable(result.error));
+        QCOMPARE(result.months.size(), 2);
+        QCOMPARE(result.months[0].to, QDate(2026, 1, 31));
+        QCOMPARE(result.months[1].from, QDate(2026, 2, 1));
+        QCOMPARE(result.months[1].to, QDate(2026, 2, 12));
+        const auto pay = [](const QList<PayrollSnapshotRow>& rows, const QString& id) {
+            for (const auto& row : rows) if (row.masterId == id) return row.accruedValue;
+            return -1.0;
+        };
+        QCOMPARE(pay(result.rows, "m"), 20.0);
+        QCOMPARE(pay(result.months[0].rows, "m"), 40.0);
+        QCOMPARE(pay(result.months[1].rows, "m"), 0.0);
+        QCOMPARE(pay(result.months[0].rows, "a"), 3.0);
+        const auto clipped = ReportsDataLoader::buildPayrollSnapshot(db.databaseName(), "2025-12-28", "2026-01-10", true);
+        QVERIFY2(clipped.error.isEmpty(), qPrintable(clipped.error));
+        QCOMPARE(clipped.months.size(), 2);
+        QCOMPARE(clipped.months.first().from, QDate(2025, 12, 28));
+        QCOMPARE(clipped.months.last().to, QDate(2026, 1, 10));
+        QCOMPARE(pay(clipped.months.last().rows, "m"), 0.0);
+    }
     void payrollFiltersDistinguishNamesakes() {
         QString error;
         QVERIFY2(PayrollIdentityFixture::run(db, &error), qPrintable(error));

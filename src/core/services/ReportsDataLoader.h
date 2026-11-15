@@ -105,7 +105,14 @@ struct PayrollSnapshotRow {
     double accruedValue = 0.0;
 };
 
+struct PayrollMonth {
+    QDate from;
+    QDate to;
+    QList<PayrollSnapshotRow> rows;
+};
+
 struct PayrollSnapshot {
+    QList<PayrollMonth> months;
     QString error;
     QList<PayrollSnapshotRow> rows;
     QStringList stats;
@@ -167,7 +174,7 @@ OrdersSnapshot buildOrdersSnapshot(const QString& dbPath, const QString& df, con
 PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const QString& dt,
     double defaultParts, double defaultOil, const QMap<QString,double>& partsMap, const QMap<QString,double>& oilMap);
 OutsourceSnapshot buildOutsourceSnapshot(const QString& dbPath, const QString& df, const QString& dt);
-PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, const QString& dt);
+PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, const QString& dt, bool splitMonths = false);
 ExpensesSnapshot buildExpensesSnapshot(const QString& dbPath, const QString& df, const QString& dt);
 ExpensesSnapshot buildExpensesSnapshot(const QString& df, const QString& dt);
 TotalExpensesSnapshot buildTotalExpensesSnapshot(const QString& dbPath, const QString& df, const QString& dt);

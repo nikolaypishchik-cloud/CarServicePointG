@@ -701,7 +701,73 @@ OutsourceSnapshot buildOutsourceSnapshot(const QString& dbPath, const QString& d
     return snapshot;
 }
 
-PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, const QString& dt)
+static void readPayrollPeriod(QSqlDatabase& db, const QString& df, const QString& dt,
+                              const PayrollIdentityRead::Graph& payrollGraph, PayrollSnapshot& snapshot)
+{
+    const auto masters = orderedPersonnelForReports(loadMastersForPeriodForReports(db, df, dt,&snapshot.error));
+    if(!snapshot.error.isEmpty())return;
+    const PayrollPercentResolver payrollResolver = makePayrollPercentResolverForReports(db,&snapshot.error);
+    if(!snapshot.error.isEmpty())return;
+    const auto adminSources = loadAdminSalarySourcesForReports(db,&snapshot.error);
+    if(!snapshot.error.isEmpty())return;
+    const AdminSalaryTotals adminTotals = collectAdminSalaryTotalsForReports(db, df, dt,&snapshot.error);
+
+    if(!snapshot.error.isEmpty())return;
+    int activeMasterCount = 0;
+    for (const auto& m : masters) if (m.role == QStringLiteral("master")) ++activeMasterCount;
+    const double sharedExpensesPerMaster = activeMasterCount > 0 ? periodExpensesTotalForReports(db, df, dt,&snapshot.error) / activeMasterCount : 0.0;
+
+    if(!snapshot.error.isEmpty())return;
+    double total = 0.0;
+    for (const auto& m : masters) {
+        PayrollSnapshotRow row;
+        row.masterId = m.id;
+        row.masterName = m.role == QStringLiteral("admin") ? QString::fromUtf8("Адмін: %1").arg(m.name) : m.name;
+        const double percent = [&] {
+            if (m.role == QStringLiteral("admin")) return m.adminPercent;
+            if (payrollResolver.byId.contains(m.id)) return payrollResolver.byId.value(m.id, 0.0);
+            const QString key = payrollMasterNameKey(m.name);
+            if (!key.isEmpty() && payrollResolver.activeByName.contains(key)) {
+                return payrollResolver.activeByName.value(key, 0.0);
+            }
+            return 0.0;
+        }();
+
+        int ordersCount = 0;
+        double baseSum = 0.0;
+        double accrued = 0.0;
+
+        if (m.role == QStringLiteral("admin")) {
+            const QString source = adminSources.value(m.id, QStringLiteral("margin"));
+            ordersCount = 1;
+            baseSum = adminSalaryBaseForSource(adminTotals, source);
+            accrued = FormatUtils::roundMoneyValue(baseSum * percent / 100.0);
+            if (!(m.active || baseSum > 0.0)) continue;
+        } else {
+            const auto orders=PayrollIdentityRead::read(db,m.id,df,dt,percent,&snapshot.error,{},&payrollGraph);
+            if(!snapshot.error.isEmpty())return;
+            for(const auto& order:orders)if(!order.absent){++ordersCount;baseSum+=order.amount;accrued+=order.masterAmount;}
+            baseSum=FormatUtils::roundMoneyValue(baseSum);
+            accrued=qMax(0.0,FormatUtils::roundMoneyValue(accrued-sharedExpensesPerMaster));
+            if (!(m.active || ordersCount > 0 || baseSum > 0.0)) continue;
+        }
+
+        row.ordersCount = QString::number(ordersCount);
+        row.baseSum = FormatUtils::money(baseSum,2);
+        row.percent = QString::number(percent, 'f', 2);
+        row.accrued = FormatUtils::money(accrued,2);
+        row.accruedValue = accrued;
+        snapshot.rows.append(row);
+        total += accrued;
+    }
+
+    snapshot.stats = {
+        QString::fromUtf8("Співробітників:  %1").arg(snapshot.rows.size()),
+        QString::fromUtf8("Нараховано:  %1  грн.").arg(FormatUtils::money(total,2))
+    };
+}
+
+PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, const QString& dt, bool splitMonths)
 {
     PayrollSnapshot snapshot;
     const QString connName = makeReportsWorkerConnectionName(QStringLiteral("payroll"));
@@ -712,76 +778,40 @@ PayrollSnapshot buildPayrollSnapshot(const QString& dbPath, const QString& df, c
         if (!db.open() || !db.transaction()) {
             snapshot.error=db.lastError().text();
         } else {
-            const auto read=[&] {
-            const auto masters = orderedPersonnelForReports(loadMastersForPeriodForReports(db, df, dt,&snapshot.error));
-            if(!snapshot.error.isEmpty())return;
-            const PayrollPercentResolver payrollResolver = makePayrollPercentResolverForReports(db,&snapshot.error);
-            if(!snapshot.error.isEmpty())return;
-            const auto adminSources = loadAdminSalarySourcesForReports(db,&snapshot.error);
-            if(!snapshot.error.isEmpty())return;
-            const AdminSalaryTotals adminTotals = collectAdminSalaryTotalsForReports(db, df, dt,&snapshot.error);
-
-            if(!snapshot.error.isEmpty())return;
-            int activeMasterCount = 0;
-            PayrollIdentityRead::Graph payrollGraph;
-            if(!PayrollIdentityRead::loadGraph(db,&payrollGraph,&snapshot.error))return;
-            for (const auto& m : masters) if (m.role == QStringLiteral("master")) ++activeMasterCount;
-            const double sharedExpensesPerMaster = activeMasterCount > 0 ? periodExpensesTotalForReports(db, df, dt,&snapshot.error) / activeMasterCount : 0.0;
-
-            if(!snapshot.error.isEmpty())return;
-            double total = 0.0;
-            for (const auto& m : masters) {
-                PayrollSnapshotRow row;
-                row.masterId = m.id;
-                row.masterName = m.role == QStringLiteral("admin") ? QString::fromUtf8("Адмін: %1").arg(m.name) : m.name;
-                const double percent = [&] {
-                    if (m.role == QStringLiteral("admin")) return m.adminPercent;
-                    if (payrollResolver.byId.contains(m.id)) return payrollResolver.byId.value(m.id, 0.0);
-                    const QString key = payrollMasterNameKey(m.name);
-                    if (!key.isEmpty() && payrollResolver.activeByName.contains(key)) {
-                        return payrollResolver.activeByName.value(key, 0.0);
+            PayrollIdentityRead::Graph graph;
+            if (PayrollIdentityRead::loadGraph(db, &graph, &snapshot.error)) {
+                readPayrollPeriod(db, df, dt, graph, snapshot);
+                if (splitMonths && snapshot.error.isEmpty()) {
+                    const QDate last = QDate::fromString(dt, Qt::ISODate);
+                    QDate first = QDate::fromString(df, Qt::ISODate);
+                    if (!first.isValid() || !last.isValid() || first > last)
+                        snapshot.error = QStringLiteral("Некоректний період для помісячного розподілу");
+                    while (snapshot.error.isEmpty() && first <= last) {
+                        const QDate monthEnd(first.year(), first.month(), first.daysInMonth());
+                        const QDate to = qMin(last, monthEnd);
+                        PayrollMonth month{first, to, {}};
+                        if (first.toString(Qt::ISODate) == df && to == last) {
+                            month.rows = snapshot.rows;
+                        } else {
+                            PayrollSnapshot part;
+                            readPayrollPeriod(db, first.toString(Qt::ISODate), to.toString(Qt::ISODate), graph, part);
+                            if (!part.error.isEmpty()) {
+                                snapshot.error = part.error;
+                                break;
+                            }
+                            month.rows = std::move(part.rows);
+                        }
+                        snapshot.months.append(std::move(month));
+                        if (to == last) break;
+                        first = to.addDays(1);
                     }
-                    return 0.0;
-                }();
-
-                int ordersCount = 0;
-                double baseSum = 0.0;
-                double accrued = 0.0;
-
-                if (m.role == QStringLiteral("admin")) {
-                    const QString source = adminSources.value(m.id, QStringLiteral("margin"));
-                    ordersCount = 1;
-                    baseSum = adminSalaryBaseForSource(adminTotals, source);
-                    accrued = FormatUtils::roundMoneyValue(baseSum * percent / 100.0);
-                    if (!(m.active || baseSum > 0.0)) continue;
-                } else {
-                    const auto orders=PayrollIdentityRead::read(db,m.id,df,dt,percent,&snapshot.error,{},&payrollGraph);
-                    if(!snapshot.error.isEmpty())return;
-                    for(const auto& order:orders)if(!order.absent){++ordersCount;baseSum+=order.amount;accrued+=order.masterAmount;}
-                    baseSum=FormatUtils::roundMoneyValue(baseSum);
-                    accrued=qMax(0.0,FormatUtils::roundMoneyValue(accrued-sharedExpensesPerMaster));
-                    if (!(m.active || ordersCount > 0 || baseSum > 0.0)) continue;
                 }
-
-                row.ordersCount = QString::number(ordersCount);
-                row.baseSum = FormatUtils::money(baseSum,2);
-                row.percent = QString::number(percent, 'f', 2);
-                row.accrued = FormatUtils::money(accrued,2);
-                row.accruedValue = accrued;
-                snapshot.rows.append(row);
-                total += accrued;
             }
-
-            snapshot.stats = {
-                QString::fromUtf8("Співробітників:  %1").arg(snapshot.rows.size()),
-                QString::fromUtf8("Нараховано:  %1  грн.").arg(FormatUtils::money(total,2))
-            };
-            };read();
             if(snapshot.error.isEmpty() && !db.commit())snapshot.error=db.lastError().text();
             if(!snapshot.error.isEmpty())db.rollback();
         }
     }
-    if(!snapshot.error.isEmpty()){snapshot.rows.clear();snapshot.stats={QString::fromUtf8("Помилка читання зарплати: ")+snapshot.error};}
+    if(!snapshot.error.isEmpty()){snapshot.months.clear();snapshot.rows.clear();snapshot.stats={QString::fromUtf8("Помилка читання зарплати: ")+snapshot.error};}
     SqliteConnectionUtils::safeCloseAndRemoveDatabase(connName);
     return snapshot;
 }
