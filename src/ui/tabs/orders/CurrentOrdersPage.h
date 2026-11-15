@@ -48,9 +48,7 @@ private:
     void startAsyncRefresh();
     void cancelActiveRefreshForOwnerShutdown(const char* reason);
     void applyAsyncSnapshot(const CurrentOrdersQueryResult& queryResult,
-                            const TabularReadModel& readModel,
-                            int vScrollBefore,
-                            int hScrollBefore);
+                            const TabularReadModel& readModel);
 
     int selectedOrderNumber() const;
     QString selectedOrderUid() const;

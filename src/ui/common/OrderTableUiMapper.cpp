@@ -2,6 +2,7 @@
 
 #include <QAbstractItemModel>
 #include <QTableView>
+#include <QScrollBar>
 
 namespace {
 
@@ -27,6 +28,39 @@ void hideInternalColumns(QTableView* table, const QAbstractItemModel* model)
 } // namespace
 
 namespace OrderTableUiMapper {
+
+ListPosition capturePosition(QTableView* table)
+{
+    ListPosition position{{}, table->verticalScrollBar()->value(), table->horizontalScrollBar()->value()};
+    const int uidColumn = modelColumnByHeader(table->model(), QStringLiteral("__order_uid"));
+    const int numberColumn = modelColumnByHeader(table->model(), QStringLiteral("__internal_number"));
+    const auto rows = table->selectionModel()->selectedRows();
+    for (const auto& row : rows) {
+        const auto uid = row.siblingAtColumn(uidColumn).data().toString().trimmed();
+        const int number = row.siblingAtColumn(numberColumn).data().toInt();
+        if (!uid.isEmpty() || number > 0)
+            position.orders.append({uid, number, row.row() == table->currentIndex().row()});
+    }
+    return position;
+}
+
+void restorePosition(QTableView* table, const ListPosition& position,
+                     const std::function<QModelIndex(const SelectedOrder&)>& findRow)
+{
+    QItemSelection selection;
+    QModelIndex current;
+    const int lastColumn = table->model()->columnCount() - 1;
+    for (const auto& order : position.orders) {
+        const auto row = findRow(order);
+        if (!row.isValid()) continue;
+        selection.select(row, row.siblingAtColumn(lastColumn));
+        if (order.current) current = row;
+    }
+    table->selectionModel()->setCurrentIndex(current, QItemSelectionModel::NoUpdate);
+    table->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect);
+    table->verticalScrollBar()->setValue(position.verticalScroll);
+    table->horizontalScrollBar()->setValue(position.horizontalScroll);
+}
 
 void applyCurrentOrdersModelShape(QTableView* table, const QAbstractItemModel* model)
 {

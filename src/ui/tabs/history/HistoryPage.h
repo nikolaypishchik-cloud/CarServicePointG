@@ -45,9 +45,7 @@ private:
     void startAsyncRefresh();
     void cancelActiveRefreshForOwnerShutdown(const char* reason);
     void applyAsyncSnapshot(const HistoryQueryResult& queryResult,
-                            const TabularReadModel& readModel,
-                            int vScrollBefore,
-                            int hScrollBefore);
+                            const TabularReadModel& readModel);
 
     void restoreHeaderState();
     void saveHeaderState() const;

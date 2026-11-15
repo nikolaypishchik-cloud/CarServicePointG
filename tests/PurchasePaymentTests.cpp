@@ -6892,6 +6892,35 @@ private slots:
             QVERIFY(QDir(profile).removeRecursively());
         }
     }
+    void registryTablesUseFreedSpace() {
+        CurrentOrdersPage current;
+        HistoryPage history;
+        for (auto* page : {static_cast<QWidget*>(&current), static_cast<QWidget*>(&history)}) {
+            auto* table = page->findChild<QTableView*>();
+            auto* layout = qobject_cast<QVBoxLayout*>(page->layout());
+            QVERIFY(table && layout);
+            QCOMPARE(layout->indexOf(table), 1);
+            QVERIFY(layout->itemAt(0)->layout());
+            QCOMPARE(layout->stretch(1), 1);
+            for (auto* button : page->findChildren<QAbstractButton*>()) {
+                QVERIFY(button->text() != QStringLiteral("Поточні наряди"));
+                QVERIFY(button->text() != QStringLiteral("Завершені наряди"));
+            }
+            for (auto* label : page->findChildren<QLabel*>())
+                QVERIFY(!label->text().contains(QStringLiteral("наряд для розрахунку")));
+            page->resize(1200, 500);
+            page->show();
+            layout->activate();
+            const int oldHeight = table->height();
+            const int oldY = table->y();
+            QCOMPARE(oldY, layout->itemAt(0)->geometry().bottom() + 1 + layout->spacing());
+            page->resize(page->width(), page->height() + 140);
+            layout->activate();
+            QCOMPARE(table->height(), oldHeight + 140);
+            QCOMPARE(table->y(), oldY);
+            QVERIFY(page->rect().contains(table->geometry()));
+        }
+    }
     void orderListsRestoreUidAfterSnapshot() {
         CurrentOrdersPage current;
         HistoryPage history;
@@ -6900,26 +6929,54 @@ private slots:
         auto verify = [](auto& page, const auto& result) {
             const QStringList headers = {QStringLiteral("№"), "__internal_number", "__order_uid"};
             const TabularReadModel initial{headers, {{71, 71, "chosen"}}, {}};
-            page.applyAsyncSnapshot(result, initial, 0, 0);
+            page.applyAsyncSnapshot(result, initial);
             page.m_table->selectRow(0);
             QCOMPARE(page.selectedOrderUid(), QStringLiteral("chosen"));
             const TabularReadModel changed{headers, {{71, 71, "different"}, {72, 72, "chosen"}}, {}};
-            page.applyAsyncSnapshot(result, changed, 0, 0);
+            page.applyAsyncSnapshot(result, changed);
             QCOMPARE(page.selectedOrderUid(), QStringLiteral("chosen"));
             QCOMPARE(page.selectedOrderNumber(), 72);
+            auto* selection = page.m_table->selectionModel();
+            const int extraRow = page.m_model->rowByColumnValue("__order_uid", "different");
+            const auto extra = page.m_proxy->mapFromSource(page.m_model->index(extraRow, 0));
+            selection->select(extra, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+            const TabularReadModel reordered{headers, {{88, 88, "chosen"}, {71, 71, "different"}, {72, 72, "third"}}, {}};
+            page.applyAsyncSnapshot(result, reordered);
+            QCOMPARE(selection->selectedRows().size(), 2);
+            QCOMPARE(page.selectedOrderUid(), QStringLiteral("chosen"));
+            const TabularReadModel partial{headers, {{71, 71, "new"}, {88, 88, "chosen"}}, {}};
+            page.applyAsyncSnapshot(result, partial);
+            QCOMPARE(selection->selectedRows().size(), 1);
+            QCOMPARE(page.selectedOrderUid(), QStringLiteral("chosen"));
             const TabularReadModel gone{headers, {{72, 72, "different"}}, {}};
-            page.applyAsyncSnapshot(result, gone, 0, 0);
+            page.applyAsyncSnapshot(result, gone);
             QVERIFY(!page.m_table->selectionModel()->hasSelection());
             page.m_table->selectRow(0);
             page.m_table->clearSelection();
-            page.applyAsyncSnapshot(result, gone, 0, 0);
+            page.applyAsyncSnapshot(result, gone);
             QVERIFY(!page.m_table->selectionModel()->hasSelection());
             const TabularReadModel old{headers, {{42, 42, ""}}, {}};
-            page.applyAsyncSnapshot(result, old, 0, 0);
+            page.applyAsyncSnapshot(result, old);
             page.m_table->selectRow(0);
-            page.applyAsyncSnapshot(result, old, 0, 0);
+            page.applyAsyncSnapshot(result, old);
             QVERIFY(page.m_table->selectionModel()->hasSelection());
             QCOMPARE(page.selectedOrderNumber(), 42);
+            TabularReadModel many{headers, {}, {}};
+            for (int i = 1; i <= 200; ++i)
+                many.rows.append({i, i, QStringLiteral("order-%1").arg(i)});
+            page.resize(1200, 500);
+            page.show();
+            page.applyAsyncSnapshot(result, many);
+            page.m_table->doItemsLayout();
+            page.m_table->selectRow(3);
+            auto* scroll = page.m_table->verticalScrollBar();
+            QVERIFY(scroll->maximum() >= 80);
+            scroll->setValue(80);
+            const QString focused = page.selectedOrderUid();
+            page.applyAsyncSnapshot(result, many);
+            QCOMPARE(scroll->value(), 80);
+            QCOMPARE(page.selectedOrderUid(), focused);
+
         };
         verify(current, currentResult);
         verify(history, HistoryQueryResult{});

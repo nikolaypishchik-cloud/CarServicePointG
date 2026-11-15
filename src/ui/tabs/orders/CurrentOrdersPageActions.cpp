@@ -218,8 +218,6 @@ void CurrentOrdersPage::refresh()
 
 void CurrentOrdersPage::startAsyncRefresh()
 {
-    const int vScrollBefore = (m_table && m_table->verticalScrollBar()) ? m_table->verticalScrollBar()->value() : 0;
-    const int hScrollBefore = (m_table && m_table->horizontalScrollBar()) ? m_table->horizontalScrollBar()->value() : 0;
     const QString filter = m_search ? m_search->text().trimmed() : QString();
     const int generation = ++m_refreshGeneration;
     const QString scopeKey = AccessControlService::currentScopeKey();
@@ -275,14 +273,14 @@ void CurrentOrdersPage::startAsyncRefresh()
     connect(worker, &QThread::finished, worker, [generation]() {
         PerfWatchdog::asyncJobFinished(QStringLiteral("current-orders"), QString::number(generation));
     }, Qt::DirectConnection);
-    connect(worker, &QThread::finished, this, [this, worker, result, asyncHandle, runtimeTicket, vScrollBefore, hScrollBefore, scopeKey]() {
+    connect(worker, &QThread::finished, this, [this, worker, result, asyncHandle, runtimeTicket, scopeKey]() {
         if (m_refreshWorker == worker) m_refreshWorker = nullptr;
         const bool canApply = scopeKey == AccessControlService::currentScopeKey()
             && asyncHandle.shouldApply(static_cast<quint64>(m_refreshGeneration))
             && RuntimeJob::RuntimeJobDispatcher::instance().shouldApply(runtimeTicket);
         RuntimeJob::RuntimeJobDispatcher::instance().finish(runtimeTicket, canApply ? RuntimeJob::Status::Succeeded : RuntimeJob::Status::Cancelled);
         if (canApply) {
-            applyAsyncSnapshot(result->queryResult, result->readModel, vScrollBefore, hScrollBefore);
+            applyAsyncSnapshot(result->queryResult, result->readModel);
         } else {
             qWarning().noquote() << QStringLiteral("ASYNC_LIFECYCLE current_orders_refresh_result_detached generation=") << asyncHandle.generation();
             m_refreshInProgress = false;
@@ -297,9 +295,7 @@ void CurrentOrdersPage::startAsyncRefresh()
 }
 
 void CurrentOrdersPage::applyAsyncSnapshot(const CurrentOrdersQueryResult& queryResult,
-                                           const TabularReadModel& readModel,
-                                           int vScrollBefore,
-                                           int hScrollBefore)
+                                           const TabularReadModel& readModel)
 {
     QElapsedTimer t; t.start();
     PerfWatchdog::ScopedTimer perfTimer(QStringLiteral("CurrentOrdersPage::applyAsyncSnapshot"), 80);
@@ -323,43 +319,20 @@ void CurrentOrdersPage::applyAsyncSnapshot(const CurrentOrdersQueryResult& query
     }
 
     if (m_table) m_table->setUpdatesEnabled(false);
-    const QModelIndex currentSelection = m_table->currentIndex();
-    const bool selected = currentSelection.isValid()
-        && m_table->selectionModel()->isRowSelected(currentSelection.row(), {});
-    const QString selectedUid = selected ? selectedOrderUid() : QString();
-    const int selectedBefore = selected ? selectedOrderNumber() : -1;
+    const auto position = OrderTableUiMapper::capturePosition(m_table);
     TabularReadModelMapper::apply(m_model, readModel);
     restoreHeaderState();
     OrderTableUiMapper::applyCurrentOrdersModelShape(m_table, m_model);
     if (m_table) m_table->setUpdatesEnabled(true);
 
-    bool restoredSelection = false;
-    if (m_table && m_proxy) {
-        int targetRow = -1;
-        if (selectedBefore > 0) {
-            const int sourceRow = selectedUid.isEmpty()
-                ? m_model->rowByColumnValue(QStringLiteral("__internal_number"), selectedBefore)
-                : m_model->rowByColumnValue(QStringLiteral("__order_uid"), selectedUid);
-            if (sourceRow >= 0) {
-                const QModelIndex proxyIndex = m_proxy->mapFromSource(m_model->index(sourceRow, 0));
-                if (proxyIndex.isValid()) targetRow = proxyIndex.row();
-            }
-        }
-        if (targetRow >= 0) {
-            const QModelIndex current = m_proxy->index(targetRow, 0);
-            if (current.isValid()) {
-                m_table->setCurrentIndex(current);
-                m_table->selectRow(targetRow);
-                m_table->scrollTo(current, QAbstractItemView::PositionAtCenter);
-                restoredSelection = true;
-            }
-        }
-        if (!restoredSelection) {
-            if (auto* vbar = m_table->verticalScrollBar()) vbar->setValue(vScrollBefore);
-            if (auto* hbar = m_table->horizontalScrollBar()) hbar->setValue(hScrollBefore);
-        }
-        if (m_table->viewport()) m_table->viewport()->update();
-    }
+    // Resolve each identity in the source snapshot index and map through the proxy.
+    OrderTableUiMapper::restorePosition(m_table, position, [this](const OrderTableUiMapper::SelectedOrder& order) {
+        const int row = order.uid.isEmpty()
+            ? m_model->rowByColumnValue(QStringLiteral("__internal_number"), order.number)
+            : m_model->rowByColumnValue(QStringLiteral("__order_uid"), order.uid);
+        const QModelIndex sourceIndex = m_model->index(row, 0);
+        return m_proxy->mapFromSource(sourceIndex);
+    });
 
     m_loaded = true;
     m_dirty = false;
