@@ -9,6 +9,7 @@
 
 #include "core/util/StoreNameNormalizer.h"
 #include <QSqlError>
+#include <QSqlRecord>
 namespace ReportsDataLoader::LocalSupport {
 
 QString parsePlateForUi(const QString& value)
@@ -379,17 +380,22 @@ AdminSalaryTotals collectAdminSalaryTotalsForReports(QSqlDatabase& db, const QSt
 {
     AdminSalaryTotals t;
 
+    const bool hasPartUid = db.record("router_work_order_parts").contains("order_uid");
+    const QString owner = hasPartUid
+        ? QStringLiteral("(NULLIF(TRIM(p.order_uid),'') IS NOT NULL AND wo.order_uid=p.order_uid) "
+                         "OR (NULLIF(TRIM(p.order_uid),'') IS NULL AND wo.number=p.order_number)")
+        : QStringLiteral("wo.number=p.order_number");
     QSqlQuery parts(db);
     parts.prepare(
         QStringLiteral("SELECT "
                        "COALESCE(SUM(COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END)),0), "
                        "COALESCE(SUM(COALESCE(p.amount,0)),0), "
-                       "COALESCE(SUM(COALESCE(p.amount,0) - COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END)),0) "
+                       "COALESCE(SUM(COALESCE(p.amount,0) - COALESCE(p.purchase_amount, CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END)),0), COALESCE(SUM(COALESCE(p.qty,1)),0) "
                        "FROM router_work_order_parts p "
-                       "JOIN router_work_orders wo ON wo.number = p.order_number "
+                       "JOIN router_work_orders wo ON (%1) "
                        "WHERE date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) >= date(?) "
                        "AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) <= date(?) "
-                       "AND wo.status='closed'"));
+                       "AND wo.status='closed'").arg(owner));
     parts.addBindValue(df);
     parts.addBindValue(dt);
     if (!parts.exec() || !parts.next()) {if(error)*error=parts.lastError().text();return {};}
@@ -397,22 +403,10 @@ AdminSalaryTotals collectAdminSalaryTotalsForReports(QSqlDatabase& db, const QSt
         t.purchaseTotal += parts.value(0).toDouble();
         t.clientTotal += parts.value(1).toDouble();
         t.margin += parts.value(2).toDouble();
+        t.partsQty = parts.value(3).toDouble();
     }
 
     parts.next();if(parts.lastError().isValid()){if(error)*error=parts.lastError().text();return {};}
-    QSqlQuery partsQtyQ(db);
-    partsQtyQ.prepare(QStringLiteral("SELECT COALESCE(SUM(COALESCE(p.qty,1)),0) "
-                                      "FROM router_work_order_parts p "
-                                      "JOIN router_work_orders wo ON wo.number = p.order_number "
-                                      "WHERE date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) >= date(?) "
-                                      "AND date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) <= date(?) "
-                                      "AND wo.status='closed'"));
-    partsQtyQ.addBindValue(df);
-    partsQtyQ.addBindValue(dt);
-    if (!partsQtyQ.exec() || !partsQtyQ.next()) {if(error)*error=partsQtyQ.lastError().text();return {};}
-    t.partsQty = partsQtyQ.value(0).toDouble();
-
-    partsQtyQ.next();if(partsQtyQ.lastError().isValid()){if(error)*error=partsQtyQ.lastError().text();return {};}
     QSqlQuery ordersQ(db);
     ordersQ.prepare(QStringLiteral("SELECT COUNT(DISTINCT wo.number) FROM router_work_orders wo "
                                    "WHERE date(CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),3,1)='.' AND substr(trim(NULLIF(TRIM(wo.closed_at),'')),6,1)='.' THEN CASE WHEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,4) ELSE '20'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),7,2) END||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),4,2)||'-'||substr(trim(NULLIF(TRIM(wo.closed_at),'')),1,2) ELSE NULLIF(TRIM(wo.closed_at),'') END) >= date(?) "

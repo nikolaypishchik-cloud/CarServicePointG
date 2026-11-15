@@ -17,6 +17,7 @@
 #include "core/services/ReportsPdfSupport.h"
 #include "core/services/ReportsPdfRenderer.h"
 #include "core/services/ReportsPdfExpenseSupport.h"
+#include "core/services/ReportsDataLoaderLocalSupport.h"
 #include "core/services/WorkshopInventoryService.h"
 #include "core/services/StaffAccountService.h"
 #include "core/services/AccessControlService.h"
@@ -78,6 +79,25 @@ class AdditionalExpenseTests : public QObject {
         QVERIFY(q.exec("INSERT INTO expenses(period_from,period_to,cleaning,cleaning_note) VALUES('2026-01-01','2026-01-31',12.10,'Synthetic note')"));
     }
 private slots:
+    void adminPartsUseOrderUidAcrossReports() {
+        preparePartsPayrollPdfFixture();
+        QSqlQuery q(db);
+        QVERIFY(q.exec("CREATE TEMP VIEW router_work_order_parts AS "
+                       "SELECT 99 AS order_number,order_uid,name,store,qty,amount,purchase_amount,purchase_price,"
+                       "markup_percent,manual_markup_override,pricing_calc_version FROM main.router_work_order_parts "
+                       "UNION ALL SELECT 11,'different-order','Other','Shop',2,200,100,50,0,0,3"));
+        QString error;
+        const auto screen = ReportsDataLoader::LocalSupport::collectAdminSalaryTotalsForReports(
+            db, "2026-01-01", "2026-01-31", &error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        const auto pdf = ReportsPdfExpenseSupport::collectAdminSalaryTotals("2026-01-01","2026-01-31",&error);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(qRound64(screen.purchaseTotal * 100), qRound64(pdf.purchaseTotal * 100));
+        QCOMPARE(qRound64(screen.clientTotal * 100), qRound64(pdf.clientTotal * 100));
+        QCOMPARE(qRound64(screen.margin * 100), qRound64(pdf.margin * 100));
+        QCOMPARE(screen.partsQty, 1.0);
+        QCOMPARE(screen.partsQty, pdf.partsQty);
+    }
     void initTestCase() {
         QStandardPaths::setTestModeEnabled(true);
         QCoreApplication::setOrganizationName("CarServiceExpenseTests");
