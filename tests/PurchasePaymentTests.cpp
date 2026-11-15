@@ -5961,14 +5961,14 @@ private slots:
         QCOMPARE(source.rows.size(),3);
         ReportsPage report;
         report.show();
-        auto* mode = report.findChild<QComboBox*>("partsReportMode");
+        auto* mode = report.findChild<QTabBar*>("partsReportMode");
         auto* tabs = report.findChild<QTabWidget*>();
         auto* search = report.findChild<QLineEdit*>("partsReportSearch");
         QVERIFY(mode && tabs && search);
         const auto dates = report.findChildren<QDateEdit*>();
         for (auto* date : dates) date->setDate(QDate(2026,9,1));
         tabs->setCurrentWidget(mode->parentWidget());
-        mode->setCurrentText(QStringLiteral("За нарядами"));
+        QTest::mouseClick(mode, Qt::LeftButton, Qt::NoModifier, mode->tabRect(1).center());
         search->setText("Second");
         report.refresh();
         auto* orders = report.findChild<QListWidget*>("partsRegisterOrders");
@@ -5998,7 +5998,7 @@ private slots:
         QVERIFY2(routeError.isEmpty(), qPrintable(routeError));
         QCOMPARE(openedUid, QStringLiteral("order-b"));
         QCOMPARE(openedNumber, QStringLiteral("2"));
-        QCOMPARE(mode->currentText(), QStringLiteral("За нарядами"));
+        QCOMPARE(mode->tabText(mode->currentIndex()), QStringLiteral("За нарядами"));
         // Both source purchases belong to this store. Searching for one order
         // must leave both balances in the period total.
         QVERIFY2(source.supplierDebtError.isEmpty(), qPrintable(source.supplierDebtError));
@@ -6055,7 +6055,7 @@ private slots:
         shop->setCurrentIndex(0);
         QVERIFY(labelContains(tile, FormatUtils::money(275, 2)));
         QCOMPARE(cards().size(), 2);
-        mode->setCurrentText(QStringLiteral("Усі позиції"));
+        QTest::mouseClick(mode, Qt::LeftButton, Qt::NoModifier, mode->tabRect(2).center());
         QVERIFY(strip->isVisible());
         QCOMPARE(cards().size(), 2);
         search->setText("absent-OEM");
@@ -6116,7 +6116,7 @@ private slots:
         QCOMPARE(PurchasePaymentService::history(db,paid,&error).size(),1);
         QVERIFY2(error.isEmpty(),qPrintable(error));
         tabs->setCurrentWidget(mode->parentWidget());
-        mode->setCurrentText(QStringLiteral("За нарядами"));
+        QTest::mouseClick(mode, Qt::LeftButton, Qt::NoModifier, mode->tabRect(1).center());
         QTRY_VERIFY_WITH_TIMEOUT(labelContains(tile,FormatUtils::money(200,2)) && cards().size()==1,10000);
         QCOMPARE(cards().first()->property("supplier").toString(),QStringLiteral("Store"));
     }

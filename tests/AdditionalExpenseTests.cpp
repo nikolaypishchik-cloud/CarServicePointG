@@ -20,6 +20,7 @@
 #include "core/services/StaffAccountService.h"
 #include "core/services/AccessControlService.h"
 #include <QComboBox>
+#include <QTabBar>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QInputDialog>
@@ -277,7 +278,7 @@ private slots:
         q.addBindValue(today);
         QVERIFY(q.exec());
         ReportsPage page;
-        auto* mode = page.findChild<QComboBox*>("partsReportMode");
+        auto* mode = page.findChild<QTabBar*>("partsReportMode");
         auto* search = page.findChild<QLineEdit*>("partsReportSearch");
         auto* table = page.findChild<QTableView*>("partsRegisterTable");
         QVERIFY(mode && search && table);
@@ -288,7 +289,7 @@ private slots:
         QVERIFY(tabs);
         tabs->setCurrentWidget(mode->parentWidget());
         page.refresh();
-        mode->setCurrentText(QStringLiteral("Усі позиції"));
+        QTest::mouseClick(mode, Qt::LeftButton, Qt::NoModifier, mode->tabRect(2).center());
         QVERIFY(!view->isHidden());
         QTRY_COMPARE_WITH_TIMEOUT(table->model()->rowCount(), 2, 10000);
         auto* store = view->findChildren<QComboBox*>().value(0);
@@ -304,19 +305,30 @@ private slots:
         QCOMPARE(table->model()->index(0, 6).data().toString(), QStringLiteral("OEM-71"));
         QCOMPARE(table->model()->index(0, 9).data().toString(), FormatUtils::money(90.50, 2));
         QCOMPARE(table->model()->index(0, 10).data().toString(), FormatUtils::money(45.25, 2));
+        for (int index = 0; index < mode->count(); ++index) {
+            const auto rect = mode->tabRect(index);
+            QVERIFY2(mode->rect().contains(rect), qPrintable(QString("mode %1x%2, tab %3 at %4,%5 size %6x%7")
+                .arg(mode->width()).arg(mode->height()).arg(index).arg(rect.x()).arg(rect.y()).arg(rect.width()).arg(rect.height())));
+            QVERIFY(mode->tabRect(index).width() >= mode->fontMetrics().horizontalAdvance(mode->tabText(index)));
+        }
+        QVERIFY(!mode->usesScrollButtons());
+        const auto modeCapture = qEnvironmentVariable("CS_PARTS_MODE_CAPTURE");
+        if (!modeCapture.isEmpty()) QVERIFY(mode->grab().save(modeCapture));
         const QString capture = qEnvironmentVariable("CS_FLAT_REPORT_CAPTURE");
         if (!capture.isEmpty()) QVERIFY(page.grab().save(capture));
         search->setText("no match");
         QVERIFY(table->isRowHidden(0));
         search->setText("oem-71");
         QVERIFY(!table->isRowHidden(0));
-        mode->setCurrentText(QStringLiteral("За нарядами"));
+        QTest::mouseClick(mode, Qt::LeftButton, Qt::NoModifier, mode->tabRect(1).center());
         auto* orders = view->findChild<QListWidget*>("partsRegisterOrders");
         QVERIFY(orders && !orders->isHidden());
         QCOMPARE(orders->count(), 1);
         QCOMPARE(view->exportSelection().rows.size(), 1);
         QCOMPARE(view->exportSelection().rows.first()[6], QStringLiteral("OEM-71"));
-        mode->setCurrentIndex(0);
+        mode->setFocus();
+        QTest::keyClick(mode, Qt::Key_Left);
+        QCOMPARE(mode->currentIndex(), 0);
         QVERIFY(view->isHidden());
     }
 

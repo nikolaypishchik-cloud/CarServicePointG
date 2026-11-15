@@ -286,14 +286,29 @@ void ReportsPage::buildUi()
     search->setAccessibleName(tr("Пошук у придбанні запчастин"));
     search->setPlaceholderText(tr("Запчастина, наряд або накладна"));
     search->setClearButtonEnabled(true);
-    auto* mode = new QComboBox(partsPage);
+    auto* mode = new QTabBar(partsPage);
     mode->setObjectName("partsReportMode");
     mode->setAccessibleName(tr("Режим придбання запчастин"));
-    mode->addItems({tr("Звіт"), tr("За нарядами"), tr("Усі позиції")});
-    groupActions->addWidget(mode);
+    mode->setDrawBase(false);
+    mode->setExpanding(false);
+    mode->setUsesScrollButtons(false);
+    mode->setElideMode(Qt::ElideNone);
+    mode->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+    mode->setFocusPolicy(Qt::StrongFocus);
+    mode->addTab(tr("Звіт"));
+    mode->addTab(tr("За нарядами"));
+    mode->addTab(tr("Усі позиції"));
+    mode->setStyleSheet("#partsReportMode::tab { padding: 4px 10px; margin: 1px; border: 1px solid #718591; border-radius: 4px; }"
+                        "#partsReportMode::tab:selected { background: #146873; color: white; border-color: #55dae0; }");
+    mode->ensurePolished();
+    int tabsWidth = 0;
+    for (int index = 0; index < mode->count(); ++index)
+        tabsWidth += mode->tabRect(index).width();
+    mode->setMinimumWidth(tabsWidth + 2 * mode->style()->pixelMetric(QStyle::PM_DefaultFrameWidth, nullptr, mode));
     groupActions->addWidget(search, 1);
     groupActions->addWidget(collapse);
     groupActions->addWidget(expand);
+    groupActions->addWidget(mode);
     auto* noMatches = new QLabel(tr("За цим запитом позицій не знайдено"), partsPage);
     noMatches->setObjectName("partsSearchEmpty");
     noMatches->hide();
@@ -343,7 +358,7 @@ void ReportsPage::buildUi()
     m_partsRegister->storeChanged = [this] { updateDashboard(); };
     m_partsRegister->orderEdited = [this] { markDirty(); scheduleRefresh(0); queueRefreshAll(0); };
     connect(search, &QLineEdit::textChanged, m_partsRegister, &PartsRegisterView::setSearch);
-    connect(mode, &QComboBox::currentIndexChanged, this, [this, collapse, expand, search, updateRows](int index) {
+    connect(mode, &QTabBar::currentChanged, this, [this, collapse, expand, search, updateRows](int index) {
         const bool flat = index != 0;
         m_partsTable->setVisible(!flat);
         m_partsRegister->setActive(flat, index == 1);
