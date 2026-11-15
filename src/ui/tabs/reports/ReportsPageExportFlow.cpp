@@ -485,9 +485,10 @@ void ReportsPage::exportPayrollPdf()
     if(m_tabKeys.value(static_cast<int>(ReportTab::Payroll))!=key)return;
     const QDate fromDate = m_from->date();
     const QDate toDate = m_to->date();
-    runPdfExportTask(QString::fromUtf8("Формування PDF звіту по зарплаті..."), [fromDate, toDate]() {
+    const QString employeeId = m_payrollEmployee->currentData().toString();
+    runPdfExportTask(QString::fromUtf8("Формування PDF звіту по зарплаті..."), [fromDate, toDate, employeeId]() {
         ReportsPdfRenderer::ExportResult result;
-        ReportsPdfRenderer::renderPayrollPdf(fromDate, toDate, &result);
+        ReportsPdfRenderer::renderPayrollPdf(fromDate, toDate, &result, employeeId);
         return result;
     });
 }

@@ -380,7 +380,10 @@ PayrollHistoryIssuedTotals collectIssuedPayrollTotals(const QString& df, const Q
 
         if (masterIdIdx >= 0) {
             const QString masterId = dataQ.value(masterIdIdx).toString().trimmed();
-            if (!masterId.isEmpty()) totals.byMasterId[masterId] += amount;
+            if (!masterId.isEmpty()) {
+                totals.byMasterId[masterId] += amount;
+                continue;
+            }
         }
         if (masterNameIdx >= 0) {
             const QString masterName = payrollMasterNameKey(dataQ.value(masterNameIdx).toString());
@@ -395,14 +398,7 @@ PayrollHistoryIssuedTotals collectIssuedPayrollTotals(const QString& df, const Q
 double issuedPayrollForMaster(const PayrollHistoryIssuedTotals& totals, const MasterRow& master)
 {
     const QString id = master.id.trimmed();
-    if (!id.isEmpty() && totals.byMasterId.contains(id)) {
-        return totals.byMasterId.value(id, 0.0);
-    }
-    const QString key = payrollMasterNameKey(master.name);
-    if (!key.isEmpty() && totals.byMasterName.contains(key)) {
-        return totals.byMasterName.value(key, 0.0);
-    }
-    return 0.0;
+    return totals.byMasterId.value(id) + totals.byMasterName.value(payrollMasterNameKey(master.name));
 }
 
 int partServiceMatchScore(const QString& serviceTitle, const QString& partName)

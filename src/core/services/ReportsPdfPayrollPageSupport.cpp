@@ -174,8 +174,8 @@ void renderPayrollPages(
         int y = theme.top;
         drawHeader(y);
 
-        const bool isAdmin = m.masterName.startsWith(QString::fromUtf8("Адмін:"));
-        const QString displayName = ReportsPdfPayrollSupport::displayMasterName(m.masterName);
+        const bool isAdmin = m.isAdmin;
+        const QString displayName = isAdmin ? ReportsPdfPayrollSupport::displayMasterName(m.masterName) : m.masterName;
         const QString roleTitle = ReportsPdfPayrollSupport::roleTitleForMaster(isAdmin);
         drawMasterBanner(y, roleTitle, displayName);
 

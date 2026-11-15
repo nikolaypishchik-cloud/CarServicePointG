@@ -466,6 +466,50 @@ private slots:
         QVERIFY(q.exec("UPDATE staff_accounts SET active=0 WHERE id='pdf-owner'"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());
         QVERIFY(q.exec("UPDATE staff_accounts SET active=1 WHERE id='pdf-owner'"));QVERIFY2(render(),qPrintable(result.errorText));
     }
+    void payrollPdfSeparatesNamesakesAndIssuedAmounts() {
+        preparePartsPayrollPdfFixture();
+        QSqlQuery q(db);
+        QVERIFY(q.exec("UPDATE masters SET active=0,active_to='2025-12-31' WHERE id<>'pdf-master'"));
+        QVERIFY(q.exec("INSERT INTO masters(id,name,role,active) VALUES('pdf-second','Synthetic master','master',1)"));
+        QVERIFY(q.exec("CREATE TABLE payroll_history(period_from TEXT,period_to TEXT,master_id TEXT,master_name TEXT,amount REAL)"));
+        QVERIFY(q.exec("INSERT INTO payroll_history VALUES('2026-01-01','2026-01-31','pdf-master','Synthetic master',10)"));
+        const QDate from(2026, 1, 1), to(2026, 1, 31);
+        QString error;
+        const auto details = [&](const QString& id) {
+            return ReportsPdfSupport::collectPayrollDetails("2026-01-01", "2026-01-31", &error, true, id);
+        };
+        auto staff = details("pdf-master");
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(staff.size(), 1);
+        QCOMPARE(staff.first().issued, 10.0);
+        QCOMPARE(qRound64(staff.first().toIssue * 100), 3420);
+        staff = details("pdf-second");
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(staff.size(), 1);
+        QCOMPARE(staff.first().issued, 0.0);
+        ReportsPdfRenderer::ExportResult result;
+        QVERIFY2(ReportsPdfRenderer::renderPayrollPdf(from, to, &result, "pdf-master"), qPrintable(result.errorText));
+        const QString firstPath = result.path;
+        const QByteArray first = PayrollReadFixture::bytes(firstPath);
+        QVERIFY2(ReportsPdfRenderer::renderPayrollPdf(from, to, &result, "pdf-second"), qPrintable(result.errorText));
+        QVERIFY(result.path != firstPath);
+        QCOMPARE(result.recordCount, 1);
+        const QString capture = qEnvironmentVariable("CS_PAYROLL_SCOPE_CAPTURE");
+        if (!capture.isEmpty()) {
+            QVERIFY(QFile::copy(firstPath, capture + "/first.pdf"));
+            QVERIFY(QFile::copy(result.path, capture + "/second.pdf"));
+        }
+        QVERIFY(!ReportsPdfRenderer::renderPayrollPdf(from, to, &result, "unknown"));
+        QVERIFY(q.exec("INSERT INTO payroll_history VALUES('2026-01-01','2026-01-31',NULL,'Synthetic master',4)"));
+        QVERIFY(!ReportsPdfRenderer::renderPayrollPdf(from, to, &result, "pdf-master"));
+        QVERIFY(result.errorText.contains(QStringLiteral("без ID")));
+        QCOMPARE(PayrollReadFixture::bytes(firstPath), first);
+        QVERIFY(q.exec("UPDATE masters SET name='Other' WHERE id='pdf-second'"));
+        staff = details("pdf-master");
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(staff.size(), 1);
+        QCOMPARE(staff.first().issued, 14.0);
+    }
     void payrollPdfSupplementFailuresScopeAndRepeat() {
         preparePartsPayrollPdfFixture();QString error;
         QSqlQuery staffing(db);

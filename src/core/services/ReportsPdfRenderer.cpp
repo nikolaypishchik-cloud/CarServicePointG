@@ -22,6 +22,7 @@
 #include <QScopeGuard>
 #include "core/diagnostics/RuntimeLoggingControl.h"
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -478,7 +479,7 @@ bool renderExpensesPdf(const QDate& fromDate, const QDate& toDate, const Expense
     return ok;
 }
 
-bool renderPayrollPdf(const QDate& fromDate, const QDate& toDate, ExportResult* result)
+bool renderPayrollPdf(const QDate& fromDate, const QDate& toDate, ExportResult* result, const QString& employeeId)
 {
     const QString df = fromDate.toString(QStringLiteral("yyyy-MM-dd"));
     const QString dt = toDate.toString(QStringLiteral("yyyy-MM-dd"));
@@ -488,7 +489,7 @@ bool renderPayrollPdf(const QDate& fromDate, const QDate& toDate, ExportResult* 
     auto db=QSqlDatabase::database(currentConnectionName(),false);
     if(!db.transaction()){readError=db.lastError().text();return fail();}
     auto rollback=qScopeGuard([&]{db.rollback();});
-    const auto masters=ReportsPdfSupport::collectPayrollDetails(df,dt,&readError);
+    const auto masters=ReportsPdfSupport::collectPayrollDetails(df,dt,&readError,true,employeeId);
     if(!readError.isEmpty())return fail();
     const auto expenseBreakdown=ReportsPdfExpenseSupport::periodExpenseBreakdown(df,dt,&readError);
     if(!readError.isEmpty())return fail();
@@ -503,7 +504,15 @@ bool renderPayrollPdf(const QDate& fromDate, const QDate& toDate, ExportResult* 
     const auto adminTotals=ReportsPdfExpenseSupport::collectAdminSalaryTotals(df,dt,&readError);
     if(!readError.isEmpty())return fail();
     if(!db.commit()){readError=db.lastError().text();return fail();}rollback.dismiss();
-    const QString path = makeReportPdfPath(QString::fromUtf8("Зарплата"), reportDateRangeStem(fromDate, toDate));
+    QString stem = reportDateRangeStem(fromDate, toDate);
+    if (!employeeId.isEmpty()) {
+        if (masters.size() != 1) {
+            readError = QStringLiteral("Співробітника не знайдено за вибраний період");
+            return fail();
+        }
+        stem += QStringLiteral("_") + QString::fromLatin1(QCryptographicHash::hash(employeeId.toUtf8(), QCryptographicHash::Sha256).toHex());
+    }
+    const QString path = makeReportPdfPath(QString::fromUtf8("Зарплата"), stem);
     QString pathError;
     if (!ensurePdfOutputPath(path, &pathError)) {
         if (result) {

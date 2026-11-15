@@ -43,6 +43,6 @@ bool renderPeriodPdf(const QDate& fromDate, const QDate& toDate, ExportResult* r
 bool renderPartsPdf(const QDate& fromDate, const QDate& toDate, ExportResult* result);
 bool renderOutsourcePdf(const QDate& fromDate, const QDate& toDate, ExportResult* result);
 bool renderExpensesPdf(const QDate& fromDate, const QDate& toDate, const ExpensesFormData& data, ExportResult* result);
-bool renderPayrollPdf(const QDate& fromDate, const QDate& toDate, ExportResult* result);
+bool renderPayrollPdf(const QDate& fromDate, const QDate& toDate, ExportResult* result, const QString& employeeId = {});
 
 } // namespace ReportsPdfRenderer

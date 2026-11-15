@@ -27,6 +27,7 @@ QString normalizeOilGradeForReport(QString text);
 bool oilGradeLessThan(const QString& a, const QString& b);
 bool isMotorOilName(QString name);
 QVariant reportsWorkerSetting(QSqlDatabase& db, const QString& key, const QVariant& def = QVariant(), QString* error = nullptr);
+QList<MasterRow> loadAllMastersForReports(QSqlDatabase& db, QString* error);
 QList<MasterRow> loadMastersForPeriodForReports(QSqlDatabase& db, const QString& fromDateIso, const QString& toDateIso, QString* error);
 QString makeReportsWorkerConnectionName(const QString& suffix);
 QString payrollMasterNameKey(QString value);

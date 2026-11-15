@@ -51,6 +51,7 @@ struct OutsourcePdfRow {
 };
 
 struct PayrollMasterPdf {
+    bool isAdmin = false;
     QString masterId;
     QString masterName;
     double percent = 0.0;
@@ -117,7 +118,7 @@ QMap<QString, QList<OutsourcePdfRow>> collectOutsourceGroups(const QString& df, 
                                                              int& count, double& repairTotal, double& clientTotal, QString* error = nullptr);
 bool validateFinancialPdfSource(const QDate& from, const QDate& to, QString* error);
 bool validateExpensesPdfSource(const QDate& from, const QDate& to, QString* error);
-QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& dt, QString* error = nullptr, bool includeWorkText = true);
+QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& dt, QString* error = nullptr, bool includeWorkText = true, const QString& employeeId = {});
 QMap<QString,double> loadMarkupMapForReports(const QString& key);
 bool isMotorOilName(QString name);
 

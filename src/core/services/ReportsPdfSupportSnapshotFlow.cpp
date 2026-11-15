@@ -298,7 +298,7 @@ QMap<QString, QList<OutsourcePdfRow>> collectOutsourceGroups(const QString& df, 
     return groups;
 }
 
-QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& dt, QString* error, bool includeWorkText)
+QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& dt, QString* error, bool includeWorkText, const QString& employeeId)
 {
     QList<PayrollMasterPdf> mastersOut;
     QString failure;auto db=QSqlDatabase::database(currentConnectionName(),false);
@@ -316,13 +316,25 @@ QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& 
     if(!failure.isEmpty())return fail();
     PayrollIdentityRead::Graph payrollGraph;
     if(!PayrollIdentityRead::loadGraph(db,&payrollGraph,&failure))return fail();
+    QHash<QString, int> nameOwners;
+    if (!issuedTotals.byMasterName.isEmpty()) {
+        const auto all = ReportsDataLoader::LocalSupport::loadAllMastersForReports(db, &failure);
+        if (!failure.isEmpty()) return fail();
+        for (const auto& master : all) ++nameOwners[payrollMasterNameKey(master.name)];
+    }
     for (const auto& m : masters) {
-        PayrollMasterPdf pm; pm.masterId = m.id; pm.masterName = m.role == QStringLiteral("admin") ? QString::fromUtf8("Адмін: %1").arg(m.name) : m.name; pm.percent = resolvePayrollPercent(m, payrollResolver);
+        if (!employeeId.isEmpty() && m.id != employeeId) continue;
+        const QString nameKey = payrollMasterNameKey(m.name);
+        if (issuedTotals.byMasterName.contains(nameKey) && nameOwners.value(nameKey) > 1) {
+            failure = QStringLiteral("Виплата без ID: ім’я «%1» належить кільком співробітникам").arg(m.name);
+            return fail();
+        }
+        PayrollMasterPdf pm; pm.isAdmin = m.role == QStringLiteral("admin"); pm.masterId = m.id; pm.masterName = m.role == QStringLiteral("admin") ? QString::fromUtf8("Адмін: %1").arg(m.name) : m.name; pm.percent = resolvePayrollPercent(m, payrollResolver);
         if (m.role == QStringLiteral("admin")) {
             const QString source = adminSources.value(m.id, QStringLiteral("margin"));
             PayrollOrderRow row; row.dateStart=ReportsDateUtils::dmy(df); row.dateEnd=ReportsDateUtils::dmy(dt); row.orderNumber=QStringLiteral("-"); row.car=adminSalarySourceLabel(source); row.works=QString::fromUtf8("Зарплата адміна за вибраним джерелом"); row.amount=adminSalaryBaseForSource(adminTotals, source); row.masterAmount=FormatUtils::roundMoneyValue(row.amount * pm.percent / 100.0);
             pm.orders.append(row); pm.ordersCount=1; pm.worksTotal=row.amount; pm.accrued=row.masterAmount; pm.issued = issuedPayrollForMaster(issuedTotals, m); pm.toIssue = qMax(0.0, pm.accrued - pm.issued);
-            if (pm.accrued > 0.0 || pm.toIssue > 0.0) mastersOut.append(pm);
+            if (!employeeId.isEmpty() || pm.accrued > 0.0 || pm.toIssue > 0.0) mastersOut.append(pm);
             continue;
         }
         const auto orders=PayrollIdentityRead::read(db,m.id,df,dt,pm.percent,&failure,{},&payrollGraph);
@@ -338,7 +350,7 @@ QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& 
         pm.accrued=qMax(0.0,FormatUtils::roundMoneyValue(pm.accrued-sharedExpensesPerMaster));
         pm.issued = issuedPayrollForMaster(issuedTotals, m);
         pm.toIssue = qMax(0.0, pm.accrued - pm.issued);
-        if (pm.accrued > 0.0 || pm.toIssue > 0.0) mastersOut.append(pm);
+        if (!employeeId.isEmpty() || pm.accrued > 0.0 || pm.toIssue > 0.0) mastersOut.append(pm);
     }
     return mastersOut;
 }
