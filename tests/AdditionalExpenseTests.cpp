@@ -468,9 +468,12 @@ private slots:
         QVERIFY2(q.exec("INSERT INTO work_orders(number,order_uid,order_number,order_year,opened_at,status,plate,plate_norm,car,client,master_id) "
                         "VALUES(11,'parts-report-order',7,2026,'2026-01-01','open','','','Synthetic','','m1')"),qPrintable(q.lastError().text()));
         QVERIFY(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,name,store,ordered_at,qty,purchase_price,purchase_amount,price,amount,markup_percent,manual_markup_override) VALUES(21,11,'parts-report-order','parts-report-part','Synthetic part','Shop','2026-01-01',1,30,30,45,45,50,1)"));
+        QVERIFY(q.exec("UPDATE work_order_parts SET manufacturer='QA manufacturer', installed_at='2026-01-24' WHERE id=21"));
         PartsQueryService::invalidateCache();
         auto good=read(db.databaseName());QVERIFY2(good.error.isEmpty(),qPrintable(good.error));QCOMPARE(good.rows.size(),2);
         QCOMPARE(good.rows.last().purchase,QString("30"));
+        QVERIFY(good.rows.last().tooltip.contains(QStringLiteral("Виробник: QA manufacturer")));
+        QVERIFY(good.rows.last().tooltip.contains(QStringLiteral("Встановлено: 2026-01-24")));
         QVERIFY(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,name,store,ordered_at,qty,purchase_amount) VALUES "
                        "(22,11,'parts-report-order','group-other','Other part','Other shop','2026-01-02',3,41),"
                        "(23,11,'parts-report-order','group-same','Second part','Shop','2026-01-03',0.5,10.25)"));

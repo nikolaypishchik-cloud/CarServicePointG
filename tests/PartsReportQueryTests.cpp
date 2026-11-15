@@ -23,7 +23,8 @@ int main(int argc,char** argv) {
  sql("INSERT INTO router_work_order_parts VALUES(9,'2026-01-01',1,'uid','Shop','Part','A',30,30,1,45,50,1,1)");
  sql("INSERT INTO work_order_parts VALUES(9,1,'uid')");
  sql("INSERT INTO work_order_part_attachments VALUES(9,'INV','synthetic.pdf','2026-01-01')");
- check(PartsReportQuery::execute(db,&q,&error));check(q.next() && q.value(17).toString()=="INV");q.finish();
+ check(PartsReportQuery::execute(db,&q,&error));check(q.next() && q.value(17).toString()=="INV");
+ check(q.value("report_manufacturer").isNull() && q.value("report_installed_at").isNull());q.finish();
  sql("ALTER TABLE router_work_order_parts ADD COLUMN part_uid TEXT");
  sql("ALTER TABLE work_order_parts ADD COLUMN part_uid TEXT");
  sql("UPDATE router_work_order_parts SET part_uid='archived-part'");

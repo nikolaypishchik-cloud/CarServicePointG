@@ -271,6 +271,8 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 QString store;
                 QString partName;
                 QString partNumber;
+                QString manufacturer;
+                QString installedAt;
                 QString invoiceNumber;
                 QString invoicePath;
                 QString invoiceDate;
@@ -321,6 +323,8 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                     row.store = resolveStoreForReports(rawStore.isEmpty() ? QString::fromUtf8("(без магазину)") : rawStore, rawInvoiceNumber);
                     row.partName = q.value(6).toString();
                     row.partNumber = q.value(7).toString();
+                    row.manufacturer = q.value("report_manufacturer").toString().trimmed();
+                    row.installedAt = q.value("report_installed_at").toString().trimmed();
                     row.plate = parsePlateForUi(q.value(8).toString());
                     row.car = q.value(9).toString();
                     row.vin = q.value(10).toString();
@@ -408,6 +412,8 @@ PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const
                 out.client = FormatUtils::formatNumberSpaces(row.client, 0);
                 QStringList tip;
                 if (!row.partNumber.trimmed().isEmpty()) tip << QString::fromUtf8("OEM: %1").arg(row.partNumber.trimmed());
+                if (!row.manufacturer.isEmpty()) tip << QStringLiteral("Виробник: %1").arg(row.manufacturer);
+                if (!row.installedAt.isEmpty()) tip << QStringLiteral("Встановлено: %1").arg(row.installedAt);
                 if (!row.plate.trimmed().isEmpty()) tip << QString::fromUtf8("Номер авто: %1").arg(parsePlateForUi(row.plate));
                 if (!row.car.trimmed().isEmpty()) tip << QString::fromUtf8("Авто: %1").arg(row.car.trimmed());
                 if (!row.vin.trimmed().isEmpty()) tip << QString::fromUtf8("VIN: %1").arg(row.vin.trimmed());
