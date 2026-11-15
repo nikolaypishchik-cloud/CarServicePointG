@@ -57,6 +57,28 @@ class ProfileSnapshotTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual((restored / 'attachments/order-7' / name).read_bytes(), expected)
 
+    def test_empty_directories_restore_and_are_verified(self):
+        directory = self.profile / 'documents' / 'pending'
+        directory.mkdir(parents=True)
+        (self.profile / 'settings.ini').write_text('folder=' + directory.as_posix())
+        m.snapshot(self.profile, self.backup)
+        restored = self.base / 'restored'
+        m.restore(self.backup, restored)
+        self.assertTrue((restored / 'documents/pending').is_dir())
+        self.assertEqual((restored / 'settings.ini').read_text(), 'folder=' + (restored / 'documents/pending').as_posix())
+        (self.backup / 'files/documents/pending').rmdir()
+        with self.assertRaises(ValueError):
+            m.verify(self.backup)
+
+    def test_legacy_manifest_without_directories_restores_files(self):
+        m.snapshot(self.profile, self.backup)
+        path = self.backup / 'manifest.json'
+        data = json.loads(path.read_text(encoding='utf-8'))
+        data.pop('directories', None)
+        path.write_text(json.dumps(data), encoding='utf-8')
+        target = m.restore(self.backup, self.base / 'restored')
+        self.assertEqual(set(m.inventory(target)), set(m.inventory(self.profile)))
+
     def test_refuses_existing_destination(self):
         m.snapshot(self.profile,self.backup)
         with self.assertRaises(FileExistsError):m.restore(self.backup,self.profile)

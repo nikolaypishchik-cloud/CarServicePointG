@@ -39,12 +39,17 @@ def digest(path: Path) -> str:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
-def inventory(root: Path) -> dict[str, Path]:
+def inventory(root: Path, directories: set[str] | None = None) -> dict[str, Path]:
     root = checked(root)
     result = {}
-    for folder, dirs, files in os.walk(root, followlinks=False):
+    def raise_walk_error(error):
+        raise error
+
+    for folder, dirs, files in os.walk(root, onerror=raise_walk_error, followlinks=False):
         for name in dirs:
-            checked(Path(folder) / name)
+            directory = checked(Path(folder) / name)
+            if directories is not None:
+                directories.add(directory.relative_to(root).as_posix())
         for name in files:
             item = checked(Path(folder) / name)
             if not item.is_file():
@@ -107,7 +112,8 @@ def snapshot(profile_root, destination, *, _step=lambda phase: None):
     if not root.is_dir():
         raise ValueError('Profile directory is missing')
     target = new_target(Path(destination), root)
-    source = inventory(root)
+    directories = set()
+    source = inventory(root, directories)
     databases = {name for name, path in source.items() if not is_attachment(name) and database(path)}
     for name in source:
         if not is_attachment(name) and Path(name).suffix.lower() in {'.db', '.sqlite', '.sqlite3'} and name not in databases:
@@ -124,6 +130,8 @@ def snapshot(profile_root, destination, *, _step=lambda phase: None):
             guard.execute('BEGIN IMMEDIATE')
         before = {name: digest(path) for name, path in source.items() if name not in databases | sidecars}
         _step('locked')
+        for name in sorted(directories):
+            (stage / 'files' / name).mkdir()
         entries = []
         for name, path in sorted(source.items()):
             if name in sidecars:
@@ -153,7 +161,10 @@ def snapshot(profile_root, destination, *, _step=lambda phase: None):
             entries.append(dict(path=name, kind=kind, size=copy.stat().st_size,
                                 sha256=digest(copy), user_version=version))
             _step('copied')
-        current = inventory(root)
+        current_directories = set()
+        current = inventory(root, current_directories)
+        if current_directories != directories:
+            raise ValueError('Profile directory list changed during snapshot')
         if set(current) - sidecars != set(source) - sidecars:
             raise ValueError('Profile file list changed during snapshot')
         for name, expected in before.items():
@@ -161,7 +172,7 @@ def snapshot(profile_root, destination, *, _step=lambda phase: None):
                 raise ValueError(f'File changed during snapshot: {name}')
         manifest = dict(format='carservice-profile-v1', state='complete',
                         created_utc=datetime.now(timezone.utc).isoformat(), files=entries,
-                        source_root=str(root),
+                        source_root=str(root), directories=sorted(directories),
                         scope='Files beneath source_root; no external files or OS credential stores')
         write_json(stage / 'manifest.json', manifest)
         verify(stage)
@@ -176,13 +187,17 @@ def verify(snapshot_root):
     if manifest.get('format') != 'carservice-profile-v1' or manifest.get('state') != 'complete':
         raise ValueError('Incomplete or unsupported snapshot')
     seen = set()
-    for entry in manifest['files']:
-        name = entry['path']; relative = PurePosixPath(name)
+    def validate_name(name):
+        relative = PurePosixPath(name)
         if relative.as_posix() != name or relative.is_absolute() or not relative.parts or any(p in {'..', '.'} or ':' in p or '\\' in p for p in relative.parts):
             raise ValueError('Unsafe manifest path')
         if name.casefold() in seen:
             raise ValueError('Duplicate manifest path')
         seen.add(name.casefold())
+
+    for entry in manifest['files']:
+        name = entry['path']
+        validate_name(name)
         path = checked(root / 'files' / name)
         if not path.is_file() or path.stat().st_size != entry['size'] or digest(path) != entry['sha256']:
             raise ValueError(f'Hash/size verification failed: {name}')
@@ -191,8 +206,17 @@ def verify(snapshot_root):
                 raise ValueError('Schema version mismatch')
         elif entry['kind'] != 'file':
             raise ValueError('Unknown entry type')
-    if {name.casefold() for name in inventory(root / 'files')} != seen:
+    actual_directories = set()
+    if {name.casefold() for name in inventory(root / 'files', actual_directories)} != seen:
         raise ValueError('Unlisted/missing files in snapshot')
+    if 'directories' in manifest:
+        directories = manifest['directories']
+        if not isinstance(directories, list):
+            raise ValueError('Invalid directory inventory')
+        for name in directories:
+            validate_name(name)
+        if set(directories) != actual_directories:
+            raise ValueError('Unlisted/missing directories in snapshot')
     return manifest
 
 
@@ -322,6 +346,8 @@ def restore(snapshot_root, destination, *, _step=lambda phase: None):
     target = new_target(Path(destination), source)
     stage = target.with_name(target.name + '.partial-' + uuid.uuid4().hex)
     stage.mkdir()
+    for name in sorted(manifest.get('directories', [])):
+        (stage / name).mkdir()
     for entry in manifest['files']:
         copy = stage / entry['path']; copy.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / 'files' / entry['path'], copy)
