@@ -256,8 +256,15 @@ public:
             // Leave room for the native calendar arrow, frame and text padding.
             date->setFixedWidth(date->fontMetrics().horizontalAdvance("00.00.00")+44);
         }
-        for(auto* value:m_values)value->setStyleSheet(QString("background:transparent;border:none;font-size:%1pt;font-weight:bold;color:%2;").arg(tab==2?13:15).arg(light?"#111111":"#ffffff"));
-        if(tab==5)m_values[2]->setStyleSheet(QString("background:transparent;border:none;font-size:10pt;font-weight:normal;color:%1;").arg(light?"#111111":"#ffffff"));
+        if (tab == 5) {
+            setStyleSheet(styleSheet() + QStringLiteral(
+                "#reportMetric0 { background: #145957; }"
+                "#reportMetric1 { background: #734d14; }"
+                "#reportMetric2 { background: #554370; }"
+                "#reportMetric0 QLabel, #reportMetric1 QLabel, #reportMetric2 QLabel { color: white; }"));
+        }
+        for(auto* value:m_values)value->setStyleSheet(QString("background:transparent;border:none;font-size:%1pt;font-weight:bold;color:%2;").arg(tab==2?13:15).arg(light && tab!=5?"#111111":"#ffffff"));
+        if(tab==5)m_values[2]->setStyleSheet(QStringLiteral("background:transparent;border:none;font-size:10pt;font-weight:normal;color:white;"));
         m_actions->setVisible(tab==1);m_metrics->setVisible(tab!=1&&tab!=2&&tab!=3);m_searchTile->setVisible(tab==1||tab==2);
         m_parts->setVisible(tab==3);
         const QColor accent=light?QColor("#177a92"):QColor(tab==2?"#86bff1":"#8bdfee");

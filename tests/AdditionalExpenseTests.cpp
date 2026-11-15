@@ -915,6 +915,15 @@ private slots:
         page.refresh();
         QTRY_VERIFY_WITH_TIMEOUT(form->isEnabled(), 10000);
         QVERIFY(!stats->text().contains(QStringLiteral("Не вдалося прочитати витрати")));
+        auto* dashboard = page.findChild<QWidget*>("reportDashboard");
+        QVERIFY(dashboard);
+        QVERIFY(dashboard->styleSheet().contains("#145957"));
+        QVERIFY(form->findChild<QFrame*>("electricityPanel"));
+        QVERIFY(form->findChild<QFrame*>("otherExpensesPanel"));
+        const QString capture = qEnvironmentVariable("CS_EXPENSE_PALETTE_CAPTURE");
+        if (!capture.isEmpty()) QVERIFY(page.grab().save(capture));
+        tabs->setCurrentIndex(0);
+        QTRY_VERIFY(!dashboard->styleSheet().contains("#145957"));
     }
 
     void expenseSavePreservesHistoryAcrossLateFailure() {

@@ -3,6 +3,7 @@
 #include "core/services/settings/ReportsSettingsService.h"
 #include "ui/tabs/reports/ReportsUiSupport.h"
 
+#include <QFrame>
 #include <QGridLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -47,12 +48,19 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
     w.page->setAttribute(Qt::WA_StyledBackground, true);
     w.page->setStyleSheet(QString::fromUtf8(R"(
         #reportsExpensesPage {
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                        stop:0 rgba(156,170,186,0.12),
-                                        stop:0.52 rgba(172,186,202,0.18),
-                                        stop:1 rgba(188,202,218,0.24));
+            background: #142438;
             border: none;
         }
+        #reportsExpensesPage QLabel { color: #edf4fa; background: transparent; }
+        #reportsExpensesPage QFrame#electricityPanel,
+        #reportsExpensesPage QFrame#otherExpensesPanel {
+            background: #f8fafc; border: 1px solid #cad6df; border-radius: 8px;
+        }
+        #electricityPanel QLabel, #otherExpensesPanel QLabel { color: #203044; }
+        #reportsExpensesPage QPushButton#expenseSave {
+            background: #117477; color: white; border-radius: 5px; padding: 6px 16px;
+        }
+        #reportsExpensesPage QPushButton#expenseSave:disabled { background: #536775; }
     )"));
 
     auto* expRoot = new QVBoxLayout(w.page);
@@ -66,26 +74,13 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
     expTitle->setFont(expTitleFont);
     expRoot->addWidget(expTitle);
 
-    auto* grid = new QGridLayout();
-    grid->setHorizontalSpacing(12);
-    grid->setVerticalSpacing(8);
-    grid->setColumnStretch(0, 0);
+    auto* electricityPanel = new QFrame(w.page);
+    electricityPanel->setObjectName(QStringLiteral("electricityPanel"));
+    expRoot->addWidget(electricityPanel);
+    auto* grid = new QGridLayout(electricityPanel);
     grid->setColumnStretch(1, 1);
-    grid->setColumnMinimumWidth(1, 250);
-    grid->setColumnMinimumWidth(2, 20);
-    grid->setColumnStretch(3, 0);
     grid->setColumnStretch(4, 1);
-    grid->setColumnMinimumWidth(4, 170);
-
     int rr = 0;
-    auto* p1 = new QLabel(QString::fromUtf8("Період"), w.page);
-    grid->addWidget(p1, rr, 0);
-    auto* p2 = new QLabel(QString::fromUtf8("з:"), w.page);
-    grid->addWidget(p2, rr, 1, Qt::AlignLeft | Qt::AlignVCenter);
-    auto* p3 = new QLabel(QString::fromUtf8("по:"), w.page);
-    grid->addWidget(p3, rr, 3, Qt::AlignLeft | Qt::AlignVCenter);
-    ++rr;
-
     auto* elecHeader = new QLabel(QString::fromUtf8("Ел.енергія"), w.page);
     QFont secf = elecHeader->font();
     secf.setBold(true);
@@ -118,29 +113,37 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
     grid->addWidget(w.elecCostEdit, rr, 1);
     ++rr;
 
-    addExpenseRow(w.page, grid, rr, QString::fromUtf8("Витрати на миючі засоби"), w.cleaningEdit, w.cleaningNoteEdit);
-    addExpenseRow(w.page, grid, rr, QString::fromUtf8("Витрати на ПЗ OpenDataBot"), w.softwareEdit, w.softwareNoteEdit);
-    addExpenseRow(w.page, grid, rr, QString::fromUtf8("Опалення"), w.heatingEdit, w.heatingNoteEdit);
-    addExpenseRow(w.page, grid, rr, QString::fromUtf8("Амортизація"), w.amortizationEdit, w.amortizationNoteEdit);
-    addExpenseRow(w.page, grid, rr, QString::fromUtf8("Оренда"), w.rentEdit, w.rentNoteEdit);
-    addExpenseRow(w.page, grid, rr, QString::fromUtf8("Інші витрати"), w.otherEdit, w.otherNoteEdit);
+    auto* otherPanel = new QFrame(w.page);
+    otherPanel->setObjectName(QStringLiteral("otherExpensesPanel"));
+    expRoot->addWidget(otherPanel);
+    auto* expensesGrid = new QGridLayout(otherPanel);
+    expensesGrid->setColumnStretch(1, 1);
+    expensesGrid->setColumnStretch(4, 1);
+    auto* otherHeader = new QLabel(QString::fromUtf8("Інші витрати"), otherPanel);
+    otherHeader->setFont(secf);
+    expensesGrid->addWidget(otherHeader, 0, 0, 1, 5);
+    int expenseRow = 1;
+    addExpenseRow(otherPanel, expensesGrid, expenseRow, QString::fromUtf8("Витрати на миючі засоби"), w.cleaningEdit, w.cleaningNoteEdit);
+    addExpenseRow(otherPanel, expensesGrid, expenseRow, QString::fromUtf8("Витрати на ПЗ OpenDataBot"), w.softwareEdit, w.softwareNoteEdit);
+    addExpenseRow(otherPanel, expensesGrid, expenseRow, QString::fromUtf8("Опалення"), w.heatingEdit, w.heatingNoteEdit);
+    addExpenseRow(otherPanel, expensesGrid, expenseRow, QString::fromUtf8("Амортизація"), w.amortizationEdit, w.amortizationNoteEdit);
+    addExpenseRow(otherPanel, expensesGrid, expenseRow, QString::fromUtf8("Оренда"), w.rentEdit, w.rentNoteEdit);
+    addExpenseRow(otherPanel, expensesGrid, expenseRow, QString::fromUtf8("Інші витрати"), w.otherEdit, w.otherNoteEdit);
 
     auto* totalLabel = new QLabel(QString::fromUtf8("Всього витрат"), w.page);
     totalLabel->setFont(secf);
-    grid->addWidget(totalLabel, rr, 0);
+    auto* footer = new QHBoxLayout();
+    footer->addWidget(totalLabel);
     w.expensesTotalEdit = makeWordField();
     w.expensesTotalEdit->setReadOnly(true);
-    grid->addWidget(w.expensesTotalEdit, rr, 1);
-    ++rr;
-
-    expRoot->addLayout(grid);
-    auto* expBtns = new QHBoxLayout();
-    expBtns->addStretch(1);
+    footer->addWidget(w.expensesTotalEdit);
+    footer->addStretch(1);
     w.electricityPdfButton = new QPushButton(QString::fromUtf8("PDF ел.енергії"), w.page);
     w.expensesSaveButton = new QPushButton(QString::fromUtf8("Зберегти"), w.page);
-    expBtns->addWidget(w.electricityPdfButton);
-    expBtns->addWidget(w.expensesSaveButton);
-    expRoot->addLayout(expBtns);
+    w.expensesSaveButton->setObjectName(QStringLiteral("expenseSave"));
+    footer->addWidget(w.electricityPdfButton);
+    footer->addWidget(w.expensesSaveButton);
+    expRoot->addLayout(footer);
 
     return w;
 }
