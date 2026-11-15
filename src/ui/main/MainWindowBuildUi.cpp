@@ -4,9 +4,25 @@
 #include "ui/main/MainWindowModulePrelude.h"
 #include "ui/tabs/reports/PurchaseDebtsPage.h"
 #include <QToolButton>
+#include <QKeyEvent>
 #include <QPainter>
 
 namespace {
+class HeaderModuleButton final : public QToolButton {
+public:
+    using QToolButton::QToolButton;
+
+protected:
+    void keyPressEvent(QKeyEvent* event) override {
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            event->accept();
+            if (!event->isAutoRepeat()) click();
+            return;
+        }
+        QToolButton::keyPressEvent(event);
+    }
+};
+
 QIcon pendingHeaderIcon(bool exchangeRate)
 {
     QPixmap image(64, 64);
@@ -204,7 +220,8 @@ void MainWindow::buildUi()
     headerActions->setSpacing(8);
     headerActions->addStretch();
     auto makeModuleButton = [&](const QString& name, const QString& title, const QString& tip) {
-        auto* button = new QToolButton(m_topRightSpacer);
+        auto* button = new HeaderModuleButton(m_topRightSpacer);
+        button->setFocusPolicy(Qt::StrongFocus);
         button->setObjectName(name);
         button->setText(title);
         button->setAccessibleName(title);
@@ -214,6 +231,7 @@ void MainWindow::buildUi()
         button->setStyleSheet(QStringLiteral(
             "QToolButton { background: transparent; color: #edf5fa; padding: 0 4px; border: 1px solid transparent; }"
             "QToolButton:hover, QToolButton:focus { border-color: #81cad5; }"
+            "QToolButton:pressed { background: #294854; border-color: #adebf2; }"
             "QToolButton:disabled { color: #aab9c5; }"));
         button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
         button->setIconSize(QSize(22, 22));
@@ -244,9 +262,10 @@ void MainWindow::buildUi()
         QPainter painter(&expensesImage);
         painter.setRenderHint(QPainter::Antialiasing);
         painter.setPen(QPen(QColor("#f7ac65"), 3.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.drawRoundedRect(QRectF(12, 5, 40, 54), 4, 4);
-        for (int y : {18, 29, 40}) painter.drawLine(21, y, 43, y);
-        painter.drawLine(33, 50, 43, 50);
+        painter.drawPolygon(QPolygonF{QPointF(5, 20), QPointF(32, 7),
+                                      QPointF(59, 20), QPointF(32, 33)});
+        for (int y : {31, 42})
+            painter.drawPolyline(QPolygonF{QPointF(5, y), QPointF(32, y + 13), QPointF(59, y)});
     }
     m_headerExpenses->setIcon(QIcon(expensesImage));
     connect(m_headerExpenses, &QAbstractButton::clicked, this, &MainWindow::openHeaderExpenses);

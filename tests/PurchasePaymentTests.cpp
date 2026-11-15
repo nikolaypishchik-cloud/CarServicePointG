@@ -4457,7 +4457,9 @@ private slots:
                     && pages->currentWidget() == origin;
                 dialog->reject();
             });
-            button->click();
+            button->setFocus();
+            const auto key = index == 1 ? Qt::Key_Return : (index == 3 ? Qt::Key_Enter : Qt::Key_Space);
+            QTest::keyClick(button, key);
             QVERIFY(opened);
             QCOMPARE(pages->currentWidget(), origin);
         }
