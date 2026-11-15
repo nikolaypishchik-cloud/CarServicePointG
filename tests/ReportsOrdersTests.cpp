@@ -63,6 +63,10 @@
 #include "core/services/ReportsDataLoader.h"
 #include "core/services/orders/OrderDialogPrintQueryService.h"
 #include "core/services/HistoryQueryService.h"
+#if CS_HAS_QT_PDF
+#include <QPdfDocument>
+#include <QPdfSelection>
+#endif
 #include "core/services/orders/CurrentOrdersQueryService.h"
 #include "core/services/OrderStoragePolicyService.h"
 #include "core/services/orders/PartRowPayloadBuilderService.h"
@@ -6845,10 +6849,18 @@ void ReportsOrdersTests::partsPdfLayout()
                     }
                 });
                 paymentDriver.start(50);
-                dialog->findChild<QPushButton*>("reportPayOrderParts")->click();
+                auto* payOrder = dialog->findChild<QPushButton*>("reportPayOrderParts");
+                auto* payItem = dialog->findChild<QPushButton*>("reportPayPart");
+                const auto orderGeometry = payOrder->geometry();
+                const auto itemGeometry = payItem->geometry();
+                checked = checked && payOrder->isEnabled() && payItem->isEnabled();
+                payOrder->click();
                 paymentDriver.stop();
                 qInfo() << "Payment button enabled after payment" << dialog->findChild<QPushButton*>("reportPayOrderParts")->isEnabled();
-                checked = checked && !dialog->findChild<QPushButton*>("reportPayOrderParts")->isEnabled();
+                checked = checked && !payOrder->isEnabled() && !payItem->isEnabled()
+                    && orderGeometry == payOrder->geometry() && itemGeometry == payItem->geometry();
+                const QString paidCapture = qEnvironmentVariable("CS_REPORT_PAID_PREVIEW");
+                if (!paidCapture.isEmpty()) checked = checked && dialog->grab().save(paidCapture);
                 dialog->reject();
             });
             watchdog.start(); table->doubleClicked(model->index(0,1)); watchdog.stop();
@@ -6856,6 +6868,25 @@ void ReportsOrdersTests::partsPdfLayout()
             QVERIFY(q.exec("SELECT paid FROM work_order_parts WHERE id=1")); QVERIFY(q.next()); QCOMPARE(q.value(0).toInt(), 1);
             QVERIFY(q.exec("SELECT status FROM work_orders WHERE number=7")); QVERIFY(q.next()); QCOMPARE(q.value(0).toString(), QString("closed"));
         }
+        // UI-07 reference totals must be printed together with the correct labels.
+        QVERIFY2(q.exec("INSERT INTO work_orders(number,order_number,order_uid,order_year,opened_at,status,plate,plate_norm,car,client,master_id) "
+                       "VALUES(8,8,'ui07-reference',2026,'2026-09-01','open','','','Control','Test','pdf-master')"), qPrintable(q.lastError().text()));
+        QVERIFY2(q.exec("INSERT INTO work_order_parts(order_number,order_uid,name,qty,price,amount,purchase_price,purchase_amount) "
+                       "VALUES(8,'ui07-reference','Part',1,23700,23700,18762,18762)"), qPrintable(q.lastError().text()));
+        QVERIFY2(q.exec("INSERT INTO work_order_services(order_number,order_uid,title,qty,price,amount) "
+                       "VALUES(8,'ui07-reference','Work',1,10800,10800)"), qPrintable(q.lastError().text()));
+        OrderDialog reference(nullptr, 8);
+        reference.setReadOnly(true);
+        const auto file = qEnvironmentVariable("CS_UI07_REFERENCE_PDF", dir.filePath("reference-summary.pdf"));
+        QString exportError;
+        QVERIFY2(reference.exportPartsReportToFile(file, &exportError), qPrintable(exportError));
+#if CS_HAS_QT_PDF
+        QPdfDocument report;
+        QCOMPARE(report.load(file), QPdfDocument::Error::None);
+        QString text = report.getAllText(report.pageCount()-1).text();
+        text.remove(QRegularExpression(QStringLiteral("\\s+")));
+        QVERIFY2(text.contains(QStringLiteral("Закупка18762Націнка4938Продаж23700Роботи10800Разом34500")), qPrintable(text));
+#endif
         db.close();
     }
     QSqlDatabase::removeDatabase(connection);

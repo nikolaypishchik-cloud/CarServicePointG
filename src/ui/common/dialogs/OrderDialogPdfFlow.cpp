@@ -749,10 +749,20 @@ void OrderDialog::exportPdf(const QString& outFile, bool partsReport)
 
         const double discountValue = FormatUtils::discountAmount(m_discount->value(), m_discountMode->currentData().toString(), worksTotalValue);
         const double totalValue = FormatUtils::roundMoneyValue(qMax(0.0, worksTotalValue + partsTotalValue - discountValue));
-        drawSummaryRow(0, partsReport ? QString::fromUtf8("Закупка") : QString::fromUtf8("Роботи"),
-                       FormatUtils::pdfMoney(partsReport ? purchaseTotalVal - materialPurchaseTotal : worksTotalValue));
-        drawSummaryRow(1, partsReport ? QString::fromUtf8("Продаж") : QString::fromUtf8("Запчастини"),
-                       FormatUtils::pdfMoney(partsTotalValue - materialSaleTotal));
+        const double partsSale = partsTotalValue - materialSaleTotal;
+        if (partsReport) {
+            const double partsPurchase = purchaseTotalVal - materialPurchaseTotal;
+            drawSummaryRow(0, tr("Закупка"), FormatUtils::pdfMoney(partsPurchase));
+            drawSummaryRow(1, tr("Націнка"), FormatUtils::pdfMoney(partsSale - partsPurchase));
+            drawSummaryRow(2, tr("Продаж"), FormatUtils::pdfMoney(partsSale), true);
+            drawSummaryRow(3, tr("Роботи"), FormatUtils::pdfMoney(worksTotalValue), true);
+            drawSummaryRow(4, tr("Разом"), FormatUtils::pdfMoney(partsSale + worksTotalValue), true);
+        } else {
+            drawSummaryRow(0, tr("Роботи"), FormatUtils::pdfMoney(worksTotalValue));
+            drawSummaryRow(1, tr("Запчастини"), FormatUtils::pdfMoney(partsSale));
+            drawSummaryRow(2, tr("Знижка"), FormatUtils::pdfMoney(discountValue));
+            drawSummaryRow(3, tr("РАЗОМ"), FormatUtils::pdfMoney(totalValue), true);
+        }
         p.save();
         p.setPen(thinPen(QColor(178, 178, 178)));
         const int summaryLineRaisePx = qMax(1, qRound((2.0 * pdf.logicalDpiY()) / 25.4));
@@ -760,12 +770,7 @@ void OrderDialog::exportPdf(const QString& outFile, bool partsReport)
                                                                                : 18 + 3 * summaryRowStep - 3);
         p.drawLine(summaryRect.left() + 18, summaryLineY, summaryRect.right() - 18, summaryLineY);
         p.restore();
-        if (!partsReport) drawSummaryRow(2, QString::fromUtf8("Знижка"), FormatUtils::pdfMoney(discountValue));
-        drawSummaryRow(partsReport ? 2 : 3, partsReport ? QString::fromUtf8("НАЦІНКА") : QString::fromUtf8("РАЗОМ"),
-                       FormatUtils::pdfMoney(partsReport ? partsTotalValue - materialSaleTotal - purchaseTotalVal + materialPurchaseTotal : totalValue), true, 13);
-
         if (partsReport) {
-            drawSummaryRow(3, QString::fromUtf8("Роботи"), FormatUtils::pdfMoney(worksTotalValue), true);
             if (hasMaterials) {
                 const QRect materialSummary(summaryRect.left(), summaryRect.top() + 231, summaryW, 145);
                 drawBox(materialSummary, QColor(252, 252, 252), QColor(158, 158, 158));

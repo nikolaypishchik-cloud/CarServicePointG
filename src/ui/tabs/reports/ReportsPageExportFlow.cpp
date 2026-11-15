@@ -186,6 +186,13 @@ void ReportsPage::previewOrderReport()
     QDialog dialog(this); dialog.setObjectName("orderReportPreviewDialog");
     const auto orderTitle=tr("Наряд №%1").arg(m_ordersModel->cellText(m_ordersTable->currentIndex().row(), 1));
     dialog.setWindowTitle(orderTitle);
+    dialog.setStyleSheet(QStringLiteral(
+        "QDialog#orderReportPreviewDialog > QPushButton {color:#f1f5f7;border:1px solid #8094a0;border-radius:6px;"
+        "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #5b6a75,stop:0.42 #394851,stop:0.49 #283741,stop:0.51 #202c35,stop:1 #101920);}"
+        "QDialog#orderReportPreviewDialog > QPushButton:hover,QDialog#orderReportPreviewDialog > QPushButton:focus {border-color:#80dbe7;}"
+        "QDialog#orderReportPreviewDialog > QPushButton:pressed {background:#203c48;}"
+        "QDialog#orderReportPreviewDialog > QPushButton:disabled {background:#343c43;color:#919aa2;border-color:#566168;}"));
+
 #ifdef Q_OS_WIN
     // Qt's Windows decoration appends applicationDisplayName; this preview uses only its report title.
     const auto syncNativeTitle = [&dialog] {
