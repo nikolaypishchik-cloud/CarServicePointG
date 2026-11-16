@@ -117,6 +117,41 @@ private slots:
             QCOMPARE(open.priorCents,0);
         }
     }
+    void journalBalancesCarryBetweenMonths() {
+        QString error;
+        QVERIFY2(OrderClosureJournal::ensureSchema(db,&error),qPrintable(error));
+        QSqlQuery q(db);
+        const QJsonObject order{{"order_uid","o1"},{"closed_at","2026-11-02T12:00:00+02:00"}};
+        const QJsonObject response{{"order_uid","o1"},{"order",order},{"total_cents",50000}};
+        q.prepare("INSERT INTO order_closure_commands VALUES('close1','o1','{}',?,'applied')");
+        q.addBindValue(QString::fromUtf8(QJsonDocument(response).toJson()));
+        QVERIFY(q.exec());
+        QVERIFY(q.exec("INSERT INTO client_payments VALUES "
+                       "('p1','r1','o1',10000,'cash','2026-10-30','a',1),"
+                       "('p2','r2','o1',20000,'card','2026-11-03','a',2),"
+                       "('p3','r3','o2',90000,'cash','2026-11-03','a',3)"));
+        QVERIFY(q.exec("PRAGMA query_only=1"));
+        const auto month=[&](int m) {
+            QDate day(2026,m,1);
+            return CrmFinancialService::readOrderJournal(db,"o1",day,day.addMonths(1).addDays(-1));
+        };
+        const auto october=month(10),november=month(11),december=month(12);
+        QVERIFY2(october.error.isEmpty(),qPrintable(october.error));
+        QVERIFY2(november.error.isEmpty(),qPrintable(november.error));
+        QVERIFY2(december.error.isEmpty(),qPrintable(december.error));
+        QCOMPARE(october.opening,0); QCOMPARE(october.charged,0); QCOMPARE(october.paid,10000);
+        QCOMPARE(october.closing,-10000);
+        QCOMPARE(november.opening,october.closing);
+        QCOMPARE(november.charged,50000); QCOMPARE(november.paid,20000);
+        QCOMPARE(november.entries.size(),2);
+        QCOMPARE(november.entries[0].sourceUid,QStringLiteral("close1"));
+        QCOMPARE(november.entries[0].balance,40000);
+        QCOMPARE(november.entries[1].sourceUid,QStringLiteral("p2"));
+        QCOMPARE(november.entries[1].balance,20000);
+        QCOMPARE(november.closing,20000);
+        QCOMPARE(december.opening,november.closing); QCOMPARE(december.closing,december.opening);
+        QVERIFY(december.entries.isEmpty());
+    }
     void payments_data(){QTest::addColumn<qint64>("amount");QTest::newRow("none")<<qint64(-1);QTest::newRow("partial")<<qint64(200000);QTest::newRow("full")<<qint64(500000);}
     void payments() {
         QFETCH(qint64,amount);const auto before=suppliers(db);const auto c=command(db,"o1",amount);

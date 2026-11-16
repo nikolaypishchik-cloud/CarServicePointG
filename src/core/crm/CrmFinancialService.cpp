@@ -42,6 +42,46 @@ ClosureCharge readClosureCharge(QSqlDatabase db, const QString& uid, QDate first
     else if (result.closedOn<=lastDay) result.periodCents=cents;
     return result;
 }
+OrderJournal readOrderJournal(QSqlDatabase db, const QString& uid, QDate firstDay, QDate lastDay) {
+    const auto fail=[](const QString& error) { OrderJournal failed; failed.error=error; return failed; };
+    const auto savepoint="order_journal_"+QUuid::createUuid().toString(QUuid::Id128);
+    QSqlQuery boundary(db);
+    if (!db.isOpen() || !boundary.exec("SAVEPOINT "+savepoint))
+        return fail(db.isOpen()?boundary.lastError().text():QStringLiteral("База даних недоступна."));
+    auto cleanup=qScopeGuard([&] { QSqlQuery q(db); q.exec("ROLLBACK TO "+savepoint); q.exec("RELEASE "+savepoint); });
+    const auto charge=readClosureCharge(db,uid,firstDay,lastDay);
+    if (!charge.error.isEmpty()) return fail(charge.error);
+    const auto receipts=ClientReceiptReader::readPeriod(db,uid,firstDay,lastDay);
+    if (!receipts.error.isEmpty()) return fail(receipts.error);
+    OrderJournal result;
+    result.closureRecorded=!charge.requestUid.isEmpty();
+    result.receiptsAvailable=receipts.available;
+    result.opening=charge.priorCents-receipts.receivedBefore;
+    result.charged=charge.periodCents;
+    for (const auto& payment:receipts.payments)
+        result.entries.append({payment.paidOn,payment.uid,true,payment.cents,0});
+    if (charge.closedOn>=firstDay && charge.closedOn<=lastDay) {
+        auto it=result.entries.begin();
+        while (it!=result.entries.end() && it->day<charge.closedOn) ++it;
+        result.entries.insert(it,{charge.closedOn,charge.requestUid,false,charge.periodCents,0});
+    }
+    result.closing=result.opening;
+    for (auto& entry:result.entries) {
+        const auto balance=ExactMoney::sum({result.closing,entry.payment?-entry.cents:entry.cents});
+        const auto* next=std::get_if<ExactMoney::Cents>(&balance);
+        if (!next) return fail(QStringLiteral("Переповнення залишку виписки."));
+        result.closing=entry.balance=*next;
+        if (entry.payment) {
+            const auto paid=ExactMoney::sum({result.paid,entry.cents});
+            const auto* total=std::get_if<ExactMoney::Cents>(&paid);
+            if (!total) return fail(QStringLiteral("Переповнення підсумку оплат."));
+            result.paid=*total;
+        }
+    }
+    if (!boundary.exec("RELEASE "+savepoint)) return fail(boundary.lastError().text());
+    cleanup.dismiss();
+    return result;
+}
 QString money(qint64 cents) {
     return ClientReceiptReader::money(cents);
 }

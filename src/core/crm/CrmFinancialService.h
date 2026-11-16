@@ -20,6 +20,20 @@ struct ClosureCharge {
 };
 // An empty request UID means the journal has no applied closure for this order.
 ClosureCharge readClosureCharge(QSqlDatabase db, const QString& uid, QDate firstDay, QDate lastDay);
+struct JournalEntry {
+    QDate day;
+    QString sourceUid;
+    bool payment = false;
+    qint64 cents = 0;
+    qint64 balance = 0;
+};
+struct OrderJournal {
+    QList<JournalEntry> entries;
+    qint64 opening = 0, charged = 0, paid = 0, closing = 0;
+    bool closureRecorded = false, receiptsAvailable = false;
+    QString error;
+};
+OrderJournal readOrderJournal(QSqlDatabase db, const QString& uid, QDate firstDay, QDate lastDay);
 struct Snapshot {
     QList<Order> orders;
     qint64 totalCents = 0, receivedCents = 0, outstandingCents = 0, overpaidCents = 0;
