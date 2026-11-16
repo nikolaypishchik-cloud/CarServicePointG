@@ -152,6 +152,32 @@ private slots:
         QCOMPARE(december.opening,november.closing); QCOMPARE(december.closing,december.opening);
         QVERIFY(december.entries.isEmpty());
     }
+    void clientJournalFiltersAndMergesOrders() {
+        QString error;
+        QVERIFY2(OrderClosureJournal::ensureSchema(db,&error),qPrintable(error));
+        QSqlQuery q(db);
+        for (const auto& column:{"client_uid TEXT","vehicle_uid TEXT","car TEXT","order_number INTEGER"})
+            QVERIFY(q.exec("ALTER TABLE work_orders ADD COLUMN "+QString::fromLatin1(column)));
+        QVERIFY(q.exec("UPDATE work_orders SET client_uid='A',vehicle_uid=order_uid,order_number=42"));
+        QVERIFY(q.exec("INSERT INTO work_orders(number,order_uid,client_uid,vehicle_uid,status) VALUES(3,'foreign','B','o2','open')"));
+        QVERIFY(q.exec("UPDATE work_orders SET status='closed' WHERE order_uid='o2'"));
+        QVERIFY(q.exec("INSERT INTO client_payments VALUES('p1','r1','o2',1000,'cash','2026-10-31','a',1),"
+                       "('p2','r2','o2',2000,'card','2026-11-03','a',2),('p3','r3','o1',3000,'card','2026-11-02','a',3),"
+                       "('p4','r4','foreign',9000,'cash','2026-11-01','a',4)"));
+        QVERIFY(q.exec("PRAGMA query_only=1"));
+        const QDate from(2026,11,1), through(2026,11,30);
+        const auto both=CrmFinancialService::readClientJournal(db,"A",{},from,through);
+        QVERIFY2(both.error.isEmpty(),qPrintable(both.error));
+        QCOMPARE(both.opening,-1000); QCOMPARE(both.paid,5000); QCOMPARE(both.closing,-6000);
+        QCOMPARE(both.unverifiedClosures,QList<int>{42});
+        QCOMPARE(both.entries.size(),2);
+        QCOMPARE(both.entries[0].orderUid,QStringLiteral("o1")); QCOMPARE(both.entries[0].event.balance,-4000);
+        QCOMPARE(both.entries[1].orderUid,QStringLiteral("o2")); QCOMPARE(both.entries[1].event.balance,-6000);
+        const auto one=CrmFinancialService::readClientJournal(db,"A","o2",from,through);
+        QVERIFY2(one.error.isEmpty(),qPrintable(one.error));
+        QCOMPARE(one.entries.size(),1); QCOMPARE(one.entries[0].event.sourceUid,QStringLiteral("p2"));
+        QCOMPARE(one.closing,-3000);
+    }
     void payments_data(){QTest::addColumn<qint64>("amount");QTest::newRow("none")<<qint64(-1);QTest::newRow("partial")<<qint64(200000);QTest::newRow("full")<<qint64(500000);}
     void payments() {
         QFETCH(qint64,amount);const auto before=suppliers(db);const auto c=command(db,"o1",amount);

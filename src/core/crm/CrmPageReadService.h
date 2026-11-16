@@ -36,6 +36,7 @@ struct IssueSource {
     QString error;
 };
 IssueSource statementIssueSource(const QString& clientUid, const QString& orderUid, const QString& partUid, qint64 issueId);
+CrmFinancialService::ClientJournal statementFinances(const QString& clientUid, const QString& vehicleUid, QDate from, QDate through);
 Rows statementVehicles(const QString& clientUid, QString* error);
 bool statementDecisions(const QString& clientUid, const QString& vehicleUid, QDate from, QDate through, QVariantList& rows, QString* error);
 ClientDetails details(const QString& uid);

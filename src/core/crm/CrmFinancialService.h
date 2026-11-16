@@ -34,6 +34,18 @@ struct OrderJournal {
     QString error;
 };
 OrderJournal readOrderJournal(QSqlDatabase db, const QString& uid, QDate firstDay, QDate lastDay);
+struct ClientEntry {
+    JournalEntry event;
+    QString orderUid, vehicleUid, car;
+    int orderNumber = 0;
+};
+struct ClientJournal {
+    QList<ClientEntry> entries;
+    qint64 opening = 0, charged = 0, paid = 0, closing = 0;
+    QList<int> unverifiedClosures;
+    QString error;
+};
+ClientJournal readClientJournal(QSqlDatabase db, const QString& clientUid, const QString& vehicleUid, QDate from, QDate through);
 struct Snapshot {
     QList<Order> orders;
     qint64 totalCents = 0, receivedCents = 0, outstandingCents = 0, overpaidCents = 0;

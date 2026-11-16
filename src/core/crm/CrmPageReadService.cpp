@@ -203,6 +203,9 @@ IssueSource statementIssueSource(const QString& clientUid, const QString& orderU
     else if (result.issue.isEmpty()) result.error=QStringLiteral("Первинну видачу або її зв’язок із позицією не підтверджено.");
     return result;
 }
+CrmFinancialService::ClientJournal statementFinances(const QString& clientUid, const QString& vehicleUid, QDate from, QDate through) {
+    return CrmFinancialService::readClientJournal(Database::db(),clientUid,vehicleUid,from,through);
+}
 Rows statementVehicles(const QString& clientUid, QString* error) {
     QSqlQuery query(Database::db());
     query.prepare("SELECT vehicle_uid, TRIM(brand || ' ' || model),plate FROM crm_vehicles WHERE client_uid=? ORDER BY brand,model,plate,vehicle_uid");

@@ -178,4 +178,18 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     QVERIFY(!CrmPageReadService::statementIssueSource("other","order-a","part-81",11).error.isEmpty());
     QVERIFY(!CrmPageReadService::statementIssueSource("client-a","order-a","part-82",11).error.isEmpty());
     QVERIFY(q.exec("PRAGMA query_only=OFF"));
+    QVERIFY(q.exec("CREATE TABLE client_payments(payment_uid TEXT,order_uid TEXT,paid_on TEXT,recorded_ms INTEGER,method TEXT,amount_cents INTEGER)"));
+    q.prepare("INSERT INTO client_payments VALUES('receiptx','order-a',?,1,'cash',12500)");
+    q.addBindValue(day.toString(Qt::ISODate));
+    QVERIFY(q.exec());
+    auto* financial=dialog->findChild<QTableWidget*>("statementFinances");
+    QVERIFY(financial);
+    tabs->setCurrentWidget(financial);
+    generate->click();
+    QCOMPARE(financial->rowCount(),1);
+    QCOMPARE(financial->item(0,1)->data(Qt::UserRole).toString(),QStringLiteral("order-a"));
+    QCOMPARE(financial->item(0,3)->data(Qt::UserRole).toString(),QStringLiteral("receiptx"));
+    QCOMPARE(financial->item(0,5)->text(),QStringLiteral("125,00 грн"));
+    QCOMPARE(financial->item(0,6)->text(),QStringLiteral("-125,00 грн"));
+    QVERIFY(pdf->isEnabled());
 }

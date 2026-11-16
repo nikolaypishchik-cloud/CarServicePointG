@@ -120,8 +120,13 @@ void MainWindow::openHeaderStatements()
     layout->addWidget(generate);
     auto* tabs = new QTabWidget(dialog);
     layout->addWidget(tabs);
-    tabs->addTab(new QWidget(tabs),tr("Розрахунки"));
-    tabs->setTabEnabled(0,false);
+    auto* finances = new QTableWidget(0,7,tabs);
+    finances->setObjectName("statementFinances");
+    finances->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    finances->setSelectionBehavior(QAbstractItemView::SelectRows);
+    finances->setSelectionMode(QAbstractItemView::SingleSelection);
+    finances->setHorizontalHeaderLabels({tr("Дата"),tr("Наряд №"),tr("Автомобіль"),tr("Операція"),tr("Нараховано"),tr("Сплачено"),tr("Залишок")});
+    tabs->addTab(finances,tr("Розрахунки"));
     auto* issues = new QTableWidget(0,10,tabs);
     tabs->addTab(issues,tr("Запчастини"));
     issues->setHorizontalHeaderLabels({tr("Дата події"),tr("Запчастина"),tr("Кількість, шт."),tr("Виконавець"),
@@ -140,6 +145,7 @@ void MainWindow::openHeaderStatements()
     table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->horizontalHeader()->setStretchLastSection(true);
     auto* message = new QLabel(dialog);
+    message->setWordWrap(true);
     layout->addWidget(message);
     auto* pdf = new QPushButton(tr("PDF"),dialog);
     layout->addWidget(pdf);
@@ -149,6 +155,10 @@ void MainWindow::openHeaderStatements()
         const auto context = tr("Клієнт: %1 • Автомобіль: %2 • Період: %3 — %4")
             .arg(client->currentText(),car->currentText(),from->date().toString("dd.MM.yyyy"),through->date().toString("dd.MM.yyyy"));
         const bool parts = tabs->currentWidget()==issues;
+        if (tabs->currentWidget()==finances) {
+            previewStatement(dialog,tr("Виписка — розрахунки"),context+" • "+message->text(),*finances);
+            return;
+        }
         previewStatement(dialog,parts?tr("Виписка — рух запчастин"):tr("Виписка — погодження"),context,parts?*issues:*table);
     });
     connect(generate,&QPushButton::clicked,dialog,[=] {
@@ -156,6 +166,31 @@ void MainWindow::openHeaderStatements()
         table->setRowCount(0);
         if (!canAccessPage(9) || client->currentIndex()<0) return;
         QString error;
+        if (tabs->currentWidget()==finances) {
+            finances->setRowCount(0);
+            const auto journal=CrmPageReadService::statementFinances(client->currentData().toString(),
+                car->currentData().toString(),from->date(),through->date());
+            if (!journal.error.isEmpty()) { message->setText(journal.error); return; }
+            const auto money=CrmFinancialService::money;
+            for (const auto& entry:journal.entries) {
+                const int row=finances->rowCount();
+                finances->insertRow(row);
+                const auto& event=entry.event;
+                const QStringList cells={event.day.toString("dd.MM.yyyy"),QString::number(entry.orderNumber),entry.car,
+                    event.payment?tr("Оплата"):tr("Закриття наряду"),event.payment?QString():money(event.cents),
+                    event.payment?money(event.cents):QString(),money(event.balance)};
+                for (int c=0;c<cells.size();++c) finances->setItem(row,c,new QTableWidgetItem(cells[c]));
+                finances->item(row,1)->setData(Qt::UserRole,entry.orderUid);
+                finances->item(row,3)->setData(Qt::UserRole,event.sourceUid);
+            }
+            QString totals=tr("За журналом • На початок %1 • Нараховано %2 • Сплачено %3 • На кінець %4")
+                .arg(money(journal.opening),money(journal.charged),money(journal.paid),money(journal.closing));
+            if (!journal.unverifiedClosures.isEmpty())
+                totals+=tr(" • Потребують звірки: закритих нарядів без підтвердженого нарахування — %1.").arg(journal.unverifiedClosures.size());
+            message->setText(totals);
+            pdf->setEnabled(true);
+            return;
+        }
         if (tabs->currentWidget()==issues) {
             issues->setRowCount(0);
             const auto events = CrmPageReadService::statementPartHistory(client->currentData().toString(),
@@ -208,10 +243,13 @@ void MainWindow::openHeaderStatements()
     connect(issues,&QTableWidget::itemSelectionChanged,dialog,[=] {
         openOrder->setEnabled(!issues->selectedItems().isEmpty());
     });
+    connect(finances,&QTableWidget::itemSelectionChanged,dialog,[=] {
+        openOrder->setEnabled(!finances->selectedItems().isEmpty());
+    });
     auto showOrder = [=] {
-        auto* active = tabs->currentWidget()==issues?issues:table;
+        auto* active = qobject_cast<QTableWidget*>(tabs->currentWidget());
         if (!canAccessPage(9) || active->selectedItems().isEmpty()) return;
-        const auto* source = active->item(active->currentRow(),4);
+        const auto* source = active->item(active->currentRow(),active==finances?1:4);
         if (!source) return;
         QString error;
         const auto order = CrmPageReadService::statementOrder(client->currentData().toString(),
@@ -239,6 +277,7 @@ void MainWindow::openHeaderStatements()
         card->open();
     };
     connect(openOrder,&QPushButton::clicked,dialog,showOrder);
+    connect(finances,&QTableWidget::cellActivated,dialog,showOrder);
     connect(table,&QTableWidget::cellActivated,dialog,showOrder);
     auto* sourceButton = new QPushButton(tr("Первинна видача"),dialog);
     layout->addWidget(sourceButton);
@@ -291,7 +330,7 @@ void MainWindow::openHeaderStatements()
         card->open();
     });
     connect(issues,&QTableWidget::cellActivated,dialog,showOrder);
-    auto invalidate = [=] { pdf->setEnabled(false); table->setRowCount(0); issues->setRowCount(0); openOrder->setEnabled(false); message->clear(); };
+    auto invalidate = [=] { pdf->setEnabled(false); finances->setRowCount(0); table->setRowCount(0); issues->setRowCount(0); openOrder->setEnabled(false); message->clear(); };
     connect(tabs,&QTabWidget::currentChanged,dialog,invalidate);
     connect(car,&QComboBox::currentIndexChanged,dialog,invalidate);
     connect(from,&QDateEdit::dateChanged,dialog,invalidate);
