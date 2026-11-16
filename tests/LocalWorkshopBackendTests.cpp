@@ -17,6 +17,7 @@
 #include "infrastructure/db/sqlite/Db.h"
 #include "ui/tabs/cloudsync/CloudSyncPage.h"
 #include "core/services/orders/LocalWorkshopBackend.h"
+#include "core/crm/CrmFinancialService.h"
 #include "core/services/orders/ClientReceiptReader.h"
 #include "core/services/orders/OrderClosureJournal.h"
 #include "core/services/orders/BaySnapshot.h"
@@ -91,6 +92,31 @@ private slots:
         QCOMPARE(result.payments[1].uid,QStringLiteral("p2"));
         QCOMPARE(result.payments[0].cents+result.payments[1].cents,400);
     }
+    void closureChargeUsesKyivClosureDate() {
+        QString error;
+        QVERIFY2(OrderClosureJournal::ensureSchema(db,&error),qPrintable(error));
+        QSqlQuery query(db);
+        query.prepare("INSERT INTO order_closure_commands VALUES(?,?,?,?,'applied')");
+        const QJsonObject order{{"order_uid","o1"},{"opened_at","2026-10-12"},{"closed_at","2026-10-31T22:30:00Z"}};
+        const QJsonObject response{{"order_uid","o1"},{"order",order},{"total_cents",37505}};
+        query.addBindValue("c1"); query.addBindValue("o1"); query.addBindValue("{}");
+        query.addBindValue(QString::fromUtf8(QJsonDocument(response).toJson()));
+        QVERIFY2(query.exec(),qPrintable(query.lastError().text()));
+        QVERIFY(query.exec("PRAGMA query_only=1"));
+        for (int month : {10,11,12}) {
+            const QDate start(2026,month,1);
+            const auto result=CrmFinancialService::readClosureCharge(db,"o1",start,start.addMonths(1).addDays(-1));
+            QVERIFY2(result.error.isEmpty(),qPrintable(result.error));
+            QCOMPARE(result.requestUid,QStringLiteral("c1"));
+            QCOMPARE(result.closedOn,QDate(2026,11,1));
+            QCOMPARE(result.priorCents,month==12?37505:0);
+            QCOMPARE(result.periodCents,month==11?37505:0);
+            const auto open=CrmFinancialService::readClosureCharge(db,"o2",start,start.addMonths(1).addDays(-1));
+            QVERIFY(open.error.isEmpty() && open.requestUid.isEmpty());
+            QCOMPARE(open.periodCents,0);
+            QCOMPARE(open.priorCents,0);
+        }
+    }
     void payments_data(){QTest::addColumn<qint64>("amount");QTest::newRow("none")<<qint64(-1);QTest::newRow("partial")<<qint64(200000);QTest::newRow("full")<<qint64(500000);}
     void payments() {
         QFETCH(qint64,amount);const auto before=suppliers(db);const auto c=command(db,"o1",amount);
@@ -99,6 +125,12 @@ private slots:
         QCOMPARE(scalar(db,"SELECT COUNT(*) FROM client_payments").toInt(),0);
         const auto result=LocalWorkshopBackend::request(db,"closure-commit",c);QVERIFY2(result.ok,qPrintable(QJsonDocument(result.body).toJson()));
         QCOMPARE(result.body["balance_cents"].toInteger(),qint64(500000-qMax(qint64(0),amount)));
+        const auto closedDay=QDate::fromString(result.body["order"].toObject()["closed_at"].toString().left(10),Qt::ISODate);
+        const auto charge=CrmFinancialService::readClosureCharge(db,"o1",closedDay,closedDay);
+        QVERIFY2(charge.error.isEmpty(),qPrintable(charge.error));
+        QCOMPARE(charge.requestUid,c["request_uid"].toString());
+        QCOMPARE(charge.periodCents,qint64(500000));
+        QCOMPARE(charge.priorCents,qint64(0));
         QCOMPARE(scalar(db,"SELECT status FROM work_orders WHERE number=1").toString(),QString("closed"));
         QVERIFY(!scalar(db,"SELECT installed_at FROM work_order_parts WHERE id=1").toString().isEmpty());
         QCOMPARE(scalar(db,"SELECT COUNT(*) FROM client_payments").toInt(),amount<0?0:1);

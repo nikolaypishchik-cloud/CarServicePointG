@@ -1,4 +1,5 @@
 #pragma once
+#include <QDate>
 #include <QSqlDatabase>
 #include <QString>
 #include <QList>
@@ -10,6 +11,15 @@ struct Order {
     qint64 totalCents = 0, receivedCents = 0;
     qint64 balanceCents() const { return totalCents - receivedCents; }
 };
+struct ClosureCharge {
+    QString requestUid;
+    QDate closedOn;
+    qint64 priorCents = 0;
+    qint64 periodCents = 0;
+    QString error;
+};
+// An empty request UID means the journal has no applied closure for this order.
+ClosureCharge readClosureCharge(QSqlDatabase db, const QString& uid, QDate firstDay, QDate lastDay);
 struct Snapshot {
     QList<Order> orders;
     qint64 totalCents = 0, receivedCents = 0, outstandingCents = 0, overpaidCents = 0;

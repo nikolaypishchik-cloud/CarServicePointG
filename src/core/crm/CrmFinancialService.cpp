@@ -1,6 +1,8 @@
 #include "core/services/orders/ClientReceiptReader.h"
 #include "core/crm/CrmFinancialService.h"
 #include "core/finance/ExactMoney.h"
+#include <QDateTime>
+#include <QTimeZone>
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QSet>
@@ -8,6 +10,38 @@
 #include <QUuid>
 
 namespace CrmFinancialService {
+ClosureCharge readClosureCharge(QSqlDatabase db, const QString& uid, QDate firstDay, QDate lastDay) {
+    ClosureCharge result;
+    if (!db.isOpen() || uid.trimmed().isEmpty() || !firstDay.isValid() || !lastDay.isValid() || firstDay>lastDay) {
+        result.error = QStringLiteral("Некоректні параметри нарахування за нарядом.");
+        return result;
+    }
+    QSqlQuery query(db);
+    if (!query.exec("SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='order_closure_commands')")
+        || !query.next()) { result.error=query.lastError().text(); return result; }
+    if (!query.value(0).toBool()) return result;
+    query.prepare("SELECT request_uid,json_extract(response_json,'$.order_uid'),json_extract(response_json,'$.order.closed_at'),"
+                  "json_type(response_json,'$.total_cents'),json_extract(response_json,'$.total_cents'),"
+                  "typeof(json_extract(response_json,'$.total_cents')),json_extract(response_json,'$.order.order_uid') FROM main.order_closure_commands "
+                  "WHERE order_uid=? AND state='applied' LIMIT 2");
+    query.addBindValue(uid);
+    if (!query.exec() || !query.next()) { result.error=query.lastError().text(); return result; }
+    const QString request=query.value(0).toString();
+    const auto closed=QDateTime::fromString(query.value(2).toString(),Qt::ISODate);
+    const auto cents=query.value(4).toLongLong();
+    if (request.trimmed().isEmpty() || query.value(1).toString()!=uid || query.value(6).toString()!=uid || !closed.isValid()
+        || query.value(3).toString()!="integer" || query.value(5).toString()!="integer" || cents<0) {
+        result.error=QStringLiteral("Некоректний запис закриття наряду.");
+        return result;
+    }
+    if (query.next()) { result.error=QStringLiteral("Кілька записів закриття наряду потребують звірки."); return result; }
+    if (query.lastError().isValid()) { result.error=query.lastError().text(); return result; }
+    result.requestUid=request;
+    result.closedOn=closed.toTimeZone(QTimeZone("Europe/Kyiv")).date();
+    if (result.closedOn<firstDay) result.priorCents=cents;
+    else if (result.closedOn<=lastDay) result.periodCents=cents;
+    return result;
+}
 QString money(qint64 cents) {
     return ClientReceiptReader::money(cents);
 }
