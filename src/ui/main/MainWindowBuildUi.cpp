@@ -289,24 +289,30 @@ void MainWindow::buildUi()
         if (canAccessPage(13) && ensurePage(13) && m_pageWorkshopInventory)
             m_pageWorkshopInventory->openBalance();
     });
-    for (bool exchangeRate : {true, false}) {
-        auto* button = new QToolButton(m_topRightSpacer);
-        button->setObjectName(exchangeRate ? "headerExchangeRate" : "headerStatements");
-        button->setText(exchangeRate ? tr("Курс") : tr("Виписки"));
-        button->setAccessibleName(button->text());
-        button->setToolTip(exchangeRate ? tr("Екран «%1» буде додано пізніше.").arg(button->text()) : tr("Відкрити Виписки"));
-        button->setAccessibleDescription(button->toolTip());
-        button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
-        button->setIcon(pendingHeaderIcon(exchangeRate));
-        button->setIconSize(QSize(22, 22));
-        button->setStyleSheet(QStringLiteral("QToolButton:disabled { background: transparent; color: #aab9c5; border: none; padding: 0 4px; }"));
-        button->setEnabled(false);
-        if (!exchangeRate) {
-            m_headerStatements = button;
-            connect(button, &QToolButton::clicked, this, &MainWindow::openHeaderStatements);
-        }
-        headerActions->addWidget(button);
+    auto* rate = makeModuleButton("headerExchangeRate", tr("Курс"), tr("Екран «Курс» буде додано пізніше."));
+    rate->setIcon(pendingHeaderIcon(true));
+    rate->setEnabled(false);
+    auto* cash = makeModuleButton("headerCash", tr("Каса"), tr("Екран «Каса» буде доступний після додавання модуля каси."));
+    QPixmap safeImage(64, 64);
+    safeImage.fill(Qt::transparent);
+    {
+        QPainter painter(&safeImage);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(QColor("#f3c34b"), 3.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawRoundedRect(QRectF(5, 9, 54, 44), 5, 5);
+        painter.drawRoundedRect(QRectF(12, 16, 40, 30), 3, 3);
+        painter.drawEllipse(QPointF(34, 31), 7, 7);
+        painter.drawLine(15, 54, 15, 58);
+        painter.drawLine(49, 54, 49, 58);
     }
+    QIcon safeIcon(safeImage);
+    safeIcon.addPixmap(safeImage, QIcon::Disabled);
+    cash->setIcon(safeIcon);
+    cash->setEnabled(false);
+    m_headerStatements = makeModuleButton("headerStatements", tr("Виписки"), tr("Відкрити Виписки"));
+    m_headerStatements->setIcon(pendingHeaderIcon(false));
+    m_headerStatements->setEnabled(false);
+    connect(m_headerStatements, &QAbstractButton::clicked, this, &MainWindow::openHeaderStatements);
     m_topRightSpacer->setAttribute(Qt::WA_StyledBackground, false);
     m_topRightSpacer->setStyleSheet(QStringLiteral("background:transparent; border:none;"));
     topL->addWidget(m_topRightSpacer, 1);

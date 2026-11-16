@@ -4632,6 +4632,24 @@ private slots:
             QVERIFY(brand.right() < rate->mapTo(header, QPoint()).x());
             QVERIFY(rate->mapTo(header, rate->rect().topRight()).x() < statements->mapTo(header,QPoint()).x());
         }
+        const QStringList headerNames{"headerWarehouse", "headerExpenses", "headerInventoryBalance",
+                                      "headerExchangeRate", "headerCash", "headerStatements"};
+        const QString captures = qEnvironmentVariable("CS_HEADER_SIZE_CAPTURES");
+        for (const auto& size : {QSize(1280,720), QSize(1366,768), QSize(1920,1080)}) {
+            window.resize(size);
+            QCoreApplication::processEvents();
+            int edge = logo->mapTo(header, logo->rect().topRight()).x();
+            for (const auto& name : headerNames) {
+                auto* button = header->findChild<QToolButton*>(name);
+                QVERIFY2(button && button->isVisibleTo(&window), qPrintable(name));
+                QVERIFY(!button->icon().isNull());
+                const QRect bounds(button->mapTo(header, QPoint()), button->size());
+                QVERIFY2(header->rect().contains(bounds) && bounds.left() > edge, qPrintable(name));
+                edge = bounds.right();
+            }
+            QVERIFY(!header->findChild<QToolButton*>("headerCash")->isEnabled());
+            if (!captures.isEmpty()) QVERIFY(window.grab().save(QDir(captures).filePath(QString("shell-%1.png").arg(size.width()))));
+        }
         const QString path = qEnvironmentVariable("CS_HEADER_PREVIEW");
         if (!path.isEmpty()) QVERIFY(header->grab().save(path));
     }
