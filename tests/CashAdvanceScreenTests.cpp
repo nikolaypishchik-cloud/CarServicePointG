@@ -10,6 +10,8 @@
 #include <QSqlQuery>
 #include <QStandardPaths>
 #include <QTableWidget>
+#include <QTabWidget>
+#include "core/services/orders/CashOutflow.h"
 #include <QTemporaryDir>
 #include "app/App.h"
 #include "core/services/AccessControlService.h"
@@ -208,6 +210,114 @@ private slots:
         QVERIFY(q.exec("SELECT COUNT(*),SUM(cents) FROM cash_advance_events WHERE method='cash'") && q.next());
         QCOMPARE(q.value(0).toInt(),2);
         QCOMPARE(q.value(1).toLongLong(),10001);
+        q.finish();
+        // Direct card receipt and cash expense exercise different sources of funds.
+        q.prepare("INSERT INTO client_payments VALUES('card-source','original','order',9000,'card',?,'worker',1)");
+        q.addBindValue(day.toString(Qt::ISODate));
+        QVERIFY(q.exec());
+        page.refresh();
+        auto throughForm=[&](QString button,QString input){
+            auto* trigger=page.findChild<QPushButton*>(button);
+            QVERIFY(trigger && trigger->isEnabled());
+            trigger->click();
+            auto* dialog=page.findChild<QDialog*>("outflowDialog");
+            QVERIFY(dialog);
+            dialog->findChild<QLineEdit*>("outflowAmount")->setText(input);
+            if(button=="postExpense")dialog->findChild<QLineEdit*>("outflowCategory")->setText("Матеріали");
+            dialog->findChild<QLineEdit*>("outflowReason")->setText("QA");
+            auto* submit=dialog->findChild<QPushButton*>("outflowPost");
+            submit->click();
+            auto* status=dialog->findChild<QLabel*>("outflowStatus");
+            QCOMPARE(status->text(),QStringLiteral("Проведено."));
+            QVERIFY(!submit->isEnabled());
+            dialog->close();
+            QTRY_VERIFY(!page.findChild<QDialog*>("outflowDialog"));
+        };
+        auto* receipts=page.findChild<QTableWidget*>("directCashPayments");
+        QCOMPARE(receipts->rowCount(),1);
+        receipts->selectRow(0);
+        throughForm("refundReceipt","30,00");
+        throughForm("postExpense","40,00");
+        for(const auto& kind:QStringList{"expense","payment"}){
+            q.prepare("SELECT uid,source,cents,category FROM cash_outflows WHERE kind=?");
+            q.addBindValue(kind);
+            QVERIFY(q.exec() && q.next());
+            CashOutflow::Command cmd{q.value(0).toString(),kind,q.value(1).toString(),"QA",day,q.value(2).toLongLong(),q.value(3).toString()};
+            q.finish();
+            QVERIFY(CashOutflow::post(cmd).replay);
+            cmd.cents++;
+            QVERIFY(!CashOutflow::post(cmd).error.isEmpty());
+        }
+        QVERIFY(!CashOutflow::post({id(),"expense",{},"QA",day,55002,"Матеріали"}).error.isEmpty());
+        QVERIFY(!CashOutflow::post({id(),"payment","card-source","QA",day,6001}).error.isEmpty());
+        const auto totals=ClientReceiptReader::read(db,{"order"});
+        QCOMPARE(totals.centsByOrder.value("order"),12001);
+        const auto history=ClientReceiptReader::readPeriod(db,"order",day,day);
+        QVERIFY(history.error.isEmpty());
+        QVERIFY(std::any_of(history.payments.begin(),history.payments.end(),[](const auto& item){return item.method=="refund" && item.cents==-3000;}));
+        auto advanceRefund=CashOutflow::Command{id(),"advance",sourceUid,"QA",day,3999};
+        auto refunded=CashOutflow::post(advanceRefund);
+        QVERIFY2(refunded.error.isEmpty(),qPrintable(refunded.error));
+        QVERIFY(CashOutflow::post(advanceRefund).replay);
+        valid.requestUid=id();
+        valid.cents=1;
+        QVERIFY(!CashAdvanceService::post(valid).error.isEmpty());
+        advanceRefund.uid=id();
+        QVERIFY(!CashOutflow::post(advanceRefund).error.isEmpty());
+        QVERIFY(q.exec("SELECT COUNT(*),SUM(cents) FROM cash_outflows") && q.next());
+        QCOMPARE(q.value(0).toInt(),3);
+        QCOMPARE(q.value(1).toLongLong(),10999);
+        q.finish();
+        QVERIFY(q.exec("UPDATE access_role_permissions SET granted=0 WHERE role_id='administrator' AND permission_key='cash.expense'"));
+        QVERIFY(!CashOutflow::allowed(true));
+        QVERIFY(!CashOutflow::post({id(),"expense",{},"QA",day,1,"Матеріали"}).error.isEmpty());
+        QVERIFY(CashOutflow::allowed(false));
+        page.refresh();
+        page.findChild<QTabWidget*>()->setCurrentIndex(1);
+        QVERIFY(q.exec("SELECT uid FROM cash_advance_events WHERE method='cash' AND cents=10000") && q.next());
+        const auto originalCash=q.value(0).toString();
+        q.finish();
+        for(int row=0;row<displayed->rowCount();++row)
+            if(displayed->item(row,0)->data(Qt::UserRole).toString()==originalCash)displayed->selectRow(row);
+        throughForm("refundReceipt","21,01");
+        QVERIFY(q.exec("SELECT COUNT(*),SUM(cents) FROM cash_outflows WHERE shift_uid IS NOT NULL") && q.next());
+        QCOMPARE(q.value(0).toInt(),2);
+        QCOMPARE(q.value(1).toLongLong(),6101);
+        q.finish();
+        QVERIFY(q.exec("SELECT uid FROM cash_outflows WHERE kind='advance' AND cents=2101") && q.next());
+        const auto mistaken=q.value(0).toString();
+        q.finish();
+        auto reverse=CashOutflow::Command{id(),"reverse",mistaken,"Помилка введення",day,2100};
+        QVERIFY(!CashOutflow::post(reverse).error.isEmpty());
+        reverse.cents=2101;
+        auto* tabs=page.findChild<QTabWidget*>();
+        tabs->setCurrentIndex(2);
+        auto* outflows=qobject_cast<QTableWidget*>(tabs->currentWidget());
+        QVERIFY(outflows);
+        for(int row=0;row<outflows->rowCount();++row)
+            if(outflows->item(row,0)->data(Qt::UserRole).toString()==mistaken)outflows->selectRow(row);
+        page.findChild<QPushButton*>("reverseRefund")->click();
+        auto* dialog=page.findChild<QDialog*>("outflowDialog");
+        QVERIFY(dialog);
+        QCOMPARE(dialog->findChild<QLineEdit*>("outflowAmount")->text(),"21.01");
+        dialog->findChild<QLineEdit*>("outflowReason")->setText(reverse.reason);
+        dialog->findChild<QPushButton*>("outflowPost")->click();
+        QCOMPARE(dialog->findChild<QLabel*>("outflowStatus")->text(),QStringLiteral("Проведено."));
+        QVERIFY(!CashOutflow::post(reverse).error.isEmpty());
+        q.prepare("SELECT uid FROM cash_outflows WHERE reversed_uid=?");q.addBindValue(mistaken);
+        QVERIFY(q.exec() && q.next());reverse.uid=q.value(0).toString();q.finish();
+        QVERIFY(CashOutflow::post(reverse).replay);
+        auto atomic=CashOutflow::Command{id(),"advance",originalCash,"QA",day,1};
+        QVERIFY(q.exec("CREATE TRIGGER failed_outflow_audit BEFORE INSERT ON activity_audit_events BEGIN SELECT RAISE(ABORT,'fixture'); END"));
+        QVERIFY(!CashOutflow::post(atomic).error.isEmpty());
+        QVERIFY(q.exec("DROP TRIGGER failed_outflow_audit"));
+        auto recovered=CashOutflow::post(atomic);
+        QVERIFY(recovered.error.isEmpty() && !recovered.replay);
+        QVERIFY(CashOutflow::post(atomic).replay);
+        prior=CashShiftService::current().uid;
+        QVERIFY(transition(Step::Freeze,0).recorded);
+        QVERIFY(transition(Step::Close,55000).recorded);
+        QCOMPARE(CashShiftService::current().phase,"closed");
     }
 };
 QTEST_MAIN(CashAdvanceScreenTests)

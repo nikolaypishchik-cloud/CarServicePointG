@@ -47,6 +47,34 @@ QString kind(Action value)
     return {};
 }
 }
+QString balance(QSqlDatabase db,const QString& shift,qint64& amount,bool allowUnlinked)
+{
+    QSqlQuery q(db);
+    if(!run(q,"SELECT opening_cents FROM main.cash_shifts WHERE shift_uid=?",{shift}))return q.lastError().text();
+    if(!q.next())return QStringLiteral("Касову зміну не знайдено.");
+    std::vector<ExactMoney::Cents> amounts{q.value(0).toLongLong()};
+    auto addSum=[&](const QString& sql){
+        if(!run(q,sql,{shift}) || !q.next())return false;
+        amounts.push_back(q.value(0).toLongLong());return true;
+    };
+    if(db.tables().contains("cash_advance_events") && !addSum("SELECT COALESCE(SUM(cents),0) FROM main.cash_advance_events WHERE shift_uid=? AND method='cash' AND source_uid IS NULL"))
+        return q.lastError().text();
+    if(db.tables().contains("client_payments")){
+        if(!q.exec("CREATE TABLE IF NOT EXISTS main.cash_shift_receipts(payment_uid TEXT PRIMARY KEY NOT NULL,shift_uid TEXT NOT NULL REFERENCES cash_shifts(shift_uid))"))return q.lastError().text();
+        if(!run(q,"SELECT 1 FROM main.client_payments p WHERE p.method='cash' AND p.recorded_ms >= (SELECT opened_ms FROM main.cash_shifts WHERE shift_uid=?) "
+                   "AND NOT EXISTS(SELECT 1 FROM main.cash_shift_receipts r WHERE r.payment_uid=p.payment_uid) LIMIT 1",{shift}))return q.lastError().text();
+        if(q.next() && !allowUnlinked)return QStringLiteral("Є готівкова оплата без підтвердженого зв’язку зі зміною. Потрібна звірка.");
+    }
+    if(db.tables().contains("cash_shift_receipts") && !addSum("SELECT COALESCE(SUM(p.amount_cents),0) FROM main.cash_shift_receipts l JOIN main.client_payments p ON p.payment_uid=l.payment_uid WHERE l.shift_uid=?"))
+        return q.lastError().text();
+    if(db.tables().contains("cash_shift_transitions") && !addSum("SELECT COALESCE(SUM(delta),0) FROM main.cash_shift_transitions WHERE shift_uid=?"))return q.lastError().text();
+    if(db.tables().contains("cash_outflows") && !addSum("SELECT COALESCE(SUM(CASE WHEN reversed_uid IS NULL THEN -cents ELSE cents END),0) FROM main.cash_outflows WHERE shift_uid=?"))return q.lastError().text();
+    const auto total=ExactMoney::sum(amounts);
+    const auto* balance=std::get_if<ExactMoney::Cents>(&total);
+    if(!balance || *balance<0)return QStringLiteral("Некоректний обліковий залишок.");
+    amount=*balance;
+    return {};
+}
 State current()
 {
     if(auto error=CashAdvanceService::postingAuthorityError();!error.isEmpty()) return {{},{},{},{},error};
@@ -102,27 +130,9 @@ Result apply(const Command& c)
         if(actor==recipient || !run(q,"SELECT role FROM staff_accounts WHERE id=? AND active=1 AND role IN ('owner','administrator')",{recipient}) || !q.next() || !AccessControlService::hasPermission(db,q.value(0).toString(),"cash.view"))
             return fail(QStringLiteral("Оберіть іншого чинного отримувача каси."));
     }
-    if(!run(q,"SELECT opening_cents FROM main.cash_shifts WHERE shift_uid=?",{state.uid}) || !q.next())return fail(q.lastError().text());
-    std::vector<ExactMoney::Cents> amounts{q.value(0).toLongLong()};
-    auto addSum=[&](const QString& sql){
-        if(!run(q,sql,{state.uid}) || !q.next())return false;
-        amounts.push_back(q.value(0).toLongLong());return true;
-    };
-    if(db.tables().contains("cash_advance_events") && !addSum("SELECT COALESCE(SUM(cents),0) FROM main.cash_advance_events WHERE shift_uid=? AND method='cash' AND source_uid IS NULL"))
-        return fail(q.lastError().text());
-    if(db.tables().contains("client_payments")){
-        if(!q.exec("CREATE TABLE IF NOT EXISTS main.cash_shift_receipts(payment_uid TEXT PRIMARY KEY NOT NULL,shift_uid TEXT NOT NULL REFERENCES cash_shifts(shift_uid))"))return fail(q.lastError().text());
-        if(!run(q,"SELECT 1 FROM main.client_payments p WHERE p.method='cash' AND p.recorded_ms >= (SELECT opened_ms FROM main.cash_shifts WHERE shift_uid=?) "
-                   "AND NOT EXISTS(SELECT 1 FROM main.cash_shift_receipts r WHERE r.payment_uid=p.payment_uid) LIMIT 1",{state.uid}))return fail(q.lastError().text());
-        if(q.next() && c.action!=Action::Freeze)return fail(QStringLiteral("Є готівкова оплата без підтвердженого зв’язку зі зміною. Потрібна звірка."));
-    }
-    if(db.tables().contains("cash_shift_receipts") && !addSum("SELECT COALESCE(SUM(p.amount_cents),0) FROM main.cash_shift_receipts l JOIN main.client_payments p ON p.payment_uid=l.payment_uid WHERE l.shift_uid=?"))
-        return fail(q.lastError().text());
-    if(!addSum("SELECT COALESCE(SUM(delta),0) FROM main.cash_shift_transitions WHERE shift_uid=?"))return fail(q.lastError().text());
-    const auto total=ExactMoney::sum(amounts);
-    const auto* balance=std::get_if<ExactMoney::Cents>(&total);
-    if(!balance || *balance<0)return fail(QStringLiteral("Некоректний обліковий залишок."));
-    const qint64 expected=*balance,difference=c.counted-expected;
+    qint64 expected=0;
+    if(const auto error=balance(db,state.uid,expected,c.action==Action::Freeze);!error.isEmpty())return fail(error);
+    const qint64 difference=c.counted-expected;
     if(!run(q,"SELECT outcome,counted FROM main.cash_shift_transitions WHERE shift_uid=? ORDER BY rowid DESC LIMIT 1",{state.uid}))
         return fail(q.lastError().text());
     const bool pending=q.next() && q.value(0).toString()=="discrepancy";

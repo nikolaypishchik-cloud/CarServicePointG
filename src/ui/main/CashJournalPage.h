@@ -11,6 +11,7 @@ private:
     QDateEdit* firstDay;
     QDateEdit* lastDay;
     QTableWidget* table;
+    QTableWidget* outflowTable;
     QTableWidget* advanceTable;
     QLabel* advanceStatus;
     QLabel* summary;

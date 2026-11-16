@@ -173,7 +173,16 @@ QJsonObject preview(QSqlDatabase db,const QJsonObject& s,const QString& uid) {
         bp.append(QJsonObject{{"uid",p["part_uid"]},{"qty",p["qty"]},{"price",p["price"]},{"installed_at",p["installed_at"].toString()},{"closure_issue_evidence",p["closure_issue_evidence"]}});
     }
     for(const auto& v:services){auto p=v.toObject();bs.append(QJsonObject{{"uid",p["service_uid"]},{"qty",p["qty"]},{"price",p["price"]}});}
+    qint64 refunds=0;
+    if(db.tables().contains("cash_outflows")){
+        auto refunded=query(db,"SELECT COALESCE(SUM(CASE WHEN kind='payment' THEN cents ELSE -cents END),0) FROM main.cash_outflows WHERE kind IN ('payment','undo_payment') AND order_uid=?",{uid});
+        require(refunded.next(),refunded.lastError().text());
+        refunds=refunded.value(0).toLongLong();
+        require(refunds<=received,QStringLiteral("Повернення перевищують оплати."));
+        received-=refunds;
+    }
     QJsonObject view{{"order_uid",uid},{"order_number",o["number"].toVariant().toString()},{"status",o["status"]},{"total_cents",total},{"received_cents",received},{"balance_cents",total-received},{"install_part_uids",install},{"unresolved_parts",unresolved},{"occupancy",occupancy(s,uid)},{"basis",QJsonObject{{"discount",o["discount"]},{"discount_mode",o["discount_mode"]},{"parts",bp},{"services",bs}}}};
+    if(refunds)view["refund_cents"]=refunds;
     view["revision"]=revision({{"order",o},{"parts",parts},{"services",services},{"payments",payments},{"view",view}});return view;
 }
 QJsonObject close(QSqlDatabase db,QJsonObject& s,const QJsonObject& p,qint64 now,const QString& actor) {
@@ -206,6 +215,7 @@ QJsonObject close(QSqlDatabase db,QJsonObject& s,const QJsonObject& p,qint64 now
     for(const auto& part:v["install_part_uids"].toArray())installed.append(QJsonObject{{"part_uid",part},{"order_uid",uid},{"installed_at",date.date().toString(Qt::ISODate)}});
     auto o=order(db,uid);o["status"]="closed";o["closed_at"]=date.toString(Qt::ISODateWithMs);
     QJsonObject result{{"schema_version",1},{"ok",true},{"request_uid",id},{"order_uid",uid},{"status","closed"},{"order",o},{"installed_parts",installed},{"payments",payments},{"payment_uid",paymentUid},{"total_cents",v["total_cents"]},{"received_cents",received},{"balance_cents",v["total_cents"].toInteger()-received}};
+    if(v.contains("refund_cents"))result["refund_cents"]=v["refund_cents"];
     QString error;require(OrderClosureJournal::apply(db,result,&error),error,500);return result;
 }
 }

@@ -88,15 +88,21 @@ Choices advances(const QString& client)
     auto db = Database::db();
     if (!authorized(db)) return {{},QStringLiteral("Немає доступу.")};
     if (!db.tables().contains("cash_advance_events")) return {};
+    const QString refunds=db.tables().contains("cash_outflows")?"-COALESCE((SELECT SUM(CASE WHEN kind='advance' THEN cents ELSE -cents END) FROM main.cash_outflows WHERE kind IN ('advance','undo_advance') AND source=a.uid),0)":"";
     return choices("SELECT uid,day || ' · ' || printf('%lld,%02lld грн',remaining/100,remaining%100) || ' · ' || uid "
                    "FROM (SELECT a.uid,a.day,a.cents-COALESCE((SELECT SUM(b.cents) FROM main.cash_advance_events b "
-                   "WHERE b.source_uid=a.uid),0) AS remaining FROM main.cash_advance_events a "
+                   "WHERE b.source_uid=a.uid),0)"+refunds+" AS remaining FROM main.cash_advance_events a "
                    "WHERE a.source_uid IS NULL AND a.client_uid=?) WHERE remaining>0 ORDER BY day,uid",{client});
 }
 QString postingAuthorityError()
 {
     const auto db=Database::db();
     if (!authorized(db)) return QStringLiteral("Немає прав на проведення.");
+    return stationError();
+}
+QString stationError()
+{
+    const auto db=Database::db();
     const auto key=binding(db);
     if (!CloudSyncSettings::localBackendEnabled() || key.isEmpty() || Database::getSetting("cash.single_station",QString()).toString()!=key)
         return QStringLiteral("Для проведення потрібен підтверджений єдиний ПК або відповідь сервера.");
@@ -147,7 +153,8 @@ Result post(const Command& c)
     }
     QString error;
     if (allocation) {
-        if (!exec(q,"SELECT a.client_uid,a.cents-COALESCE((SELECT SUM(b.cents) FROM main.cash_advance_events b WHERE b.source_uid=a.uid),0) "
+        const QString refunds=db.tables().contains("cash_outflows")?"-COALESCE((SELECT SUM(CASE WHEN kind='advance' THEN cents ELSE -cents END) FROM main.cash_outflows WHERE kind IN ('advance','undo_advance') AND source=a.uid),0)":"";
+        if (!exec(q,"SELECT a.client_uid,a.cents-COALESCE((SELECT SUM(b.cents) FROM main.cash_advance_events b WHERE b.source_uid=a.uid),0)"+refunds+" "
                     "FROM main.cash_advance_events a WHERE a.uid=? AND a.source_uid IS NULL",{c.advanceUid}) || !q.next())
             return fail(QStringLiteral("Не знайдено джерело авансу."));
         const QString client=q.value(0).toString();

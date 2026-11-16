@@ -38,6 +38,9 @@ const QVector<AccessPermissionDefinition>& definitions()
         {QStringLiteral("nav.history"), QString::fromUtf8("Розділи"), QString::fromUtf8("База виконаних нарядів")},
         {QStringLiteral("nav.reports"), QString::fromUtf8("Розділи"), QString::fromUtf8("Звіти")},
         {QStringLiteral("nav.clients"), QString::fromUtf8("Розділи"), QString::fromUtf8("Клієнти")},
+        {QStringLiteral("cash.reverse"), QStringLiteral("Каса"), QStringLiteral("Сторнувати повернення")},
+        {QStringLiteral("cash.refund"), QStringLiteral("Каса"), QStringLiteral("Проводити повернення")},
+        {QStringLiteral("cash.expense"), QStringLiteral("Каса"), QStringLiteral("Проводити видатки")},
         {QStringLiteral("cash.view"), QString::fromUtf8("Каса"), QString::fromUtf8("Переглядати журнал каси")},
         {QStringLiteral("nav.inventory"), QString::fromUtf8("Розділи"), QString::fromUtf8("Склад СТО")},
         {QStringLiteral("nav.catalog"), QString::fromUtf8("Розділи"), QString::fromUtf8("Каталог")},
@@ -88,7 +91,7 @@ QSet<QString> defaultGrants(const QString& roleId)
         return permissions({"nav.planning", "nav.intake", "nav.new_order", "nav.current_orders", "nav.parts", "nav.history",
                             "nav.reports", "nav.clients", "nav.inventory", "nav.catalog", "nav.statistics", "nav.settings",
                             "orders.create", "orders.edit", "orders.close", "parts.order", "parts.install",
-                            "inventory.purchase", "inventory.delete", "security.manage", "cash.view"});
+                            "inventory.purchase", "inventory.delete", "security.manage", "cash.view", "cash.refund", "cash.expense", "cash.reverse"});
     }
     if (roleId == QStringLiteral("manager")) {
         return permissions({"nav.planning", "nav.intake", "nav.new_order", "nav.current_orders", "nav.parts", "nav.history",
@@ -333,7 +336,7 @@ bool ensureSchema(QSqlDatabase database, QString* errorText)
             if (role.id == QStringLiteral("administrator")) {
                 QSqlQuery seed(database);
                 if (!seed.exec(QStringLiteral("INSERT OR IGNORE INTO access_role_permissions(role_id,permission_key,granted) "
-                                              "VALUES('administrator','cash.view',1)"))) {
+                                              "VALUES('administrator','cash.view',1),('administrator','cash.refund',1),('administrator','cash.expense',1),('administrator','cash.reverse',1)"))) {
                     setError(errorText, seed.lastError().text());
                     return false;
                 }
@@ -498,7 +501,10 @@ bool setRolePermissions(QSqlDatabase database, const QString& roleId, const QSet
         return false;
     }
     if (ActivityAuditService::currentActor().role != QStringLiteral("owner")
-        && permissionKeys.contains(QStringLiteral("cash.view")) != hasPermission(database, roleId, QStringLiteral("cash.view"))) {
+        && (permissionKeys.contains("cash.view") != hasPermission(database,roleId,"cash.view") ||
+            permissionKeys.contains("cash.refund") != hasPermission(database,roleId,"cash.refund") ||
+            permissionKeys.contains("cash.reverse") != hasPermission(database,roleId,"cash.reverse") ||
+            permissionKeys.contains("cash.expense") != hasPermission(database,roleId,"cash.expense"))) {
         database.rollback();
         setError(errorText, QStringLiteral("Лише власник може змінювати доступ до каси."));
         return false;
@@ -523,10 +529,12 @@ bool setRolePermissions(QSqlDatabase database, const QString& roleId, const QSet
             return false;
         }
     }
-    if (roleId == QStringLiteral("administrator") && !permissionKeys.contains(QStringLiteral("cash.view"))) {
+    for(const QString key : {QStringLiteral("cash.view"),QStringLiteral("cash.refund"),QStringLiteral("cash.expense"),QStringLiteral("cash.reverse")}) {
+        if(roleId!="administrator" || permissionKeys.contains(key))continue;
         QSqlQuery revoke(database);
-        if (!revoke.exec(QStringLiteral("INSERT INTO access_role_permissions(role_id,permission_key,granted) "
-                                        "VALUES('administrator','cash.view',0)"))) {
+        revoke.prepare("INSERT INTO access_role_permissions(role_id,permission_key,granted) VALUES('administrator',?,0)");
+        revoke.addBindValue(key);
+        if (!revoke.exec()) {
             database.rollback();
             setError(errorText, revoke.lastError().text());
             return false;

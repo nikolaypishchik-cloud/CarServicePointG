@@ -32,7 +32,10 @@ Result read(QSqlDatabase db, const QSet<QString>& orderUids) {
     result.available=true;
     if (orderUids.isEmpty()) return result;
     // One statement provides a consistent receipt snapshot; never SQL SUM on unchecked values.
-    QString sql = "SELECT order_uid,amount_cents,typeof(amount_cents) FROM main.client_payments";
+    QString parts="SELECT order_uid,amount_cents,0 AS refund FROM main.client_payments";
+    if(db.tables().contains("cash_outflows"))
+        parts+=" UNION ALL SELECT order_uid,cents,kind='payment' FROM main.cash_outflows WHERE kind IN ('payment','undo_payment')";
+    QString sql="SELECT order_uid,amount_cents,typeof(amount_cents),refund FROM ("+parts+")";
     if (orderUids.size() == 1) sql += " WHERE order_uid=?";
     if (!query.prepare(sql)) return fail(query.lastError().text());
     if (orderUids.size() == 1) query.addBindValue(*orderUids.cbegin());
@@ -45,7 +48,7 @@ Result read(QSqlDatabase db, const QSet<QString>& orderUids) {
         const qint64 cents=query.value(1).toLongLong(&valid);
         if (!valid || query.value(2).toString()!="integer" || cents<=0)
             return fail(QStringLiteral("Некоректна сума клієнтської оплати наряду %1.").arg(uid));
-        const auto sum=ExactMoney::sum({result.centsByOrder.value(uid),cents});
+        const auto sum=ExactMoney::sum({result.centsByOrder.value(uid),query.value(3).toBool()?-cents:cents});
         if (const auto* value=std::get_if<ExactMoney::Cents>(&sum)) result.centsByOrder.insert(uid,*value);
         else return fail(QStringLiteral("Переповнення клієнтських оплат наряду %1.").arg(uid));
     }
@@ -111,7 +114,10 @@ PaymentHistory readPeriod(QSqlDatabase db, const QString& orderUid, QDate firstD
     PaymentHistory history;
     history.available = query.value(0).toBool();
     if (!history.available) return history;
-    if (!query.prepare("SELECT payment_uid,paid_on,amount_cents,typeof(amount_cents),method FROM main.client_payments "
+    QString parts="SELECT payment_uid,paid_on,amount_cents,method,order_uid,recorded_ms,0 AS refund FROM main.client_payments";
+    if(db.tables().contains("cash_outflows"))
+        parts+=" UNION ALL SELECT uid,day,cents,CASE WHEN kind='undo_payment' THEN 'refund_reversal' ELSE method END,order_uid,recorded_ms,kind='payment' FROM main.cash_outflows WHERE kind IN ('payment','undo_payment')";
+    if (!query.prepare("SELECT payment_uid,paid_on,amount_cents,typeof(amount_cents),method,refund FROM ("+parts+") "
                        "WHERE order_uid=? ORDER BY paid_on,recorded_ms,payment_uid")) return fail(query.lastError().text());
     query.addBindValue(orderUid);
     if (!query.exec()) return fail(query.lastError().text());
@@ -123,10 +129,11 @@ PaymentHistory readPeriod(QSqlDatabase db, const QString& orderUid, QDate firstD
         const auto uid = query.value(0).toString();
         if (uid.trimmed().isEmpty() || query.value(3).toString() != "integer" || cents <= 0)
             return fail(QStringLiteral("Некоректна ідентичність або сума оплати."));
+        const auto net=query.value(5).toBool()?-cents:cents;
         if (day >= firstDay) {
-            history.payments.append({uid, day, cents, query.value(4).toString()});
+            history.payments.append({uid, day, net, query.value(5).toBool()?QStringLiteral("refund"):query.value(4).toString()});
         } else {
-            const auto sum = ExactMoney::sum({history.receivedBefore, cents});
+            const auto sum = ExactMoney::sum({history.receivedBefore, net});
             const auto* value = std::get_if<ExactMoney::Cents>(&sum);
             if (!value) return fail(QStringLiteral("Переповнення підсумку попередніх оплат."));
             history.receivedBefore = *value;

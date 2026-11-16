@@ -12,6 +12,7 @@ struct Command {
 struct Result { QString operationUid, error; bool replay = false; };
 struct Choices { QList<Choice> rows; QString error; };
 QString designateSingleWorkstation();
+QString stationError();
 QString postingAuthorityError();
 struct Entry { QString uid, order, source; QDate day; qint64 cents; };
 struct Ledger { QList<Entry> entries; QString error; };

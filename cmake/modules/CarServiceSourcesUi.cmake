@@ -123,6 +123,7 @@ set(CS_UI_SOURCES
     src/ui/common/dialogs/OrderDialogPdfFlow.cpp
     src/ui/main/MainWindowBuildUi.cpp
     src/ui/main/CashOpeningDialog.cpp
+    src/ui/main/CashOutflowDialog.cpp
     src/ui/main/CashShiftDialog.cpp
     src/ui/main/CashAdvanceDialog.cpp
     src/ui/main/CashJournalPage.cpp

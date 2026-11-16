@@ -95,6 +95,13 @@ bool apply(QSqlDatabase db,const QJsonObject& result,QString* error) {
         for(int i=0;i<args.size();++i)if(verify.value(i).toString()!=args[i].toString())return fail(error,"Client receipt conflict");
         receiptTotal+=cents;
     }
+    if(result.contains("refund_cents")){
+        QSqlQuery refunds(db);
+        if(!refunds.prepare("SELECT COALESCE(SUM(CASE WHEN kind='payment' THEN cents ELSE -cents END),0) FROM main.cash_outflows WHERE kind IN ('payment','undo_payment') AND order_uid=?"))return fail(error,refunds.lastError().text());
+        refunds.addBindValue(uid);
+        if(!refunds.exec() || !refunds.next() || refunds.value(0).toLongLong()!=result["refund_cents"].toInteger(-1))return fail(error,"Refund total mismatch");
+        receiptTotal-=refunds.value(0).toLongLong();
+    }
     if(receiptTotal!=result["received_cents"].toInteger(-1))return fail(error,"Client receipt total mismatch");
     for(const auto& value:result["installed_parts"].toArray()) {
         const auto part=value.toObject();const QString date=part["installed_at"].toString();

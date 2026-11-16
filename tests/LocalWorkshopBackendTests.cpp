@@ -298,6 +298,20 @@ private slots:
         QCOMPARE(LocalWorkshopBackend::request(db,"closure-commit",pay).body,posted.body);
         QCOMPARE(scalar(db,"SELECT SUM(amount_cents) FROM client_payments JOIN cash_shift_receipts USING(payment_uid) WHERE shift_uid='shift'").toInt(),1050);
     }
+    void orderClosureIncludesConfirmedRefund() {
+        auto first=LocalWorkshopBackend::request(db,"closure-commit",command(db,"o1",200000));
+        QVERIFY(first.ok);
+        QSqlQuery q(db);
+        QVERIFY(q.exec("UPDATE work_orders SET status='open' WHERE order_uid='o1'"));
+        QVERIFY(q.exec("CREATE TABLE cash_outflows(kind TEXT,order_uid TEXT,cents INTEGER)"));
+        QVERIFY(q.exec("INSERT INTO cash_outflows VALUES('payment','o1',20000),('advance','o1',3000)"));
+        auto second=LocalWorkshopBackend::request(db,"closure-commit",command(db,"o1",320000));
+        QVERIFY2(second.ok,qPrintable(QJsonDocument(second.body).toJson()));
+        QCOMPARE(second.body["received_cents"].toInteger(),500000);
+        QCOMPARE(second.body["refund_cents"].toInteger(),20000);
+        QCOMPARE(second.body["balance_cents"].toInteger(),0);
+        QCOMPARE(scalar(db,"SELECT SUM(amount_cents) FROM client_payments").toLongLong(),520000);
+    }
     void conflictAndFailures() {
         QVERIFY(action(db,"provision").ok);
         QVERIFY(action(db,"confirm-occupied",{{"order_uid","o1"},{"target_state","on_bay"},{"target_bay_uid","1"},{"expected_version",0}}).ok);

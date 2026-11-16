@@ -1,5 +1,6 @@
 #include "CashJournalPage.h"
 #include "CashAdvanceDialog.h"
+#include "core/services/orders/CashOutflow.h"
 #include "core/services/orders/CashAdvanceService.h"
 #include "core/services/ActivityAuditService.h"
 #include <QMessageBox>
@@ -104,6 +105,40 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     advanceTable->horizontalHeader()->setStretchLastSection(true);
     advanceLayout->addWidget(advanceTable);
     tabs->addTab(advanceTab,tr("Аванси"));
+    outflowTable=new QTableWidget(0,6,tabs);
+    outflowTable->setHorizontalHeaderLabels({tr("Дата"),tr("Операція"),tr("Сума"),tr("Спосіб"),tr("Причина"),tr("Автор")});
+    outflowTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    tabs->addTab(outflowTable,tr("Повернення й видатки"));
+    auto* refund=new QPushButton(tr("Повернення"),this);
+    auto* expense=new QPushButton(tr("Видаток"),this);
+    refund->setObjectName("refundReceipt");
+    expense->setObjectName("postExpense");
+    refund->setEnabled(CashOutflow::allowed(false));
+    expense->setEnabled(CashOutflow::allowed(true));
+    actions->addWidget(refund);
+    actions->addWidget(expense);
+    connect(expense,&QPushButton::clicked,this,[this]{openOutflowDialog(this,"expense",{},tr("Готівка"));});
+    connect(refund,&QPushButton::clicked,this,[this,tabs,advanceTab]{
+        const bool advance=tabs->currentWidget()==advanceTab;
+        auto* source=advance?advanceTable:table;
+        auto* entry=source->item(source->currentRow(),0);
+        if((!advance && tabs->currentWidget()!=table) || !entry || (advance && source->item(source->currentRow(),1)->text()!=tr("Отримання"))){
+            summary->setText(tr("Виберіть первинну пряму оплату або отриманий аванс."));return;
+        }
+        const auto uid=entry->data(Qt::UserRole).toString();
+        openOutflowDialog(this,advance?"advance":"payment",uid,entry->text()+" · "+source->item(source->currentRow(),advance?2:3)->text()+" · "+uid);
+    });
+    auto* reverse=new QPushButton(tr("Сторно повернення"),this);
+    reverse->setObjectName("reverseRefund");
+    reverse->setEnabled(CashOutflow::canReverse());
+    actions->addWidget(reverse);
+    connect(reverse,&QPushButton::clicked,this,[this,tabs]{
+        auto* cell=outflowTable->item(outflowTable->currentRow(),0);
+        if(tabs->currentWidget()!=outflowTable || !cell || !cell->data(Qt::UserRole+1).toBool()){
+            summary->setText(tr("Виберіть повернення у вкладці «Повернення й видатки»."));return;
+        }
+        openOutflowDialog(this,"reverse",cell->data(Qt::UserRole).toString(),cell->toolTip(),cell->data(Qt::UserRole+2).toLongLong());
+    });
     body->addWidget(tabs,1);
     summary = new QLabel(this);
     summary->setObjectName("cashTotal");
@@ -119,6 +154,17 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
 
 void CashJournalPage::refresh()
 {
+    QString outflowError;
+    const auto entries=CashOutflow::ledger(firstDay->date(),lastDay->date(),outflowError);
+    outflowTable->setRowCount(entries.size());
+    for(int row=0;row<entries.size();++row){
+        const auto& item=entries[row];
+        const QStringList fields{item.date,item.kind=="expense"?tr("Видаток"):item.kind.startsWith("undo_")?tr("Сторно повернення"):tr("Повернення"),ClientReceiptReader::money(item.cents),item.method,item.reason,item.actor};
+        for(int col=0;col<fields.size();++col){
+            auto* cell=new QTableWidgetItem(fields[col]);cell->setData(Qt::UserRole,item.uid);cell->setData(Qt::UserRole+1,item.kind=="payment" || item.kind=="advance");cell->setData(Qt::UserRole+2,item.cents);cell->setToolTip(item.uid+" "+item.source);outflowTable->setItem(row,col,cell);
+        }
+    }
+    if(!outflowError.isEmpty()){summary->setText(outflowError);return;}
     const auto advances=CashAdvanceService::ledger(firstDay->date(),lastDay->date());
     advanceStatus->setText(!advances.error.isEmpty()?advances.error:
         (advances.entries.isEmpty()?tr("За обраний період немає операцій з авансами."):QString()));
