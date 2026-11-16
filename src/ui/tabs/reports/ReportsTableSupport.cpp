@@ -30,7 +30,7 @@ QStringList periodHeaders()
 QStringList ordersHeaders()
 {
     return {
-        QString::fromUtf8("Дата"), QString::fromUtf8("Наряд"), QString::fromUtf8("Авто"),
+        QString::fromUtf8("Стан"), QString::fromUtf8("Наряд / дата"), QString::fromUtf8("Авто"),
         QString::fromUtf8("Накладні"), QString::fromUtf8("Запчастини, грн"),
         QString::fromUtf8("Дата сплати"), QString::fromUtf8("Сплата")
     };
@@ -301,7 +301,7 @@ void applyPeriodSnapshot(QTableView* table, ReportsSnapshotTableModel* model, co
     finishSnapshotApply(table, model);
 }
 
-void applyOrdersSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const OrdersSnapshot& snapshot)
+void applyOrdersSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const OrdersSnapshot& snapshot, bool groupByPayment)
 {
     if (!table || !model) return;
     table->setUpdatesEnabled(false);
@@ -309,7 +309,19 @@ void applyOrdersSnapshot(QTableView* table, ReportsSnapshotTableModel* model, co
 
     QVector<ReportsSnapshotTableModel::Row> rows;
     rows.reserve(snapshot.rows.size());
+    QString previousStatus;
     for (const auto& row : snapshot.rows) {
+        if (groupByPayment && (rows.isEmpty() || previousStatus != row.paymentStatus)) {
+            ReportsSnapshotTableModel::Row heading;
+            heading.cells.resize(ordersHeaders().size());
+            heading.cells[0] = makeCell(row.paymentStatus.isEmpty() ? QObject::tr("Стан оплати не встановлено") : row.paymentStatus,
+                                       int(Qt::AlignVCenter | Qt::AlignLeft), QVariant(), QString(), true);
+            heading.spanAllColumns = true;
+            heading.background = QColor("#dbe8f1");
+            heading.cells[0].foreground = QColor("#183248");
+            rows.push_back(heading);
+            previousStatus = row.paymentStatus;
+        }
         ReportsSnapshotTableModel::Row out;
         QStringList invoiceLabels;
         for (const auto& invoice : row.invoiceNumbers) invoiceLabels.append(invoiceNumberLabel(invoice));
@@ -322,6 +334,12 @@ void applyOrdersSnapshot(QTableView* table, ReportsSnapshotTableModel* model, co
             makeCell(row.paymentDue),
             makeCell(row.paymentStatus)
         };
+        out.cells[0].extraRoles[Qt::DisplayRole] = row.closed ? QStringLiteral("●") : QStringLiteral("○");
+        out.cells[0].tooltip = row.closed ? QObject::tr("Закритий наряд") : QObject::tr("Відкритий наряд");
+        out.cells[1].extraRoles[Qt::DisplayRole] = QStringList{row.orderNumber, row.date}.join('\n');
+        out.cells[1].bold = true;
+        out.cells[2].extraRoles[Qt::DisplayRole] = row.car.split(QStringLiteral(" | "), Qt::SkipEmptyParts).join('\n');
+        out.cells[5].extraRoles[Qt::DisplayRole] = row.paymentDue.split(QStringLiteral(", "), Qt::SkipEmptyParts).join('\n');
         out.cells[3].link=!row.invoiceKeys.isEmpty();out.cells[6].link=true;
         out.cells[6].bold=row.paymentStatus.startsWith(QString::fromUtf8("Не сплачено"), Qt::CaseInsensitive);
         rows.push_back(out);
@@ -332,6 +350,7 @@ void applyOrdersSnapshot(QTableView* table, ReportsSnapshotTableModel* model, co
     table->blockSignals(false);
     table->setUpdatesEnabled(true);
     finishSnapshotApply(table, model);
+    table->resizeRowsToContents();
 }
 
 void applyPartsSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const PartsSnapshot& snapshot)

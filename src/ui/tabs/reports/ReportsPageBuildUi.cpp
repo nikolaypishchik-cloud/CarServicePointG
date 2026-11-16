@@ -271,6 +271,28 @@ void ReportsPage::buildUi()
     m_tabs->addTab(periodPage, QString::fromUtf8("Звіт за період"));
     auto* ordersPage = makeTab(m_ordersTable, m_ordersModel);
     m_orderPager = new OrderReportPager(m_ordersTable, m_ordersModel, ordersPage);
+    auto* orderFilterLayout = new QHBoxLayout;
+    auto* payment = new QComboBox(ordersPage);
+    payment->setObjectName("orderReportPaymentFilter");
+    payment->setAccessibleName(tr("Оплата"));
+    payment->addItem(tr("Усі"));
+    for (const auto& status : {tr("Сплачено"), tr("Не сплачено повністю"), tr("Помилка звірки")})
+        payment->addItem(status, status);
+    orderFilterLayout->addWidget(new QLabel(tr("Оплата"), ordersPage));
+    orderFilterLayout->addWidget(payment);
+    auto* orderGrouping = new QComboBox(ordersPage);
+    orderGrouping->setObjectName("orderReportGroup");
+    orderGrouping->setAccessibleName(tr("Групування"));
+    orderGrouping->addItems({tr("Без групування"), tr("За станом оплати")});
+    orderFilterLayout->addWidget(new QLabel(tr("Групування"), ordersPage));
+    orderFilterLayout->addWidget(orderGrouping);
+    orderFilterLayout->addStretch();
+    qobject_cast<QVBoxLayout*>(ordersPage->layout())->insertLayout(0, orderFilterLayout);
+    connect(payment, &QComboBox::currentIndexChanged, this, [this, payment] {
+        m_orderPaymentFilter = payment->currentData().toString();
+        markDirty(); scheduleRefresh(0);
+    });
+    connect(orderGrouping, &QComboBox::currentIndexChanged, m_orderPager, &OrderReportPager::setPaymentGrouping);
     ordersPage->layout()->addWidget(m_orderPager);
     m_tabs->addTab(ordersPage, tr("Наряди"));
     m_invoicesPage = new InvoicesPage(this);
@@ -309,12 +331,12 @@ void ReportsPage::buildUi()
         m_invoiceMetrics={QString::number(count),QString::number(paid),QString::number(unpaid),FormatUtils::money(remaining/100.0,2)+QString::fromUtf8(" грн")};
         if(activeTab()==ReportTab::Invoices)updateDashboard();
     };
-    m_dashboard->action=[this](int group,int index){
+    m_dashboard->action=[this, payment, orderGrouping](int group,int index){
         if(group==0){
             const auto today=QDate::currentDate();m_to->setDate(today);
             m_from->setDate(index==0?today:index==1?today.addDays(-6):QDate(today.year(),today.month(),1));
         }else if(group==1){m_orderStatusFilter=index;}
-        else if(index==1){m_orderStatusFilter=0;m_searchEdit->clear();m_to->setDate(QDate::currentDate());m_from->setDate(QDate::currentDate().addDays(-9));}
+        else if(index==1){m_orderStatusFilter=0;payment->setCurrentIndex(0);orderGrouping->setCurrentIndex(0);m_searchEdit->clear();m_to->setDate(QDate::currentDate());m_from->setDate(QDate::currentDate().addDays(-9));}
         markDirty();scheduleRefresh(0);updateDashboard();
     };
     auto* partsPage = makeTab(m_partsTable, m_partsModel);

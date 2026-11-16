@@ -81,6 +81,7 @@ private:
     ReportDashboard* m_dashboard=nullptr;
     OrderReportPager* m_orderPager = nullptr;
     int m_orderStatusFilter=0;
+    QString m_orderPaymentFilter;
     bool m_expensesFound=false;
     QPushButton* m_repeatExpenses = nullptr;
     QStringList m_invoiceMetrics;

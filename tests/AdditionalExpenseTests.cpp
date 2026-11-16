@@ -345,6 +345,7 @@ private slots:
             row.orderNumber = QString::number(number);
             row.invoiceTotal = FormatUtils::money(number + 0.25, 2);
             row.internalOrderNumber = 1000 + number;
+            row.paymentStatus = number % 2 ? tr("Сплачено") : tr("Не сплачено повністю");
             full.rows.append(row);
         }
         pager.setSnapshot(full);
@@ -361,6 +362,17 @@ private slots:
         QCOMPARE(model.cellUserValue(0, 0).toInt(), 1001);
         next->click();
         QCOMPARE(model.cellUserValue(0, 0).toInt(), 1011);
+        pager.setPaymentGrouping(1);
+        QCOMPARE(model.rowCount(), 11);
+        QVERIFY(model.rowSpansAllColumns(0));
+        QVERIFY(!model.cellUserValue(0, 0).isValid());
+        QCOMPARE(model.cellUserValue(1, 0).toInt(), 1002);
+        next->click();
+        QVERIFY(model.rowSpansAllColumns(0));
+        QCOMPARE(model.cellUserValue(1, 0).toInt(), 1022);
+        pager.setPaymentGrouping(0);
+        QCOMPARE(model.rowCount(), 10);
+        QCOMPARE(model.cellUserValue(0, 0).toInt(), 1001);
         model.setMessageRow(QStringLiteral("Завантаження"));
         QVERIFY(!pager.isEnabled());
         QCOMPARE(model.rowCount(), 1);

@@ -505,6 +505,8 @@ void ReportsPage::applyOrdersSnapshot(const OrdersSnapshot& snapshot)
 {
     auto visible=snapshot;
     if(m_orderStatusFilter!=0)visible.rows.removeIf([this](const OrdersSnapshotRow& row){return m_orderStatusFilter==1?row.closed:!row.closed;});
+    if (!m_orderPaymentFilter.isEmpty())
+        visible.rows.removeIf([this](const OrdersSnapshotRow& row) { return row.paymentStatus != m_orderPaymentFilter; });
     m_orderPager->setSnapshot(visible);
     QList<qint64> receipts;
     for(const auto& row:visible.rows)receipts.append(row.clientReceivedCents);

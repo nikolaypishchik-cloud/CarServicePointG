@@ -54,6 +54,7 @@ public:
         m_collator.setNumericMode(true);
         connect(model, &QAbstractItemModel::modelReset, this, [this] {
             if (m_rendering) return;
+            m_original = {};
             m_snapshot = {};
             m_page = 0;
             setEnabled(false);
@@ -61,8 +62,14 @@ public:
         });
     }
 
+    void setPaymentGrouping(int index) {
+        m_paymentGrouping = index != 0;
+        if (isEnabled()) setSnapshot(m_original);
+    }
+
     void setSnapshot(const OrdersSnapshot& filtered) {
         setEnabled(true);
+        m_original = filtered;
         m_snapshot = filtered;
         m_page = 0;
         sort();
@@ -82,11 +89,14 @@ private:
     }
 
     void sort() {
-        if (m_sortColumn < 0) return;
+
         const auto money = [](QString value) {
             return value.simplified().remove(' ').replace(',', '.').toDouble();
         };
         std::stable_sort(m_snapshot.rows.begin(), m_snapshot.rows.end(), [&](const auto& a, const auto& b) {
+            if (m_paymentGrouping && a.paymentStatus != b.paymentStatus)
+                return m_collator.compare(a.paymentStatus, b.paymentStatus) < 0;
+            if (m_sortColumn < 0) return false;
             if (m_sortColumn == 4) return m_descending ? money(b.invoiceTotal) < money(a.invoiceTotal)
                                                        : money(a.invoiceTotal) < money(b.invoiceTotal);
             const int cmp = m_collator.compare(sortText(a, m_sortColumn), sortText(b, m_sortColumn));
@@ -102,7 +112,7 @@ private:
         OrdersSnapshot slice;
         slice.rows = m_snapshot.rows.mid(m_page * size, size);
         m_rendering = true;
-        ReportsTableSupport::applyOrdersSnapshot(m_table, m_model, slice);
+        ReportsTableSupport::applyOrdersSnapshot(m_table, m_model, slice, m_paymentGrouping);
         m_rendering = false;
         m_previous->setEnabled(m_page > 0);
         m_next->setEnabled(m_page + 1 < pages);
@@ -116,7 +126,9 @@ private:
     QComboBox* m_size;
     QPushButton* m_previous;
     QPushButton* m_next;
+    OrdersSnapshot m_original;
     OrdersSnapshot m_snapshot;
+    bool m_paymentGrouping = false;
     QCollator m_collator;
     int m_page = 0;
     int m_sortColumn = -1;
