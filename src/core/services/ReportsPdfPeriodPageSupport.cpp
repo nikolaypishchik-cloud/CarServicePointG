@@ -100,7 +100,10 @@ void renderPeriodPage(
         painter.restore();
         y += titleH + titleToSubtitleGap;
         drawCenteredText(painter, QRect(theme.left, y, theme.contentWidth, subtitleH), subtitle, subtitleFont);
-        y += subtitleH + subtitleToTableGap;
+        y += subtitleH;
+        drawCenteredText(painter, QRect(theme.left, y, theme.contentWidth, subtitleToTableGap),
+                         QStringLiteral("Усі наряди за обрані дати. Фільтри екрана не застосовано."), summaryFont);
+        y += subtitleToTableGap;
 
         int xx = tableX;
         for (int i = 0; i < headers.size(); ++i) {

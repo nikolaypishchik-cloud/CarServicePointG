@@ -739,6 +739,19 @@ private slots:
         QVERIFY(q.exec("ALTER TABLE work_order_parts RENAME COLUMN amount TO broken_amount"));QVERIFY(read().isEmpty());QVERIFY(!error.isEmpty());QCOMPARE(parts,0.0);
         ReportsPdfRenderer::ExportResult failed;QVERIFY(!ReportsPdfRenderer::renderPeriodPdf(QDate(2026,1,1),QDate(2026,1,31),&failed));QVERIFY(!failed.errorText.isEmpty());QVERIFY(!QFile::exists(failed.path));
         QVERIFY(q.exec("ALTER TABLE work_order_parts RENAME COLUMN broken_amount TO amount"));rows=read();QVERIFY2(error.isEmpty(),qPrintable(error));QCOMPARE(rows.size(),1);QCOMPARE(qRound64(parts*100),4525);
+        configureFinancialReportDirectory();
+        QVERIFY(q.exec("INSERT INTO work_orders(number,order_uid,order_number,order_year,opened_at,closed_at,status,plate,plate_norm,car,client,master_id) VALUES"
+                       "(12,'pdf-second',8,2026,'2026-01-31','','open','','','QA-HIDDEN','','m2'),"
+                       "(13,'pdf-outside',9,2026,'2026-02-01','','open','','','QA-OUTSIDE','','m2')"));
+        const auto filtered=ReportsDataLoader::buildPeriodSnapshot(db.databaseName(),"2026-01-01","2026-01-31",{"id:m1","Synthetic"});
+        QVERIFY2(filtered.error.isEmpty(),qPrintable(filtered.error));
+        QCOMPARE(filtered.rows.size(),1);
+        QCOMPARE(filtered.rows.first().orderUid,QStringLiteral("pdf-order"));
+        ReportsPdfRenderer::ExportResult exported;
+        QVERIFY2(ReportsPdfRenderer::renderPeriodPdf(QDate(2026,1,1),QDate(2026,1,31),&exported),qPrintable(exported.errorText));
+        QCOMPARE(exported.recordCount,2);
+        const auto evidence=qEnvironmentVariable("CS_PERIOD_SCOPE_PDF");
+        if (!evidence.isEmpty()) QVERIFY(QFile::copy(exported.path,evidence));
     }
     void reportDetailAndElectricityReadFailures() {
         QString error;QVERIFY2(PayrollReadFixture::schema(db,&error),qPrintable(error));QVERIFY2(PayrollReadFixture::populate(db,&error),qPrintable(error));QSqlQuery q(db);
