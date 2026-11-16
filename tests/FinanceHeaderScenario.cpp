@@ -78,7 +78,7 @@ void checkFinanceHeaderActions(QSqlDatabase db) {
         cash->click();
         QTRY_COMPARE(pages->currentWidget()->objectName(),QStringLiteral("cashJournalPage"));
         auto* journalPage = pages->currentWidget();
-        auto* entries = journalPage->findChild<QTableWidget*>();
+        auto* entries = journalPage->findChild<QTableWidget*>("directCashPayments");
         QVERIFY(entries);
         QTRY_VERIFY(entries->rowCount() > 0);
         const auto receipts = entries->findItems(QStringLiteral("ui-order"),Qt::MatchExactly);

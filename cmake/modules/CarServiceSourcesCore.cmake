@@ -69,6 +69,7 @@ set(CS_CORE_SOURCES
     src/core/server_bridge/ServerBridgeModule.cpp
     src/core/crm/CrmModule.cpp
     src/core/crm/CrmClientService.cpp
+    src/core/services/orders/CashAdvanceService.cpp
     src/core/services/orders/ClientReceiptReader.cpp
     src/core/crm/CrmFinancialService.cpp
     src/core/crm/CrmVehicleService.cpp

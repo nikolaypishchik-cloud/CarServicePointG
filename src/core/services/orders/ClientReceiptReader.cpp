@@ -73,7 +73,7 @@ Journal readJournal(QSqlDatabase db, QDate firstDay, QDate lastDay)
     if (!result.available)
         return result;
     if (!query.prepare("SELECT payment_uid,order_uid,paid_on,amount_cents,typeof(amount_cents),method,actor "
-                       "FROM main.client_payments WHERE paid_on BETWEEN ? AND ? "
+                       "FROM main.client_payments WHERE method<>'advance_allocation' AND paid_on BETWEEN ? AND ? "
                        "ORDER BY paid_on DESC,recorded_ms DESC,payment_uid"))
         return fail(query.lastError().text());
     query.addBindValue(firstDay.toString(Qt::ISODate));
