@@ -133,6 +133,34 @@ QVariantMap statementOrder(const QString& clientUid, const QString& orderUid, QS
     if (query.lastError().isValid()) { *error = query.lastError().text(); return {}; }
     return row;
 }
+Rows statementIssues(const QString& clientUid, const QString& vehicleUid, QDate from, QDate through, QString* error) {
+    if (clientUid.trimmed().isEmpty() || !from.isValid() || !through.isValid() || from>through) {
+        *error = QStringLiteral("Некоректний клієнт або період видач.");
+        return {};
+    }
+    auto db = Database::db();
+    const auto orders = crmOrderHistorySource(db);
+    const QString parts = orders=="router_work_orders" ? QStringLiteral("router_work_order_parts") : QStringLiteral("work_order_parts");
+    QSqlQuery query(db);
+    QString sql = QStringLiteral(
+        "SELECT m.moved_on,p.name,m.quantity,m.actor,o.order_uid,p.part_uid,m.id,o.car,COALESCE(NULLIF(o.order_number,0),o.number) "
+        "FROM workshop_spare_movements m JOIN %1 o ON o.number=m.order_number "
+        "JOIN %2 p ON p.id=m.part_id AND p.order_number=o.number AND p.order_uid=o.order_uid "
+        "WHERE m.operation='issue' AND o.client_uid=? AND trim(o.order_uid)<>'' AND trim(p.part_uid)<>'' "
+        "AND m.moved_on BETWEEN ? AND ? "
+        "AND (SELECT count(*) FROM %1 x WHERE x.order_uid=o.order_uid)=1 "
+        "AND (SELECT count(*) FROM %2 x WHERE x.order_number=m.order_number AND x.id=m.part_id)=1 "
+        "AND (SELECT count(*) FROM %2 x WHERE x.part_uid=p.part_uid)=1 ").arg(orders,parts);
+    if (!vehicleUid.isEmpty()) sql += QStringLiteral("AND o.vehicle_uid=? ");
+    query.prepare(sql + QStringLiteral("ORDER BY m.moved_on,m.id"));
+    query.addBindValue(clientUid);
+    query.addBindValue(from.toString(Qt::ISODate));
+    query.addBindValue(through.toString(Qt::ISODate));
+    if (!vehicleUid.isEmpty()) query.addBindValue(vehicleUid);
+    Rows events;
+    if (!collect(query,&events,error)) events.clear();
+    return events;
+}
 Rows statementVehicles(const QString& clientUid, QString* error) {
     QSqlQuery query(Database::db());
     query.prepare("SELECT vehicle_uid, TRIM(brand || ' ' || model),plate FROM crm_vehicles WHERE client_uid=? ORDER BY brand,model,plate,vehicle_uid");

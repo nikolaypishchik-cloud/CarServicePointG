@@ -10,6 +10,8 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QTableWidget>
+#include <QTabWidget>
+#include "core/crm/CrmPageReadService.h"
 #include <QTemporaryDir>
 #include <QTextDocument>
 #include <QTimer>
@@ -39,7 +41,7 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     header->click();
     auto* dialog=window.findChild<QDialog*>("headerStatementsWindow");
     QVERIFY(dialog);
-    auto* table=dialog->findChild<QTableWidget*>();
+    auto* table=dialog->findChild<QTableWidget*>("statementApprovals");
     QVERIFY(table);
     auto button=[&](const QString& text)->QPushButton* {
         for (auto* item:dialog->findChildren<QPushButton*>()) if(item->text()==text) return item;
@@ -97,4 +99,39 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     QVERIFY(date);
     date->setDate(date->date().addDays(-1));
     QVERIFY(!pdf->isEnabled());
+
+    QVERIFY(q.exec("ALTER TABLE work_orders ADD COLUMN vehicle_uid TEXT"));
+    QVERIFY(q.exec("UPDATE work_orders SET vehicle_uid='vehicle-a' WHERE number=1"));
+    QVERIFY(q.exec("ALTER TABLE work_order_parts ADD COLUMN part_uid TEXT"));
+    QVERIFY(q.exec("CREATE VIEW IF NOT EXISTS router_work_order_parts AS SELECT * FROM work_order_parts"));
+    QVERIFY(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,name) VALUES"
+                   "(81,1,'order-a','part-81','Filter'),(82,1,'order-a','part-82','Filter')"));
+    QVERIFY(q.exec("CREATE TABLE workshop_spare_movements(id INTEGER PRIMARY KEY,part_id INTEGER,order_number INTEGER,"
+                   "moved_on TEXT,operation TEXT,quantity REAL,actor TEXT)"));
+    const auto day=QDate::currentDate();
+    q.prepare("INSERT INTO workshop_spare_movements VALUES(11,81,1,?,'issue',1,'QA'),(12,81,1,?,'issue',2,'QA'),"
+              "(13,82,1,?,'issue',1,''),(14,999,1,?,'issue',1,'QA'),(15,81,1,?,'receipt',9,'QA')");
+    for (int i=0;i<5;++i) q.addBindValue(day.toString(Qt::ISODate));
+    QVERIFY2(q.exec(),qPrintable(q.lastError().text()));
+    QVERIFY(q.exec("PRAGMA query_only=ON"));
+    for (const auto& vehicle : {QStringLiteral("vehicle-a"),QStringLiteral("other")}) {
+        error.clear();
+        const auto events=CrmPageReadService::statementIssues("client-a",vehicle,day,day,&error);
+        QVERIFY2(error.isEmpty(),qPrintable(error));
+        QCOMPARE(events.size(),vehicle=="vehicle-a"?3:0);
+    }
+    auto* issues=dialog->findChild<QTableWidget*>("statementIssues");
+    auto* tabs=dialog->findChild<QTabWidget*>();
+    QVERIFY(issues && tabs);
+    tabs->setCurrentWidget(issues);
+    generate->click();
+    QCOMPARE(issues->rowCount(),3);
+    QCOMPARE(issues->item(0,0)->text(),day.toString(Qt::ISODate));
+    QCOMPARE(issues->item(0,5)->text(),QStringLiteral("part-81"));
+    QCOMPARE(issues->item(1,2)->text(),QStringLiteral("2"));
+    QCOMPARE(issues->item(1,6)->text(),QStringLiteral("12"));
+    QCOMPARE(issues->item(2,5)->text(),QStringLiteral("part-82"));
+    QCOMPARE(issues->item(2,3)->text(),QStringLiteral("Немає даних"));
+    QVERIFY(pdf->isEnabled());
+    QVERIFY(q.exec("PRAGMA query_only=OFF"));
 }

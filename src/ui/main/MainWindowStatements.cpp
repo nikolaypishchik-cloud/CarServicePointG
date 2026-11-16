@@ -22,14 +22,14 @@
 #include <memory>
 
 namespace {
-void previewStatement(QWidget* parent, const QString& context, const QTableWidget& table) {
+void previewStatement(QWidget* parent, const QString& title, const QString& context, const QTableWidget& table) {
     auto* preview = new QDialog(parent);
     preview->setAttribute(Qt::WA_DeleteOnClose);
     preview->setWindowTitle(QObject::tr("Попередній перегляд виписки"));
     auto* layout = new QVBoxLayout(preview);
     auto* document = new QTextDocument(preview);
     QString html = QStringLiteral("<h1>%1</h1><p>%2</p><table border='1' cellspacing='0' cellpadding='4'><thead><tr>")
-        .arg(QObject::tr("Виписка — погодження"),context.toHtmlEscaped());
+        .arg(title.toHtmlEscaped(),context.toHtmlEscaped());
     for (int c=0; c<table.columnCount(); ++c)
         html += "<th>" + table.horizontalHeaderItem(c)->text().toHtmlEscaped() + "</th>";
     html += "</tr></thead>";
@@ -40,7 +40,7 @@ void previewStatement(QWidget* parent, const QString& context, const QTableWidge
         html += "</tr>";
     }
     html += "</table>";
-    if (!table.rowCount()) html += QObject::tr("<p>За обраними параметрами погоджень немає.</p>");
+    if (!table.rowCount()) html += QObject::tr("<p>За обраними параметрами записів немає.</p>");
     document->setHtml(html);
     auto printer = std::make_shared<QPrinter>(QPrinter::HighResolution);
     printer->setPageSize(QPageSize(QPageSize::A4));
@@ -120,11 +120,18 @@ void MainWindow::openHeaderStatements()
     layout->addWidget(generate);
     auto* tabs = new QTabWidget(dialog);
     layout->addWidget(tabs);
-    for (const auto& title : {tr("Розрахунки"),tr("Запчастини")}) {
-        int index = tabs->addTab(new QWidget(tabs), title);
-        tabs->setTabEnabled(index,false);
-    }
+    tabs->addTab(new QWidget(tabs),tr("Розрахунки"));
+    tabs->setTabEnabled(0,false);
+    auto* issues = new QTableWidget(0,10,tabs);
+    tabs->addTab(issues,tr("Запчастини"));
+    issues->setHorizontalHeaderLabels({tr("Дата видачі"),tr("Запчастина"),tr("Видано, шт."),tr("Виконавець"),
+        tr("UID наряду"),tr("UID позиції"),tr("ID складської видачі"),tr("Автомобіль"),tr("№ наряду"),tr("Подія")});
+    issues->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    issues->setSelectionBehavior(QAbstractItemView::SelectRows);
+    issues->setSelectionMode(QAbstractItemView::SingleSelection);
     auto* table = new QTableWidget(0,5,tabs);
+    table->setObjectName("statementApprovals");
+    issues->setObjectName("statementIssues");
     tabs->addTab(table,tr("Погодження"));
     tabs->setCurrentWidget(table);
     table->setHorizontalHeaderLabels({tr("Дата й час (UTC)"),tr("Статус"),tr("Коментар"),tr("Виконавець"),tr("UID наряду")});
@@ -141,14 +148,34 @@ void MainWindow::openHeaderStatements()
         if (!canAccessPage(9)) return;
         const auto context = tr("Клієнт: %1 • Автомобіль: %2 • Період: %3 — %4")
             .arg(client->currentText(),car->currentText(),from->date().toString("dd.MM.yyyy"),through->date().toString("dd.MM.yyyy"));
-        previewStatement(dialog,context,*table);
+        const bool parts = tabs->currentWidget()==issues;
+        previewStatement(dialog,parts?tr("Виписка — складські видачі"):tr("Виписка — погодження"),context,parts?*issues:*table);
     });
     connect(generate,&QPushButton::clicked,dialog,[=] {
         pdf->setEnabled(false);
         table->setRowCount(0);
         if (!canAccessPage(9) || client->currentIndex()<0) return;
-        QVariantList rows;
         QString error;
+        if (tabs->currentWidget()==issues) {
+            issues->setRowCount(0);
+            const auto events = CrmPageReadService::statementIssues(client->currentData().toString(),
+                    car->currentData().toString(),from->date(),through->date(),&error);
+            if (!error.isEmpty()) { message->setText(error); return; }
+            for (const auto& event : events) {
+                const int row = issues->rowCount();
+                issues->insertRow(row);
+                for (int c=0;c<event.size();++c) {
+                    const auto text=event[c].toString();
+                    issues->setItem(row,c,new QTableWidgetItem(text.isEmpty()?tr("Немає даних"):text));
+                }
+                issues->item(row,4)->setData(Qt::UserRole,event[4]);
+                issues->setItem(row,9,new QTableWidgetItem(tr("Видано зі складу")));
+            }
+            message->setText(events.isEmpty()?tr("Підтверджених складських видач за цей період немає."):QString());
+            pdf->setEnabled(true);
+            return;
+        }
+        QVariantList rows;
         if (!CrmPageReadService::statementDecisions(client->currentData().toString(),
                 car->currentData().toString(),from->date(),through->date(),rows,&error)) {
             message->setText(error);
@@ -176,9 +203,13 @@ void MainWindow::openHeaderStatements()
     connect(table,&QTableWidget::itemSelectionChanged,dialog,[=] {
         openOrder->setEnabled(!table->selectedItems().isEmpty());
     });
+    connect(issues,&QTableWidget::itemSelectionChanged,dialog,[=] {
+        openOrder->setEnabled(!issues->selectedItems().isEmpty());
+    });
     auto showOrder = [=] {
-        if (!canAccessPage(9) || table->selectedItems().isEmpty()) return;
-        const auto* source = table->item(table->currentRow(),4);
+        auto* active = tabs->currentWidget()==issues?issues:table;
+        if (!canAccessPage(9) || active->selectedItems().isEmpty()) return;
+        const auto* source = active->item(active->currentRow(),4);
         if (!source) return;
         QString error;
         const auto order = CrmPageReadService::statementOrder(client->currentData().toString(),
@@ -207,7 +238,9 @@ void MainWindow::openHeaderStatements()
     };
     connect(openOrder,&QPushButton::clicked,dialog,showOrder);
     connect(table,&QTableWidget::cellActivated,dialog,showOrder);
-    auto invalidate = [=] { pdf->setEnabled(false); table->setRowCount(0); message->clear(); };
+    connect(issues,&QTableWidget::cellActivated,dialog,showOrder);
+    auto invalidate = [=] { pdf->setEnabled(false); table->setRowCount(0); issues->setRowCount(0); openOrder->setEnabled(false); message->clear(); };
+    connect(tabs,&QTabWidget::currentChanged,dialog,invalidate);
     connect(car,&QComboBox::currentIndexChanged,dialog,invalidate);
     connect(from,&QDateEdit::dateChanged,dialog,invalidate);
     connect(through,&QDateEdit::dateChanged,dialog,invalidate);
