@@ -1,4 +1,5 @@
 #include "CashTreasury.h"
+#include "CashBankService.h"
 #include "CashAccountMovement.h"
 #include "CashAdvanceService.h"
 #include "core/finance/ExactMoney.h"
@@ -62,6 +63,7 @@ Result post(const Command& c)
         return {{},true};
     }
     if (c.day != QDate::currentDate()) return {QStringLiteral("Проведіть операцію поточною датою.")};
+    if(auto error=CashBankService::activeAccountError(db,c.account);!error.isEmpty())return {error};
     QString shift;
     if (c.account == "primary-cash") {
         if (!run(query,"SELECT shift_uid FROM main.cash_shifts WHERE state='open' AND operator_uid=?",{actor}) || !query.next())

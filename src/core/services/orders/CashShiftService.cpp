@@ -1,4 +1,6 @@
 #include "CashShiftService.h"
+#include "CashBankService.h"
+#include "CashDeskPolicy.h"
 #include "CashAdvanceService.h"
 #include "core/services/AccessControlService.h"
 #include "ClientReceiptReader.h"
@@ -77,9 +79,9 @@ QString balance(QSqlDatabase db,const QString& shift,qint64& amount,bool allowUn
     amount=*balance;
     return {};
 }
-QString currentBalance(qint64& amount)
+QString currentBalance(qint64& amount){return currentBalance(Database::db(),amount);}
+QString currentBalance(QSqlDatabase db,qint64& amount)
 {
-    auto db=Database::db();
     if(!AccessControlService::currentUserHasPermission(db,"cash.view"))return QStringLiteral("Немає доступу до каси.");
     QSqlQuery q(db);
     if(!q.exec("SAVEPOINT cash_drawer_read"))return q.lastError().text();
@@ -134,6 +136,7 @@ Result apply(const Command& c)
     if(state.uid!=c.shiftUid)return fail(QStringLiteral("Зміна вже змінилася. Оновіть дані."));
     const bool finishing=c.action==Action::Close || c.action==Action::HandOver;
     const bool starting=c.action==Action::OpenNext || c.action==Action::Accept;
+    if(starting){if(auto error=CashBankService::activeAccountError(db,"primary-cash");!error.isEmpty())return fail(error);}
     if ((c.action==Action::Freeze && (state.phase!="open" || actor!=state.operatorUid)) ||
         (finishing && (state.phase!="closing" || actor!=state.operatorUid)) ||
         (c.action==Action::OpenNext && state.phase!="closed") ||
@@ -171,6 +174,7 @@ Result apply(const Command& c)
         return fail(QStringLiteral("Не вдалося зафіксувати стан зміни."));
     if(outcome=="carried" && !run(q,"INSERT INTO main.cash_shifts(shift_uid,state,operator_uid,opened_ms,opening_cents) VALUES(?,'open',?,?,?)",
         {c.requestUid,actor,now,expected})) return fail(q.lastError().text());
+    if(outcome=="carried"){if(auto err=CashDeskPolicy::bindShift(db,c.requestUid);!err.isEmpty())return fail(err);}
     const QString resultPhase=outcome=="carried"?QStringLiteral("open"):phase;
     if(!run(q,"INSERT INTO main.cash_shift_transitions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
         {c.requestUid,state.uid,action,actor,recipient,reason,c.counted,expected,delta,outcome,resultPhase,message,now}))

@@ -1,4 +1,5 @@
 #include "CashAccountMovement.h"
+#include "CashBankService.h"
 #include "CashAdvanceService.h"
 #include "ClientReceiptReader.h"
 #include "CashShiftService.h"
@@ -24,7 +25,7 @@ bool run(QSqlQuery& q,const QString& sql,const QVariantList& args)
 QString balance(QSqlDatabase db,const QString& account,qint64& cents)
 {
     if(!AccessControlService::currentUserHasPermission(db,"cash.view"))return QStringLiteral("Немає доступу.");
-    if(account=="primary-cash")return CashShiftService::currentBalance(cents);
+    if(account=="primary-cash")return CashShiftService::currentBalance(db,cents);
     const auto tables=db.tables();
     if(!tables.contains("cash_account_moves"))return QStringLiteral("Потрібен підтверджений початковий залишок.");
     QSqlQuery q(db);
@@ -74,6 +75,7 @@ Result post(const Command& c)
     if(!db.tables().contains("cash_accounts"))return {QStringLiteral("Спочатку налаштуйте рахунки.")};
     for(const auto& account:{c.from,c.to}){
         if(account.isEmpty())continue;
+        if(auto error=CashBankService::activeAccountError(db,account);!error.isEmpty())return {error};
         if(!run(q,"SELECT 1 FROM main.cash_accounts WHERE uid=?",{account}) || !q.next())return {QStringLiteral("Рахунок не знайдено.")};
     }
     QString shift;

@@ -10,6 +10,7 @@ struct Command { QString requestUid, shiftUid; Action action; qint64 counted; QS
 struct Result { bool recorded=false; QString phase, message; };
 QString balance(QSqlDatabase db,const QString& shift,qint64& amount,bool allowUnlinked=false);
 QString currentBalance(qint64& amount);
+QString currentBalance(QSqlDatabase db,qint64& amount);
 State current();
 QList<QPair<QString,QString>> recipients();
 Result apply(const Command& command);

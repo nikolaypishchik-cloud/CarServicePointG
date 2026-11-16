@@ -1,5 +1,6 @@
 #include "CashBankService.h"
 #include "CashAdvanceService.h"
+#include "CashAccountMovement.h"
 #include "core/services/AccessControlService.h"
 #include "core/services/ActivityAuditService.h"
 #include "core/finance/ExactMoney.h"
@@ -31,15 +32,25 @@ QString schema(QSqlQuery& q)
     return {};
 }
 }
-QList<Account> accounts(QString& error)
+QString activeAccountError(QSqlDatabase db,const QString& account)
+{
+    if(!db.tables().contains("cash_bank_events"))return {};
+    QSqlQuery q(db);
+    if(!run(q,"SELECT action FROM main.cash_bank_events WHERE account=? AND action IN ('block','activate','archive') ORDER BY rowid DESC LIMIT 1",{account}))
+        return q.lastError().text();
+    if(q.next() && q.value(0)!="activate")return QStringLiteral("Рахунок заблокований або архівний.");
+    return {};
+}
+QList<Account> accounts(QString& error,bool includeInactive)
 {
     auto db=Database::db();
     if(!AccessControlService::currentUserHasPermission(db,"cash.view")){error=QStringLiteral("Немає доступу.");return {};}
-    if(!db.tables().contains("cash_accounts"))return {{"primary-cash",QStringLiteral("Каса"),"cash"}};
+    if(!db.tables().contains("cash_accounts"))return {{"primary-cash",QStringLiteral("Каса"),"cash","activate"}};
     QSqlQuery q(db);
-    if(!q.exec("SELECT uid,name,type FROM main.cash_accounts ORDER BY name")){error=q.lastError().text();return {};}
+    const auto state=db.tables().contains("cash_bank_events") ? QStringLiteral("COALESCE((SELECT action FROM main.cash_bank_events e WHERE e.account=a.uid AND e.action IN ('activate','archive','block') ORDER BY rowid DESC LIMIT 1),'activate')") : QStringLiteral("'activate'");
+    if(!q.exec("SELECT uid,name,type,"+state+" FROM main.cash_accounts a ORDER BY name")){error=q.lastError().text();return {};}
     QList<Account> items;
-    while(q.next())items.append({q.value(0).toString(),q.value(1).toString(),q.value(2).toString()});
+    while(q.next())if(includeInactive || q.value(3)=="activate")items.append({q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString()});
     error=q.lastError().text();return items;
 }
 QList<Credit> credits(QString& error)
@@ -73,7 +84,8 @@ QList<Pending> pending(QString& error)
 }
 Result post(const Command& c)
 {
-    const bool configure=c.action=="account" || c.action=="rename";
+    const bool lifecycle=QStringList{"block","activate","archive"}.contains(c.action);
+    const bool configure=c.action=="account" || c.action=="rename" || lifecycle;
     if(!configure && c.action!="credit" && c.action!="match")return {QStringLiteral("Невідома дія.")};
     const auto reason=c.reason.trimmed(),reference=c.reference.trimmed();
     if(QUuid(c.uid).isNull() || c.account.isEmpty() || reference.isEmpty() || reason.isEmpty() || reason.size()>300 || !c.date.isValid() || c.date>QDate::currentDate() || c.net<0 || c.fee<0 || c.matched<0)
@@ -96,8 +108,25 @@ Result post(const Command& c)
         if(c.action=="account"){
             if(QUuid(c.account).isNull() || (c.sourceType!="bank" && c.sourceType!="safe"))return {QStringLiteral("Перевірте тип та UID рахунку.")};
             if(!run(q,"INSERT INTO main.cash_accounts(uid,name,type) VALUES(?,?,?)",{c.account,reference,c.sourceType}))return {q.lastError().text()};
+        }else if(lifecycle){
+            if(!run(q,"SELECT type FROM main.cash_accounts WHERE uid=?",{c.account}) || !q.next())return {QStringLiteral("Рахунок не знайдено.")};
+            if(!run(q,"SELECT action FROM main.cash_bank_events WHERE account=? AND action IN ('activate','block','archive') ORDER BY rowid DESC LIMIT 1",{c.account}))return {q.lastError().text()};
+            const auto previous=q.next()?q.value(0).toString():QStringLiteral("activate");
+            if((previous=="archive" && c.action!="activate") || previous==c.action)return {QStringLiteral("Перевірте поточний стан рахунку.")};
+            if(c.action!="activate" && c.account=="primary-cash" && db.tables().contains("cash_shifts")){
+                if(!q.exec("SELECT 1 FROM main.cash_shifts WHERE state<>'closed' LIMIT 1"))return {q.lastError().text()};
+                if(q.next())return {QStringLiteral("Спочатку завершіть відкриту зміну або передачу каси.")};
+            }
+            if(c.action=="archive"){
+                qint64 funds=0;
+                if(auto error=CashAccountMovement::balance(db,c.account,funds);!error.isEmpty())return {error};
+                if(funds)return {QStringLiteral("Архівація потребує нульового підтвердженого залишку.")};
+                if(!run(q,"SELECT 1 FROM main.cash_bank_events e WHERE e.account=? AND e.action='credit' AND e.net+e.fee<>COALESCE((SELECT SUM(m.matched) FROM main.cash_bank_events m WHERE m.action='match' AND m.account=e.account AND m.reference=e.reference),0) LIMIT 1",{c.account}))return {q.lastError().text()};
+                if(q.next())return {QStringLiteral("Завершіть звіряння банківських рядків.")};
+            }
         }else if(!run(q,"UPDATE main.cash_accounts SET name=? WHERE uid=?",{reference,c.account}) || q.numRowsAffected()!=1)return {QStringLiteral("Не вдалося перейменувати рахунок.")};
     }else{
+        if(auto error=activeAccountError(db,c.account);!error.isEmpty())return {error};
         if(!run(q,"SELECT type FROM main.cash_accounts WHERE uid=?",{c.account}) || !q.next() || q.value(0)!="bank")return {QStringLiteral("Оберіть налаштований банківський рахунок.")};
         if(c.action=="credit"){
             if(c.matched || !c.source.isEmpty() || !c.sourceType.isEmpty() || (c.net==0 && c.fee==0) || !std::holds_alternative<ExactMoney::Cents>(ExactMoney::sum({c.net,c.fee})))

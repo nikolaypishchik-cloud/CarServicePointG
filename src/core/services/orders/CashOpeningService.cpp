@@ -1,4 +1,6 @@
 #include "CashOpeningService.h"
+#include "CashBankService.h"
+#include "CashDeskPolicy.h"
 #include "CashAdvanceService.h"
 #include "core/services/ActivityAuditService.h"
 #include "infrastructure/db/sqlite/Db.h"
@@ -45,6 +47,7 @@ Result apply(const Command& c)
     if (!q.exec("SELECT 1 FROM main.cash_shifts LIMIT 1")) return {q.lastError().text()};
     if (q.next()) return {QStringLiteral("Перше відкриття зміни вже проведено.")};
     if (!q.exec("SELECT effective_on FROM main.cash_opening_events WHERE kind='initial'")) return {q.lastError().text()};
+    if(auto error=CashBankService::activeAccountError(db,"primary-cash");!error.isEmpty())return {error};
     const bool initialized=q.next();
     if (initialized==(c.action==Action::Initial))
         return {initialized?QStringLiteral("Початковий залишок уже підтверджено."):QStringLiteral("Спочатку підтвердьте дату переходу та початковий залишок.")};
@@ -79,6 +82,7 @@ Result apply(const Command& c)
         return {q.lastError().text()};
     if (outcome=="open" && !execute(q,"INSERT INTO cash_shifts(shift_uid,state,operator_uid,opened_ms,opening_cents) VALUES(?,'open',?,?,?)",
         {c.uid,actor,now,c.counted})) return {q.lastError().text()};
+    if(outcome=="open"){if(auto err=CashDeskPolicy::bindShift(db,c.uid);!err.isEmpty())return {err};}
     QString error;
     if (!ActivityAuditService::record(db,"cash",kind,QStringLiteral("Підготовка першої касової зміни"),0,"cash_opening",c.uid,outcome,"{}",&error))
         return {error};

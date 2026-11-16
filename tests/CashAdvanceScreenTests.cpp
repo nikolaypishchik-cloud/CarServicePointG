@@ -18,6 +18,7 @@
 #include "core/services/orders/CashOperations.h"
 #include "core/services/orders/CashAccountMovement.h"
 #include "core/services/orders/CashTreasury.h"
+#include "core/services/orders/CashDeskPolicy.h"
 #include "core/services/orders/CashReport.h"
 #include <QTemporaryDir>
 #include "app/App.h"
@@ -156,6 +157,8 @@ private slots:
         auto shift=[&](Action action,qint64 amount,QString reason={}) {
             return CashOpeningService::apply({QUuid::createUuid().toString(QUuid::WithoutBraces),action,day,amount,reason});
         };
+        CashDeskPolicy::Policy policy{QUuid::createUuid().toString(),"worker","Test branch","Europe/Kyiv","Тестове налаштування",{8,0},{18,0},0};
+        error=CashDeskPolicy::save(policy);QVERIFY2(error.isEmpty(),qPrintable(error));
         QVERIFY(shift(Action::Initial,50000).recorded);
         QVERIFY(!shift(Action::Initial,50000).recorded);
         const auto mismatch=shift(Action::Count,49000,"перераховано");
@@ -167,6 +170,12 @@ private slots:
         QVERIFY(!shift(Action::Adjustment,49000).recorded);
         QVERIFY(shift(Action::Adjustment,49000,"рішення після перевірки").recorded);
         QVERIFY(shift(Action::Count,49000).opened);
+        const auto firstShiftId=CashShiftService::current().uid;
+        QCOMPARE(CashDeskPolicy::latest(db,error,firstShiftId).uid,policy.uid);
+        auto nextPolicy=policy;nextPolicy.uid=QUuid::createUuid().toString();nextPolicy.start=QTime(9,0);
+        QVERIFY(CashDeskPolicy::save(nextPolicy).isEmpty());
+        QCOMPARE(CashDeskPolicy::latest(db,error,firstShiftId).start,QTime(8,0));
+        QCOMPARE(CashDeskPolicy::latest(db,error).start,QTime(9,0));
         operate(false,true);
         auto firstCash=CashAdvanceService::post(cash);
         QVERIFY2(firstCash.error.isEmpty(),qPrintable(firstCash.error));
@@ -447,6 +456,19 @@ private slots:
         QVERIFY(CashAccountMovement::balance(db,safe,safeBalance).isEmpty());
         QVERIFY(CashShiftService::currentBalance(drawerBalance).isEmpty());
         QCOMPARE(safeBalance,12345);QCOMPARE(drawerBalance,55001-12345);
+        const auto emptySafe=id();
+        Bank newSafe{id(),"account",emptySafe,"QA архів","safe",{},"Створено",day};
+        ActivityAuditService::setCurrentActor({"worker","Operator","owner","test"});
+        QVERIFY(CashBankService::post(newSafe).error.isEmpty());
+        QVERIFY(CashAccountMovement::post({id(),{},emptySafe,"Нуль за перерахунком",day,0}).error.isEmpty());
+        QVERIFY(!CashBankService::post({id(),"archive",safe,safe,{},{},"Наявний залишок",day}).error.isEmpty());
+        QVERIFY(!CashBankService::post({id(),"block","primary-cash","primary-cash",{},{},"Відкрита зміна",day}).error.isEmpty());
+        Bank archive{id(),"archive",emptySafe,emptySafe,{},{},"Виведено з обліку",day};
+        QVERIFY(CashBankService::post(archive).error.isEmpty());
+        QVERIFY(CashBankService::post(archive).replay);
+        QVERIFY(!CashAccountMovement::post({id(),safe,emptySafe,"Архівний рахунок",day,1}).error.isEmpty());
+        QVERIFY(!CashBankService::accounts(error,true).isEmpty());
+        ActivityAuditService::setCurrentActor({"delegated","Responsible","manager","test"});
         const auto priorClientNet = CashOutflow::totals(day,day).net;
         CashTreasury::Command deposit{id(),"deposit","primary-cash","Розмінні кошти",2400,day,{}};
         const auto otherConnection=id();

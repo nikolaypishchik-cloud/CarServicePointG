@@ -53,7 +53,7 @@ QWidget* cashReportForm(QWidget* parent)
         form->setRowVisible(first,type!=Type::Shift);form->setRowVisible(last,type!=Type::Shift);
         QSignalBlocker block(selector);selector->clear();
         QString error;
-        if(type==Type::Account)for(const auto& row:CashBankService::accounts(error))selector->addItem(row.name,row.uid);
+        if(type==Type::Account)for(const auto& row:CashBankService::accounts(error,true))selector->addItem(row.name,row.uid);
         if(type==Type::Shift)for(const auto& row:CashReport::shifts(error))selector->addItem(row.second,row.first);
         if(!error.isEmpty())status->setText(error);
     };

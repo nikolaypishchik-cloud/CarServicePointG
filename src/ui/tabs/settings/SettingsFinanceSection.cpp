@@ -873,7 +873,7 @@ QWidget* buildOutsourceDefaultsWidget(QWidget* parent)
 
 QWidget* SettingsFinanceSection::build(const QString& id, QWidget* owner)
 {
-    if(id=="fin.cash")return cashBankForm(owner,true);
+    if(id=="fin.cash")return cashSettingsForm(owner);
     if (id == QStringLiteral("fin.defaults")) {
         return buildFinanceDefaultsWidget(owner);
     }

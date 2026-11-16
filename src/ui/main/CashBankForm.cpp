@@ -24,6 +24,9 @@ QWidget* cashBankForm(QWidget* parent,bool configure)
         action->addItem(QObject::tr("Додати банківський рахунок"),"bank");
         action->addItem(QObject::tr("Додати сейф"),"safe");
         action->addItem(QObject::tr("Перейменувати"),"rename");
+        action->addItem(QObject::tr("Блокувати нові операції"),"block");
+        action->addItem(QObject::tr("Активувати"),"activate");
+        action->addItem(QObject::tr("Архівувати"),"archive");
     }else{
         layout->addRow(new QLabel(QObject::tr("Ручна звірка за банківською випискою. Фіскальна інтеграція відсутня."),page));
         action->addItem(QObject::tr("Записати зарахування банку"),"credit");
@@ -51,7 +54,7 @@ QWidget* cashBankForm(QWidget* parent,bool configure)
     auto reload=[=]{
         QString error;
         account->clear();credit->clear();source->clear();
-        for(const auto& item:accounts(error))if(configure || item.type=="bank")account->addItem(item.name,item.uid);
+        for(const auto& item:accounts(error,configure))if(configure || item.type=="bank")account->addItem(item.name+(item.state=="block"?QObject::tr(" · заблоковано"):item.state=="archive"?QObject::tr(" · архів"):QString()),item.uid);
         if(!configure && error.isEmpty()){
             const auto rows=credits(error);
             table->setRowCount(rows.size());
@@ -69,8 +72,9 @@ QWidget* cashBankForm(QWidget* parent,bool configure)
     };
     auto update=[=]{
         const auto kind=action->currentData().toString();
-        layout->setRowVisible(account,kind=="rename" || kind=="credit");
-        layout->setRowVisible(reference,kind!="match");
+        const bool lifecycle=QStringList{"block","activate","archive"}.contains(kind);
+        layout->setRowVisible(account,kind=="rename" || kind=="credit" || lifecycle);
+        layout->setRowVisible(reference,kind!="match" && !lifecycle);
         layout->setRowVisible(credit,kind=="match");layout->setRowVisible(source,kind=="match");
         layout->setRowVisible(net,kind=="credit");layout->setRowVisible(fee,kind=="credit");
         layout->setRowVisible(date,kind=="credit");layout->setRowVisible(matched,kind=="match");
@@ -87,6 +91,7 @@ QWidget* cashBankForm(QWidget* parent,bool configure)
         auto amount=[](QLineEdit* field){const auto parsed=ExactMoney::payment(field->text().trimmed().replace(',', '.').toStdString());
             const auto* cents=std::get_if<ExactMoney::Cents>(&parsed);return cents?*cents:qint64(-1);};
         if(kind=="bank" || kind=="safe"){c.action="account";c.sourceType=kind;c.account=accountUid;}
+        if(QStringList{"block","activate","archive"}.contains(kind))c.reference=c.account;
         if(kind=="credit"){c.net=amount(net);c.fee=amount(fee);c.date=date->date();}
         if(kind=="match"){c.account=credit->currentData(Qt::UserRole+1).toString();c.reference=credit->currentData().toString();
             c.sourceType=source->currentData(Qt::UserRole+1).toString();c.source=source->currentData().toString();c.matched=amount(matched);}

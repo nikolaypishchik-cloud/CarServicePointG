@@ -75,6 +75,7 @@ set(CS_CORE_SOURCES
     src/core/services/orders/CashBankService.cpp
     src/core/services/orders/CashOperations.cpp
     src/core/services/orders/CashReport.cpp
+    src/core/services/orders/CashDeskPolicy.cpp
     src/core/services/orders/CashOutflow.cpp
     src/core/services/orders/CashShiftService.cpp
     src/core/services/orders/CashAdvanceService.cpp

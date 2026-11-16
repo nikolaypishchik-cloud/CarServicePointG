@@ -21,7 +21,8 @@ QString methodTitle(const QString& method)
     if(method=="cash")return QStringLiteral("Готівка");
     if(method=="card")return QStringLiteral("Картка");
     if(method=="transfer" || method=="bank_transfer")return QStringLiteral("Переказ");
-    return QStringLiteral("Без руху коштів клієнта");
+    if(method=="allocation" || method=="internal")return QStringLiteral("Без руху коштів клієнта");
+    return method.trimmed().isEmpty()?QStringLiteral("Історично не визначено"):method;
 }
 static Page selectRows(QDate first,QDate last,const QString& search,const QString& operation,const QString& method,int offset,bool all)
 {
