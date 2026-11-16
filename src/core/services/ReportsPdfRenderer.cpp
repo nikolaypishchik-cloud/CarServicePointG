@@ -173,12 +173,16 @@ bool renderPeriodPdf(const QDate& fromDate, const QDate& toDate, ExportResult* r
         const auto formattedRowCells = ReportsPdfPeriodSupport::buildPeriodRowCells(rows);
 
         const int pages=ReportsPdfPeriodPageSupport::renderSummary(pdf,p,th,fromDate,toDate,summary);
-        if (!pages || !pdf.newPage()) return false;
+        if (!pages) return false;
+        pdf.setPageOrientation(QPageLayout::Portrait);
+        const int lastDetailPage = ReportsPdfPeriodPageSupport::renderOrderDetails(pdf, p, buildTheme(pdf), pages, rows);
+        pdf.setPageOrientation(QPageLayout::Landscape);
+        if (lastDetailPage < 0 || !pdf.newPage()) return false;
         const bool rendered=ReportsPdfPeriodPageSupport::renderPeriodPage(
             pdf,
             p,
             th,
-            pages+1,
+            lastDetailPage+1,
             title,
             subtitle,
             formattedRowCells,
@@ -255,7 +259,8 @@ ExportResult renderPartsRegisterPdf(QDate from, QDate to, const PartsRegisterSel
         QTextDocument document;
         document.documentLayout()->setPaintDevice(&pdf);
         document.setDefaultFont(QFont(QStringLiteral("Segoe UI"), 8));
-        document.setHtml(html);
+        document.setDefaultStyleSheet(QStringLiteral("body, p, td, th, h2 { color: #111111; }"));
+        document.setHtml("<body>" + html + "</body>");
         document.setPageSize(QSizeF(pdf.width(), pdf.height()));
         QPainter painter;
         if (!painter.begin(&pdf)) {

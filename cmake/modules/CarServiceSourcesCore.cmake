@@ -142,6 +142,7 @@ set(CS_CORE_SOURCES
     src/core/services/ReportsPdfPartsSupport.cpp
     src/core/services/ReportsPdfPartsPageSupport.cpp
     src/core/services/ReportsPdfPeriodSupport.cpp
+    src/core/services/ReportsPdfOrderDetailPages.cpp
     src/core/services/ReportsPdfPeriodPageSupport.cpp
     src/core/services/ReportsPdfPaintingSupport.cpp
     src/core/services/ReportsPdfLayoutSupport.cpp

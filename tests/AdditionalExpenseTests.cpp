@@ -967,6 +967,17 @@ private slots:
         QCOMPARE(summary.days.value(QDate(2025,12,5)).total(),8000);
         const auto sample=qEnvironmentVariable("CS_PERIOD_SUMMARY_PDF");
         if (!sample.isEmpty()) QVERIFY(QFile::copy(exported.path,sample));
+        // Enough rows to exercise carry-forward in the actual exported order.
+        for (int i = 1; i <= 48; ++i) {
+            q.prepare("INSERT INTO work_order_services(order_number,order_uid,service_uid,title,qty,price,amount) "
+                      "VALUES(11,'pdf-order',?,?,2,12.50,25)");
+            q.addBindValue(QStringLiteral("detail-%1").arg(i));
+            q.addBindValue(QStringLiteral("Detail line %1").arg(i));
+            QVERIFY2(q.exec(), qPrintable(q.lastError().text()));
+        }
+        QVERIFY2(ReportsPdfRenderer::renderPeriodPdf(QDate(2026,1,2),QDate(2026,1,2),&exported),qPrintable(exported.errorText));
+        const auto multiple = qEnvironmentVariable("CS_ORDER_DETAIL_PDF");
+        if (!multiple.isEmpty()) QVERIFY(QFile::copy(exported.path, multiple));
     }
     void reportDetailAndElectricityReadFailures() {
         QString error;QVERIFY2(PayrollReadFixture::schema(db,&error),qPrintable(error));QVERIFY2(PayrollReadFixture::populate(db,&error),qPrintable(error));QSqlQuery q(db);

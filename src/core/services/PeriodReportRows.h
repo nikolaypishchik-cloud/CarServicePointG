@@ -10,12 +10,13 @@ inline Result build(const PeriodReportGraph::Graph& graph,const ReportsPdfSuppor
     using namespace ReportsPdfSupport;
     using namespace ReportsPdfSupport::LocalSupport;
     Result result;auto& out=result.rows;auto& partsTotal=result.parts;auto& worksTotal=result.works;auto& partsMargin=result.margin;
-    struct ServiceRow { int id = 0; QString title; double amount = 0.0; };
+    struct ServiceRow { int id = 0; QString title; double amount = 0.0; QString quantity; QString unitPrice; };
     struct PartRow {
         int id = 0;
         int serviceId = 0;
         QString name;
         QString qty;
+        double quantity = 0.0;
         double clientAmount = 0.0;
         double added = 0.0;
         bool assigned = false;
@@ -23,7 +24,9 @@ inline Result build(const PeriodReportGraph::Graph& graph,const ReportsPdfSuppor
     for(const auto& ord:graph.orders) {
         const QString orderUid=ord.value(6).toString();
         const QString orderNumber=ord.value(1).toString(),car=ord.value(2).toString(),plate=formatPlateForUi(ord.value(3).toString()),orderDate=ord.value(7).toString();
-        QList<ServiceRow> services;for(const auto& row:graph.services.value(orderUid))services.append({row.value(0).toInt(),row.value(1).toString(),row.value(2).toDouble()});
+        QList<ServiceRow> services;for(const auto& row:graph.services.value(orderUid))services.append({row.value(0).toInt(),row.value(1).toString(),row.value(2).toDouble(),
+            row.value(3).isNull() ? QString() : FormatUtils::smartQty(row.value(3).toDouble()),
+            row.value(4).isNull() ? QString() : FormatUtils::money(row.value(4).toDouble(),2)});
         QList<PartRow> parts;
         for(const auto& qp:graph.parts.value(orderUid)) {
             const double qty = qp.value(3).toDouble();
@@ -40,6 +43,7 @@ inline Result build(const PeriodReportGraph::Graph& graph,const ReportsPdfSuppor
             pr.id = qp.value(0).toInt();
             pr.name = qp.value(1).toString();
             pr.qty = qty > 0.0 ? FormatUtils::smartQty(qty) : QString();
+            pr.quantity = qty;
             pr.clientAmount = financials.clientAmount;
             pr.added = financials.added;
             pr.serviceId = qp.value(9).toInt();
@@ -55,12 +59,12 @@ inline Result build(const PeriodReportGraph::Graph& graph,const ReportsPdfSuppor
                 std::sort(scored.begin(), scored.end(), [](const auto& a,const auto& b){ return a.first>b.first; });
                 for (const auto& pair : scored) matched.append(pair.second);
             }
-            if (matched.isEmpty()) { PeriodPdfRow r; r.orderUid=orderUid; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; r.workTitle=service.title; r.worksPrice=service.amount; r.total=service.amount; out.append(r); worksTotal += service.amount; continue; }
+            if (matched.isEmpty()) { PeriodPdfRow r; r.orderUid=orderUid; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; r.hasWork=true; r.workQuantity=service.quantity; r.workUnitPrice=service.unitPrice; r.workTitle=service.title; r.worksPrice=service.amount; r.total=service.amount; out.append(r); worksTotal += service.amount; continue; }
             bool first=true; double partsSum=0.0; double addedSum=0.0;
-            for (int idx : matched) { auto &pr=parts[idx]; pr.assigned=true; PeriodPdfRow r; r.orderUid=orderUid; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; if(first){ r.workTitle=service.title; r.worksPrice=service.amount; first=false; } r.partName=pr.name; r.qty=pr.qty; r.partsPrice=pr.clientAmount; r.added=pr.added; partsSum+=pr.clientAmount; addedSum+=pr.added; r.total=r.worksPrice + r.partsPrice; out.append(r); }
+            for (int idx : matched) { auto &pr=parts[idx]; pr.assigned=true; PeriodPdfRow r; r.orderUid=orderUid; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; if(first){ r.hasWork=true; r.workQuantity=service.quantity; r.workUnitPrice=service.unitPrice; r.workTitle=service.title; r.worksPrice=service.amount; first=false; } r.hasPart=true; r.partQuantity=pr.quantity; r.partName=pr.name; r.qty=pr.qty; r.partsPrice=pr.clientAmount; r.added=pr.added; partsSum+=pr.clientAmount; addedSum+=pr.added; r.total=r.worksPrice + r.partsPrice; out.append(r); }
             worksTotal += service.amount; partsTotal += partsSum; partsMargin += addedSum;
         }
-        for (auto &pr : parts) if (!pr.assigned) { PeriodPdfRow r; r.orderUid=orderUid; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; r.partName=pr.name; r.qty=pr.qty; r.partsPrice=pr.clientAmount; r.added=pr.added; r.total=pr.clientAmount; out.append(r); partsTotal += pr.clientAmount; partsMargin += pr.added; }
+        for (auto &pr : parts) if (!pr.assigned) { PeriodPdfRow r; r.orderUid=orderUid; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; r.hasPart=true; r.partQuantity=pr.quantity; r.partName=pr.name; r.qty=pr.qty; r.partsPrice=pr.clientAmount; r.added=pr.added; r.total=pr.clientAmount; out.append(r); partsTotal += pr.clientAmount; partsMargin += pr.added; }
     }
     return result;
 }

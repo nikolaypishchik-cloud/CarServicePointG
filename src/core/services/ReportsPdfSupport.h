@@ -28,6 +28,11 @@ struct PeriodSummary {
     QMap<QPair<QString,QString>,PeriodAmount> masters;
 };
 struct PeriodPdfRow {
+    bool hasWork = false;
+    bool hasPart = false;
+    QString workQuantity;
+    QString workUnitPrice;
+    double partQuantity = 0.0;
     QString orderUid;
     QString date;
     QString orderNumber;

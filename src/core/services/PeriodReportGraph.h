@@ -1,6 +1,7 @@
 #pragma once
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QSqlRecord>
 #include <QSqlError>
 #include <QVariant>
 #include <QSet>
@@ -25,9 +26,13 @@ inline bool read(QSqlDatabase db,const QString& from,const QString& to,Graph* ou
     if(q.lastError().isValid())return fail(q.lastError().text());q.finish();
     if(graph.orders.isEmpty()){*output=graph;return true;}
     const QString selected="WITH selected AS MATERIALIZED ("+selection+") ";
-    if(!execute(selected+"SELECT s.id,COALESCE(s.title,''),COALESCE(s.amount,0),s.order_uid,s.service_uid FROM router_work_order_services s WHERE s.order_uid IN (SELECT order_uid FROM selected) OR (NULLIF(TRIM(s.order_uid),'') IS NULL AND s.order_number IN (SELECT number FROM selected)) ORDER BY s.id ASC"))return false;
+    const auto serviceFields = db.record(QStringLiteral("router_work_order_services"));
+    const auto optionalField = [&](const QString& name) {
+        return serviceFields.contains(name) ? QStringLiteral(",s.") + name : QStringLiteral(",NULL");
+    };
+    if(!execute(selected+"SELECT s.id,COALESCE(s.title,''),COALESCE(s.amount,0),s.order_uid,s.service_uid"+optionalField("qty")+optionalField("price")+" FROM router_work_order_services s WHERE s.order_uid IN (SELECT order_uid FROM selected) OR (NULLIF(TRIM(s.order_uid),'') IS NULL AND s.order_number IN (SELECT number FROM selected)) ORDER BY s.id ASC"))return false;
     QSet<QString> serviceUids;QMap<QString,QSet<int>> serviceIds;
-    while(q.next()) {const auto owner=q.value(3).toString(),uid=q.value(4).toString();const auto id=q.value(0).toInt();if(!owners.contains(owner) || uid.trimmed().isEmpty() || serviceUids.contains(uid) || serviceIds[owner].contains(id))return fail("Ambiguous service identity in selected period");serviceUids.insert(uid);serviceIds[owner].insert(id);graph.services[owner]<<Row{q.value(0),q.value(1),q.value(2)};}
+    while(q.next()) {const auto owner=q.value(3).toString(),uid=q.value(4).toString();const auto id=q.value(0).toInt();if(!owners.contains(owner) || uid.trimmed().isEmpty() || serviceUids.contains(uid) || serviceIds[owner].contains(id))return fail("Ambiguous service identity in selected period");serviceUids.insert(uid);serviceIds[owner].insert(id);graph.services[owner]<<Row{q.value(0),q.value(1),q.value(2),q.value(5),q.value(6)};}
     if(q.lastError().isValid())return fail(q.lastError().text());q.finish();
     if(!execute(selected+"SELECT p.id,COALESCE(p.name,''),COALESCE(p.store,''),COALESCE(p.qty,0),COALESCE(p.amount,0),COALESCE(p.purchase_amount,CASE WHEN COALESCE(p.purchase_price,0)>0 THEN COALESCE(p.purchase_price,0)*COALESCE(p.qty,1) ELSE COALESCE(p.amount,0) END),COALESCE(p.purchase_price,0),COALESCE(p.markup_percent,0),COALESCE(p.manual_markup_override,0),COALESCE(p.service_id,0),COALESCE(p.pricing_calc_version,1),p.order_uid,p.part_uid FROM router_work_order_parts p WHERE p.order_uid IN (SELECT order_uid FROM selected) OR (NULLIF(TRIM(p.order_uid),'') IS NULL AND p.order_number IN (SELECT number FROM selected)) ORDER BY p.id ASC"))return false;
     QSet<QString> partUids;QMap<QString,QSet<int>> partIds;

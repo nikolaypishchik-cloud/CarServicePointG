@@ -98,7 +98,8 @@ int renderSummary(QPdfWriter& pdf,QPainter& painter,const ReportsPdfLayoutSuppor
     document.setDefaultFont(QFont("Arial",10));
     const QSizeF area(theme.contentWidth,theme.bottom-theme.top);
     document.setPageSize(area);
-    document.setHtml(html);
+    document.setDefaultStyleSheet(QStringLiteral("body, p, td, th, h1, h2, h3 { color: #111111; }"));
+    document.setHtml("<body>" + html + "</body>");
     const int pages=document.pageCount();
     for(int i=0;i<pages;++i) {
         if(i && !pdf.newPage()) return 0;

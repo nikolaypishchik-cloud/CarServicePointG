@@ -11,6 +11,8 @@ class QPdfWriter;
 
 namespace ReportsPdfPeriodPageSupport {
 
+int renderOrderDetails(QPdfWriter& pdf, QPainter& painter, const ReportsPdfLayoutSupport::PdfTheme& theme,
+                       int pageNumber, const QList<ReportsPdfSupport::PeriodPdfRow>& rows);
 int renderSummary(QPdfWriter& pdf,QPainter& painter,const ReportsPdfLayoutSupport::PdfTheme& theme,
                    QDate first,QDate last,const ReportsPdfSupport::PeriodSummary& summary);
 bool renderPeriodPage(
