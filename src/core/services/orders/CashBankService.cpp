@@ -53,16 +53,29 @@ QList<Account> accounts(QString& error,bool includeInactive)
     while(q.next())if(includeInactive || q.value(3)=="activate")items.append({q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString()});
     error=q.lastError().text();return items;
 }
+QList<Channel> channels(QString& error)
+{
+    auto db=Database::db();
+    if(!AccessControlService::currentUserHasPermission(db,"cash.view")){error=QStringLiteral("Немає доступу.");return {};}
+    if(!db.tables().contains("cash_bank_events"))return {};
+    QSqlQuery q(db);
+    if(!q.exec("SELECT uid,account,reference,source FROM main.cash_bank_events WHERE action='channel' ORDER BY reference,uid")){
+        error=q.lastError().text();return {};
+    }
+    QList<Channel> result;
+    while(q.next())result.append({q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString()});
+    error=q.lastError().text();return result;
+}
 QList<Credit> credits(QString& error)
 {
     auto db=Database::db();
     if(!AccessControlService::currentUserHasPermission(db,"cash.view")){error=QStringLiteral("Немає доступу.");return {};}
     if(!db.tables().contains("cash_bank_events"))return {};
     QSqlQuery q(db);
-    if(!q.exec("SELECT b.uid,b.account,a.name,b.reference,b.day,b.net,b.fee,b.net+b.fee-COALESCE((SELECT SUM(m.matched) FROM main.cash_bank_events m WHERE m.action='match' AND m.account=b.account AND m.reference=b.reference),0) "
+    if(!q.exec("SELECT b.uid,b.account,a.name,b.reference,b.day,b.net,b.fee,b.net+b.fee-COALESCE((SELECT SUM(m.matched) FROM main.cash_bank_events m WHERE m.action='match' AND m.account=b.account AND m.reference=b.reference),0), (SELECT ch.reference FROM main.cash_bank_events ch WHERE b.source_type='channel' AND ch.uid=b.source AND ch.action='channel') "
                "FROM main.cash_bank_events b JOIN main.cash_accounts a ON a.uid=b.account WHERE b.action='credit' ORDER BY b.day DESC,b.rowid DESC")){error=q.lastError().text();return {};}
     QList<Credit> items;
-    while(q.next())items.append({q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString(),q.value(5).toLongLong(),q.value(6).toLongLong(),q.value(7).toLongLong()});
+    while(q.next())items.append({q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toString(),q.value(4).toString(),q.value(5).toLongLong(),q.value(6).toLongLong(),q.value(7).toLongLong(),q.value(8).toString()});
     error=q.lastError().text();return items;
 }
 QList<Pending> pending(QString& error)
@@ -85,7 +98,7 @@ QList<Pending> pending(QString& error)
 Result post(const Command& c)
 {
     const bool lifecycle=QStringList{"block","activate","archive"}.contains(c.action);
-    const bool configure=c.action=="account" || c.action=="rename" || lifecycle;
+    const bool configure=c.action=="account" || c.action=="rename" || c.action=="channel" || lifecycle;
     if(!configure && c.action!="credit" && c.action!="match")return {QStringLiteral("Невідома дія.")};
     const auto reason=c.reason.trimmed(),reference=c.reference.trimmed();
     if(QUuid(c.uid).isNull() || c.account.isEmpty() || reference.isEmpty() || reason.isEmpty() || reason.size()>300 || !c.date.isValid() || c.date>QDate::currentDate() || c.net<0 || c.fee<0 || c.matched<0)
@@ -103,7 +116,15 @@ Result post(const Command& c)
         for(int i=0;i<args.size();++i)if(q.value(i).toString()!=args[i].toString())return {QStringLiteral("Запит уже має інші реквізити.")};
         return {{},true};
     }
-    if(configure){
+    if(c.action=="channel"){
+        if(c.net || c.fee || c.matched || reference.size()>100 || !c.sourceType.isEmpty() || c.source.size()>300)
+            return {QStringLiteral("Перевірте назву та умови каналу еквайрингу.")};
+        if(auto error=activeAccountError(db,c.account);!error.isEmpty())return {error};
+        if(!run(q,"SELECT type FROM main.cash_accounts WHERE uid=?",{c.account}))return {q.lastError().text()};
+        if(!q.next() || q.value(0)!="bank")return {QStringLiteral("Оберіть банківський рахунок зарахування.")};
+        if(!run(q,"SELECT 1 FROM main.cash_bank_events WHERE action='channel' AND account=? AND reference=?",{c.account,reference}))return {q.lastError().text()};
+        if(q.next())return {QStringLiteral("Канал із такою назвою вже існує для цього рахунку.")};
+    }else if(configure){
         if(c.net || c.fee || c.matched || !c.source.isEmpty() || reference.size()>100)return {QStringLiteral("Перевірте назву рахунку.")};
         if(c.action=="account"){
             if(QUuid(c.account).isNull() || (c.sourceType!="bank" && c.sourceType!="safe"))return {QStringLiteral("Перевірте тип та UID рахунку.")};
@@ -129,7 +150,11 @@ Result post(const Command& c)
         if(auto error=activeAccountError(db,c.account);!error.isEmpty())return {error};
         if(!run(q,"SELECT type FROM main.cash_accounts WHERE uid=?",{c.account}) || !q.next() || q.value(0)!="bank")return {QStringLiteral("Оберіть налаштований банківський рахунок.")};
         if(c.action=="credit"){
-            if(c.matched || !c.source.isEmpty() || !c.sourceType.isEmpty() || (c.net==0 && c.fee==0) || !std::holds_alternative<ExactMoney::Cents>(ExactMoney::sum({c.net,c.fee})))
+            if(c.sourceType=="channel"){
+                if(!run(q,"SELECT 1 FROM main.cash_bank_events WHERE action='channel' AND uid=? AND account=?",{c.source,c.account}))return {q.lastError().text()};
+                if(!q.next())return {QStringLiteral("Канал не відповідає рахунку зарахування.")};
+            }else if(!c.sourceType.isEmpty() || !c.source.isEmpty())return {QStringLiteral("Невідоме джерело зарахування.")};
+            if(c.matched || (c.net==0 && c.fee==0) || !std::holds_alternative<ExactMoney::Cents>(ExactMoney::sum({c.net,c.fee})))
                 return {QStringLiteral("Перевірте фактичне зарахування й комісію.")};
         }else{
             if(c.net || c.fee || c.matched<=0 || (c.sourceType!="advance" && c.sourceType!="payment"))return {QStringLiteral("Оберіть первинну карткову оплату і суму звірки.")};
