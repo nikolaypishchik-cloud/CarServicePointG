@@ -149,6 +149,9 @@ private:
     QTabWidget* m_tabs = nullptr;
     QPushButton* m_pdfButton = nullptr;
 
+    PeriodFilter periodFilter() const;
+    QComboBox* m_periodMaster = nullptr;
+    QLineEdit* m_periodSearch = nullptr;
     QComboBox* m_periodGrouping = nullptr;
     PeriodGroupsView* m_periodGroups = nullptr;
     QLabel* m_weekComparison = nullptr;

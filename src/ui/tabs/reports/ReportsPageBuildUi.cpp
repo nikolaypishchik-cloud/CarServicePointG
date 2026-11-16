@@ -242,7 +242,21 @@ void ReportsPage::buildUi()
     m_periodGrouping->setAccessibleName(tr("Групування нарядів"));
     m_periodGrouping->addItems({tr("За тижнями й днями"),tr("Список нарядів")});
     m_periodGrouping->hide();
-    static_cast<QVBoxLayout*>(periodPage->layout())->insertWidget(0,m_periodGrouping,0,Qt::AlignLeft);
+    auto* periodTools=new QHBoxLayout;
+    periodLayout->insertLayout(0,periodTools);
+    periodTools->addWidget(m_periodGrouping);
+    m_periodMaster=new QComboBox(periodPage);
+    m_periodMaster->setObjectName("periodMaster");
+    m_periodMaster->setAccessibleName(tr("Майстер"));
+    m_periodMaster->addItem(tr("Усі майстри"),QString());
+    periodTools->addWidget(m_periodMaster);
+    m_periodSearch=new QLineEdit(periodPage);
+    m_periodSearch->setObjectName("periodOrderSearch");
+    m_periodSearch->setPlaceholderText(tr("Номер наряду або автомобіль"));
+    m_periodSearch->setClearButtonEnabled(true);
+    periodTools->addWidget(m_periodSearch,1);
+    connect(m_periodMaster,&QComboBox::currentIndexChanged,this,[this]{scheduleRefresh(0);});
+    connect(m_periodSearch,&QLineEdit::textChanged,this,[this]{scheduleRefresh(180);});
     connect(m_periodGrouping,&QComboBox::currentIndexChanged,this,[this](int mode) {
         m_periodGroups->setVisible(mode==0);
         m_periodTable->setVisible(mode==1);

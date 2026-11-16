@@ -24,7 +24,7 @@ void startPeriodLoad(QObject* owner,
                      const QString& dbPath,
                      const QString& df,
                      const QString& dt,
-                     std::function<void(const PeriodSnapshot&)> onReady);
+                     std::function<void(const PeriodSnapshot&)> onReady, const PeriodFilter& filter = {});
 
 void startOrdersLoad(QObject* owner,
                      const AsyncTaskHandle& asyncHandle,

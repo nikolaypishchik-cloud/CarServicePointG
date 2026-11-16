@@ -29,7 +29,14 @@ struct PeriodComparison {
     double works = 0, parts = 0;
 };
 
+struct PeriodFilter {
+    QString master;
+    QString search;
+    QString key() const { return QString::number(master.size()) + ":" + master + search; }
+};
+
 struct PeriodSnapshot {
+    QMap<QString,QString> masters;
     QList<PeriodComparison> previousWeeks;
     double currentTotal = 0;
     QList<PeriodSnapshotRow> rows;
@@ -182,7 +189,7 @@ namespace ReportsDataLoader {
 
 QString currentDatabasePath();
 
-PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, const QString& dt);
+PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, const QString& dt, const PeriodFilter& filter = {});
 OrdersSnapshot buildOrdersSnapshot(const QString& dbPath, const QString& df, const QString& dt, const QString& filter = QString());
 PartsSnapshot buildPartsSnapshot(const QString& dbPath, const QString& df, const QString& dt,
     double defaultParts, double defaultOil, const QMap<QString,double>& partsMap, const QMap<QString,double>& oilMap);

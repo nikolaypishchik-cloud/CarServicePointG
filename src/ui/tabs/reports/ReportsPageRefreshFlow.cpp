@@ -203,6 +203,7 @@ void ReportsPage::refreshActiveTab()
     }
     const bool asyncTab = ReportsAsyncSupport::isAsyncTab(idx);
     const QString key = ReportsAsyncSupport::buildTabKey(idx, m_from ? m_from->date() : QDate(), m_to ? m_to->date() : QDate())
+        + (tab==ReportTab::Period ? periodFilter().key() : QString())
         + (tab == ReportTab::Orders ? QStringLiteral("|search:") + m_searchEdit->text().trimmed() : QString());
     if (m_tabKeys.value(idx) == key) {
         applyCachedTabUi(tab);
@@ -425,9 +426,26 @@ void ReportsPage::updateDashboard()
     }
 }
 
+PeriodFilter ReportsPage::periodFilter() const
+{
+    return {m_periodMaster->currentData().toString(),m_periodSearch->text().trimmed()};
+}
+
 void ReportsPage::applyPeriodSnapshot(const PeriodSnapshot& snapshot)
 {
     ReportsTableSupport::applyPeriodSnapshot(m_periodTable, m_periodModel, snapshot);
+    const auto selected=m_periodMaster->currentData().toString();
+    const auto selectedLabel=m_periodMaster->currentText();
+    {
+        QSignalBlocker blocker(m_periodMaster);
+        m_periodMaster->clear();
+        m_periodMaster->addItem(tr("Усі майстри"),QString());
+        for (auto it=snapshot.masters.cbegin();it!=snapshot.masters.cend();++it)
+            m_periodMaster->addItem(it.value(),it.key());
+        if (!selected.isEmpty() && !snapshot.masters.contains(selected))
+            m_periodMaster->addItem(selectedLabel,selected);
+        m_periodMaster->setCurrentIndex(qMax(0,m_periodMaster->findData(selected)));
+    }
     m_periodGroups->showSnapshot(snapshot);
     m_periodGrouping->setVisible(!snapshot.rows.isEmpty());
     const bool grouped=!snapshot.rows.isEmpty() && m_periodGrouping->currentIndex()==0;
@@ -456,7 +474,8 @@ void ReportsPage::refreshPeriod()
 {
     const QString df = m_from->date().toString("yyyy-MM-dd");
     const QString dt = m_to->date().toString("yyyy-MM-dd");
-    const QString key = ReportsAsyncSupport::buildTabKey(static_cast<int>(ReportTab::Period), m_from->date(), m_to->date());
+    const auto filter=periodFilter();
+    const QString key = ReportsAsyncSupport::buildTabKey(static_cast<int>(ReportTab::Period), m_from->date(), m_to->date()) + filter.key();
     const QString dbPath = ReportsDataLoader::currentDatabasePath();
     const quint64 generation = ++m_asyncRefreshGeneration;
     const auto cancelToken = AsyncTaskHandle::renewCancellationToken(m_asyncCancelToken);
@@ -471,14 +490,14 @@ void ReportsPage::refreshPeriod()
     updateStats({QString::fromUtf8("Завантаження звіту за період…")});
     ReportsAsyncSupport::showLoadingRow(m_periodTable, m_periodModel, QString::fromUtf8("Завантаження…"));
 
-    ReportsAsyncSupport::startPeriodLoad(this, asyncHandle, dbPath, df, dt, [this, generation, key](const PeriodSnapshot& snapshot) {
+    ReportsAsyncSupport::startPeriodLoad(this, asyncHandle, dbPath, df, dt, [this, generation, key, filter](const PeriodSnapshot& snapshot) {
         if (generation != m_asyncRefreshGeneration) return;
-        if (activeTab() != ReportTab::Period) return;
+        if (activeTab() != ReportTab::Period || periodFilter().key()!=filter.key()) return;
         applyPeriodSnapshot(snapshot);
         if (snapshot.error.isEmpty()) m_tabKeys[static_cast<int>(ReportTab::Period)] = key;
         else m_tabKeys.remove(static_cast<int>(ReportTab::Period));
         applyCachedTabUi(ReportTab::Period);
-    });
+    },filter);
 }
 
 void ReportsPage::applyOrdersSnapshot(const OrdersSnapshot& snapshot)

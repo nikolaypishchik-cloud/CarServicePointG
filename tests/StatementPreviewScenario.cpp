@@ -1,6 +1,7 @@
 #include "ui/tabs/reports/ReportsPage.h"
 #include <QtTest>
 #include <QTreeWidget>
+#include <QLineEdit>
 #include <QTableView>
 #include "ui/tabs/reports/ReportsTableSupport.h"
 #include <QComboBox>
@@ -355,4 +356,20 @@ void checkWeeklyReportScreen(QSqlDatabase db) {
     QVERIFY(weeks[3].contains("11.12.2024") && weeks[3].contains("немає нарядів"));
     const auto output=qEnvironmentVariable("CS_TEST_SCREENSHOTS");
     if (!output.isEmpty()) QVERIFY(page.grab().save(QDir(output).filePath("four-weeks.png")));
+    auto* master=page.findChild<QComboBox*>("periodMaster");
+    auto* search=page.findChild<QLineEdit*>("periodOrderSearch");
+    QVERIFY(master && search);
+    master->setCurrentIndex(master->findData("name:N"));
+    QTRY_COMPARE_WITH_TIMEOUT(groups->topLevelItem(0)->text(6),groups->locale().toString(40.0,'f',2),15000);
+    QCOMPARE(text().count("немає нарядів"),4);
+    master->setCurrentIndex(0);
+    search->setText("10");
+    QTRY_VERIFY_WITH_TIMEOUT(groups->isVisible() && groups->topLevelItem(0)->text(1)=="1"
+        && groups->topLevelItem(0)->text(6)==groups->locale().toString(80.0,'f',2)
+        && master->currentIndex()==0 && text().count("немає нарядів")==4,15000);
+    search->setText("cAR2");
+    QTRY_COMPARE_WITH_TIMEOUT(groups->topLevelItem(0)->text(6),groups->locale().toString(40.0,'f',2),15000);
+    search->clear();
+    QTRY_COMPARE_WITH_TIMEOUT(groups->topLevelItem(0)->text(1),QStringLiteral("2"),15000);
+    QVERIFY(text().contains("100"));
 }

@@ -29,7 +29,7 @@ QString currentDatabasePath()
 }
 
 
-PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, const QString& dt)
+PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, const QString& dt, const PeriodFilter& filter)
 {
     PeriodSnapshot snapshot;
     const QString connName = makeReportsWorkerConnectionName(QStringLiteral("period"));
@@ -52,14 +52,16 @@ PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, con
                 for (int week = 1; week <= 4; ++week)
                     snapshot.previousWeeks.append(PeriodComparison{first.addDays(-7 * week), last.addDays(-7 * week)});
             }
-            const QString uidColumn=db.record("router_work_orders").contains("order_uid") ? "wo.order_uid" : "NULL";
+            const auto columns=db.record("router_work_orders");
+            const QString plateColumn=columns.contains("plate") ? "wo.plate" : "NULL";
+            const QString uidColumn=columns.contains("order_uid") ? "wo.order_uid" : "NULL";
             q.prepare(QStringLiteral(
                 "SELECT date(CASE WHEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),3,1)='.' AND substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,2) END||'-'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),4,2)||'-'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),1,2) ELSE COALESCE(NULLIF(wo.closed_at,''), wo.opened_at) END) AS report_day, "
                 "COALESCE(wo.order_number,wo.number), wo.number, wo.car, "
                 "COALESCE(NULLIF(wo.master_name_closed,''),m.name,''), "
-                "COALESCE(wo.works_sum,0), COALESCE(wo.parts_sum,0), wo.master_id, %1 "
+                "COALESCE(wo.works_sum,0), COALESCE(wo.parts_sum,0), wo.master_id, %1, %2 "
                 "FROM router_work_orders wo LEFT JOIN masters m ON m.id = wo.master_id "
-                "WHERE report_day BETWEEN date(?) AND date(?) ORDER BY report_day DESC, wo.number DESC").arg(uidColumn));
+                "WHERE report_day BETWEEN date(?) AND date(?) ORDER BY report_day DESC, wo.number DESC").arg(uidColumn,plateColumn));
             q.addBindValue(snapshot.previousWeeks.isEmpty() ? df : snapshot.previousWeeks.last().from.toString(Qt::ISODate));
             q.addBindValue(last.toString(Qt::ISODate));
 
@@ -73,6 +75,18 @@ PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, con
                     const double ws = q.value(5).toDouble();
                     const double ps = q.value(6).toDouble();
                     const auto day = q.value(0).toDate();
+                    const QString name=q.value(4).toString().trimmed();
+                    const QString id=q.value(7).toString();
+                    const QString master=id.isEmpty()?"name:"+name:"id:"+id;
+                    if (day>=first && !snapshot.masters.contains(master)) {
+                        QString label=name.isEmpty()?QStringLiteral("Майстра не вказано"):name;
+                        if (!id.isEmpty()) label+=QStringLiteral(" (№%1)").arg(id);
+                        snapshot.masters.insert(master,label);
+                    }
+                    if (!filter.master.isEmpty() && master!=filter.master) continue;
+                    if (!filter.search.isEmpty() && !q.value(1).toString().contains(filter.search,Qt::CaseInsensitive)
+                        && !q.value(3).toString().contains(filter.search,Qt::CaseInsensitive)
+                        && !q.value(9).toString().contains(filter.search,Qt::CaseInsensitive)) continue;
                     if (day < first) {
                         for (auto& week : snapshot.previousWeeks) {
                             if (day >= week.from && day <= week.to) {

@@ -118,17 +118,17 @@ void startPeriodLoad(QObject* owner,
                      const QString& dbPath,
                      const QString& df,
                      const QString& dt,
-                     std::function<void(const PeriodSnapshot&)> onReady)
+                     std::function<void(const PeriodSnapshot&)> onReady, const PeriodFilter& filter)
 {
-    const QString cacheKey = ReportsSnapshotCache::makeReportsKey(QStringLiteral("period"), dbPath, df, dt) + "|" + QDate::currentDate().toString(Qt::ISODate);
+    const QString cacheKey = ReportsSnapshotCache::makeReportsKey(QStringLiteral("period"), dbPath, df, dt, filter.key()) + "|" + QDate::currentDate().toString(Qt::ISODate);
     startSnapshotWorkerImpl<PeriodSnapshot>(owner,
         asyncHandle,
         QStringLiteral("reports.period"),
         cacheKey,
         ReportsSnapshotCache::tryGetPeriod,
         ReportsSnapshotCache::storePeriod,
-        [dbPath, df, dt]() {
-            return ReportsDataLoader::buildPeriodSnapshot(dbPath, df, dt);
+        [dbPath, df, dt, filter]() {
+            return ReportsDataLoader::buildPeriodSnapshot(dbPath, df, dt, filter);
         },
         std::move(onReady));
 }
