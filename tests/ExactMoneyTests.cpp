@@ -1,4 +1,5 @@
 #include "core/finance/ExactMoney.h"
+#include "core/finance/CustomerCash.h"
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -32,6 +33,42 @@ int main(int argc,char** argv) {
     reject(sum({std::numeric_limits<Cents>::max(),1}));
     reject(sum({std::numeric_limits<Cents>::min(),-1}));
     check(payment("12.34"),1234);reject(payment("12.345"));
+    using CustomerCash::Operation;
+    auto checkMovement = [&](Operation operation, Cents amount, Cents received,
+                             Cents paid, Cents freeAdvance) {
+        for (bool reverse : {false, true}) {
+            ++count;
+            const auto result = CustomerCash::movement(operation, amount, reverse);
+            const int sign = reverse ? -1 : 1;
+            if (!result || result->received != sign * received
+                || result->paidOnOrders != sign * paid || result->freeAdvance != sign * freeAdvance)
+                ++failures;
+        }
+    };
+    checkMovement(Operation::Advance, 400000, 400000, 0, 400000);
+    checkMovement(Operation::Allocation, 250000, 0, 250000, -250000);
+    checkMovement(Operation::Payment, 750000, 750000, 750000, 0);
+    checkMovement(Operation::AdvanceRefund, 150000, -150000, 0, -150000);
+    checkMovement(Operation::PaymentRefund, 100000, -100000, -100000, 0);
+    for (Cents invalid : {Cents{0}, std::numeric_limits<Cents>::min()}) {
+        ++count;
+        if (CustomerCash::movement(Operation::Advance, invalid))
+            ++failures;
+    }
+    using CustomerCash::Method;
+    auto checkDrawer = [&](Operation op, Method method, bool reversal, std::optional<Cents> expected) {
+        ++count;
+        if (CustomerCash::drawerChange(op, 1250, method, reversal) != expected)
+            ++failures;
+    };
+    checkDrawer(Operation::Payment, Method::Cash, false, 1250);
+    checkDrawer(Operation::Advance, Method::Cash, true, -1250);
+    checkDrawer(Operation::PaymentRefund, Method::Cash, false, -1250);
+    checkDrawer(Operation::Payment, Method::Card, false, 0);
+    checkDrawer(Operation::Advance, Method::Transfer, false, 0);
+    checkDrawer(Operation::Allocation, Method::NoMoneyMovement, false, 0);
+    checkDrawer(Operation::Allocation, Method::Cash, false, std::nullopt);
+    checkDrawer(Operation::Payment, Method::NoMoneyMovement, false, std::nullopt);
     std::cout<<"CHECKS="<<count<<" FAILURES="<<failures<<"\n";
     return count>14 && !failures?0:1;
 }
