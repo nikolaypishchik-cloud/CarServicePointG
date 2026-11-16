@@ -1,11 +1,14 @@
 #pragma once
 
+#include <QDate>
 #include <QSqlDatabase>
 #include <QString>
 #include <QStringList>
 #include <QVariantMap>
 
 namespace BusinessExtensionsService {
+bool readEstimateDecisions(QSqlDatabase db, const QString& clientUid, const QString& vehicleUid,
+                           const QDate& firstDay, const QDate& lastDay, QVariantList& rows, QString* errorText = nullptr);
 bool upsertEstimateApproval(QSqlDatabase db, const QVariantMap& payload, QString* approvalUid = nullptr, QString* errorText = nullptr);
 bool decideEstimateApproval(QSqlDatabase db, const QString& approvalUid, const QString& status, const QString& comment, QString* errorText = nullptr);
 bool upsertSupplierQuote(QSqlDatabase db, const QVariantMap& payload, QString* quoteUid = nullptr, QString* errorText = nullptr);

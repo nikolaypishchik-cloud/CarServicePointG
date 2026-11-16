@@ -307,7 +307,7 @@ private slots:
     }
     void estimateDecisionHistoryRetainsClientAndActor() {
         QString error;
-        const auto firstDay = QDateTime::currentDateTimeUtc().date();
+        const auto firstDay = QDate::currentDate();
         QVERIFY2(CloudSyncSchemaService::ensureSchema(db, &error), qPrintable(error));
         QSqlQuery q(db);
         QVERIFY(q.exec("INSERT INTO estimate_approvals(approval_uid,order_uid,client_uid,vehicle_uid) "
@@ -324,24 +324,23 @@ private slots:
                  qPrintable(error));
 
         for (const auto& suffix : {QStringLiteral("A"),QStringLiteral("B")}) {
-            q.prepare("SELECT actor_id,json_extract(payload_json,'$.after.order_uid'),"
-                      "json_extract(payload_json,'$.after.status'),json_extract(payload_json,'$.after.decision_comment') "
-                      "FROM activity_audit_events WHERE entity_type='estimate_approval' AND action='decision' "
-                      "AND entity_id='estimate-A' AND json_extract(payload_json,'$.after.client_uid')=? "
-                      "AND json_extract(payload_json,'$.after.vehicle_uid')=? "
-                      "AND date(occurred_at) BETWEEN ? AND ?");
-            q.addBindValue("client-"+suffix);
-            q.addBindValue("car-"+suffix);
-            q.addBindValue(firstDay.toString(Qt::ISODate));
-            q.addBindValue(QDateTime::currentDateTimeUtc().date().toString(Qt::ISODate));
-            QVERIFY2(q.exec(),qPrintable(q.lastError().text()));
-            QVERIFY(q.next());
-            QCOMPARE(q.value(0).toString(),"operator-"+suffix);
-            QCOMPARE(q.value(1).toString(),"order-"+suffix);
-            QCOMPARE(q.value(2).toString(),suffix=="A"?QStringLiteral("approved"):QStringLiteral("declined"));
-            QCOMPARE(q.value(3).toString(),suffix=="A"?QStringLiteral("first"):QStringLiteral("second"));
-            QVERIFY(!q.next());
-            q.finish();
+            QVariantList rows;
+            const auto today = QDate::currentDate();
+            QVERIFY2(BusinessExtensionsService::readEstimateDecisions(db, "client-"+suffix, "car-"+suffix,
+                         firstDay, today, rows, &error), qPrintable(error));
+            QCOMPARE(rows.size(), 1);
+            const auto row = rows.first().toMap();
+            QCOMPARE(row.value("actor_id").toString(), "operator-"+suffix);
+            QCOMPARE(row.value("order_uid").toString(), "order-"+suffix);
+            QCOMPARE(row.value("approval_uid").toString(), QStringLiteral("estimate-A"));
+            QCOMPARE(row.value("status").toString(), suffix=="A"?QStringLiteral("approved"):QStringLiteral("declined"));
+            QCOMPARE(row.value("decision_comment").toString(), suffix=="A"?QStringLiteral("first"):QStringLiteral("second"));
+            QVERIFY(BusinessExtensionsService::readEstimateDecisions(db, "client-"+suffix, {}, firstDay, today, rows, &error));
+            QCOMPARE(rows.size(), 1);
+            QVERIFY(BusinessExtensionsService::readEstimateDecisions(db, "client-"+suffix, "other", firstDay, today, rows, &error));
+            QVERIFY(rows.isEmpty());
+            QVERIFY(BusinessExtensionsService::readEstimateDecisions(db, "client-"+suffix, {}, firstDay.addDays(-1), firstDay.addDays(-1), rows, &error));
+            QVERIFY(rows.isEmpty());
         }
     }
     void missingEstimateCannotRecordDecision() {

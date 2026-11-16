@@ -129,6 +129,44 @@ bool queueCommunicationDirect(QSqlDatabase db, const QString& uid, const QVarian
 
 namespace BusinessExtensionsService {
 
+bool readEstimateDecisions(QSqlDatabase db, const QString& clientUid, const QString& vehicleUid,
+                           const QDate& firstDay, const QDate& lastDay, QVariantList& rows, QString* errorText)
+{
+    rows.clear();
+    if (clientUid.trimmed().isEmpty() || !firstDay.isValid() || !lastDay.isValid() || firstDay > lastDay) {
+        if (errorText) *errorText = QStringLiteral("Invalid statement client or period");
+        return false;
+    }
+    QSqlQuery query(db);
+    QString filter = QStringLiteral(
+        "SELECT id,entity_id,actor_id,actor_name,json_extract(payload_json,'$.after') "
+        "FROM activity_audit_events WHERE entity_type='estimate_approval' AND action='decision' "
+        "AND json_extract(payload_json,'$.after.client_uid')=? "
+        "AND date(json_extract(payload_json,'$.after.decision_at'),'localtime') BETWEEN ? AND ? ");
+    if (!vehicleUid.isEmpty())
+        filter += QStringLiteral("AND json_extract(payload_json,'$.after.vehicle_uid')=? ");
+    query.prepare(filter + QStringLiteral("ORDER BY json_extract(payload_json,'$.after.decision_at'), id"));
+    query.addBindValue(clientUid);
+    query.addBindValue(firstDay.toString(Qt::ISODate));
+    query.addBindValue(lastDay.toString(Qt::ISODate));
+    if (!vehicleUid.isEmpty()) query.addBindValue(vehicleUid);
+    if (!execPrepared(query, errorText)) return false;
+    while (query.next()) {
+        auto row = QJsonDocument::fromJson(query.value(4).toByteArray()).object().toVariantMap();
+        row.insert(QStringLiteral("audit_id"), query.value(0));
+        row.insert(QStringLiteral("approval_uid"), query.value(1));
+        row.insert(QStringLiteral("actor_id"), query.value(2));
+        row.insert(QStringLiteral("actor_name"), query.value(3));
+        rows.append(row);
+    }
+    if (query.lastError().isValid()) {
+        rows.clear();
+        if (errorText) *errorText = query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
 bool upsertEstimateApproval(QSqlDatabase db, const QVariantMap& payload, QString* approvalUid, QString* errorText)
 {
     const QString uid = text(payload, QStringLiteral("approval_uid")).isEmpty()
