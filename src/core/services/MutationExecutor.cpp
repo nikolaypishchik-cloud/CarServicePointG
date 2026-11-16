@@ -70,6 +70,12 @@ QJsonObject snapshotForAudit(QSqlDatabase database, const MutationExecutor::Requ
     const QString id = request.entityId.trimmed();
     if (id.isEmpty()) return {};
 
+    if (entity == QStringLiteral("estimate_approval") && operation == QStringLiteral("decision")) {
+        return selectOne(database, QStringLiteral(
+            "SELECT approval_uid,order_uid,client_uid,vehicle_uid,status,decision_comment,"
+            "CASE status WHEN 'approved' THEN approved_at WHEN 'declined' THEN declined_at END AS decision_at "
+            "FROM estimate_approvals WHERE approval_uid=?"), {id}, errorText);
+    }
     if (entity == QStringLiteral("crm_task")) {
         return selectOne(database, QStringLiteral("SELECT * FROM crm_client_tasks WHERE task_uid=?"), {id}, errorText);
     }

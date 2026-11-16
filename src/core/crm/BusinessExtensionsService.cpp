@@ -159,7 +159,6 @@ bool decideEstimateApproval(QSqlDatabase db, const QString& approvalUid, const Q
     request.operation = QStringLiteral("decision");
     request.description = QString::fromUtf8("Рішення клієнта щодо кошторису");
     request.changedTables = {QStringLiteral("estimate_approvals")};
-    request.systemMaintenance = true;
     const auto result = MutationExecutor::execute(db, request, [&](QSqlDatabase& txDb, QString* txError) {
         QSqlQuery q(txDb);
         if (status == QStringLiteral("approved")) {
