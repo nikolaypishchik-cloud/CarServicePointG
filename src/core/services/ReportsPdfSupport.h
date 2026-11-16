@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/services/OutsourceReportFilter.h"
+
 #include "core/services/orders/PartMarkupPolicyService.h"
 
 #include <QList>
@@ -131,7 +133,7 @@ QList<PeriodPdfRow> collectPeriodPdfRows(const QString& df, const QString& dt,
                                          double& outsourceMargin, double& salaryTotal, double& expensesTotal, QString* error = nullptr, PeriodSummary* summary = nullptr);
 QMap<QString, QList<PartPdfRow>> collectPartsPdfGroups(const QString& df, const QString& dt, QString* error = nullptr);
 QMap<QString, QList<OutsourcePdfRow>> collectOutsourceGroups(const QString& df, const QString& dt,
-                                                             int& count, double& repairTotal, double& clientTotal, QString* error = nullptr);
+                                                             int& count, double& repairTotal, double& clientTotal, QString* error = nullptr, const OutsourceReportFilter& filter = {});
 bool validateFinancialPdfSource(const QDate& from, const QDate& to, QString* error);
 bool validateExpensesPdfSource(const QDate& from, const QDate& to, QString* error);
 QList<PayrollMasterPdf> collectPayrollDetails(const QString& df, const QString& dt, QString* error = nullptr, bool includeWorkText = true, const QString& employeeId = {});

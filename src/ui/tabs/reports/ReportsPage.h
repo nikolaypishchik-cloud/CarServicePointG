@@ -159,6 +159,15 @@ private:
     QTableView* m_ordersTable = nullptr;
     QTableView* m_partsTable = nullptr;
     PartsRegisterView* m_partsRegister = nullptr;
+    QLineEdit* m_outsourceSearch = nullptr;
+    QComboBox* m_outsourceCompany = nullptr;
+    QComboBox* m_outsourcePlan = nullptr;
+    QComboBox* m_outsourceGrouping = nullptr;
+    QLabel* m_missingReturnPlan = nullptr;
+    QLabel* m_outsourceTotals = nullptr;
+    OutsourceSnapshot m_outsourceSnapshot;
+    OutsourceReportFilter outsourceFilter() const;
+    void filterOutsourceRows();
     QTableView* m_outsourceTable = nullptr;
     ReportsTableSupport::ReportsSnapshotTableModel* m_periodModel = nullptr;
     ReportsTableSupport::ReportsSnapshotTableModel* m_ordersModel = nullptr;

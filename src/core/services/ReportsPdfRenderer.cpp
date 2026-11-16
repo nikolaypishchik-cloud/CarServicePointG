@@ -23,6 +23,7 @@
 #include "core/diagnostics/RuntimeLoggingControl.h"
 
 #include <QCryptographicHash>
+#include <QDataStream>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -366,14 +367,21 @@ bool renderPartsPdf(const QDate& fromDate, const QDate& toDate, ExportResult* re
     return ok;
 }
 
-bool renderOutsourcePdf(const QDate& fromDate, const QDate& toDate, ExportResult* result)
+bool renderOutsourcePdf(const QDate& fromDate, const QDate& toDate, ExportResult* result, const OutsourceReportFilter& filter)
 {
     const QString df = fromDate.toString(QStringLiteral("yyyy-MM-dd"));
     const QString dt = toDate.toString(QStringLiteral("yyyy-MM-dd"));
     QString readError;int count=0;double repairTotal=0,clientTotal=0;
-    const auto groups=ReportsPdfSupport::collectOutsourceGroups(df,dt,count,repairTotal,clientTotal,&readError);
+    const auto groups=ReportsPdfSupport::collectOutsourceGroups(df,dt,count,repairTotal,clientTotal,&readError,filter);
     if(!readError.isEmpty()){if(result){*result={};result->reportKind="outsource";result->recordCount=0;result->errorText=readError;}return false;}
-    const QString path = makeReportPdfPath(QString::fromUtf8("Аутсорс"), reportDateRangeStem(fromDate, toDate));
+    QString stem = reportDateRangeStem(fromDate, toDate);
+    if (!filter.description().isEmpty()) {
+        QByteArray key;
+        QDataStream stream(&key, QIODevice::WriteOnly);
+        stream << filter.company << int(filter.plan) << filter.search;
+        stem += "_" + QString::fromLatin1(QCryptographicHash::hash(key, QCryptographicHash::Sha256).toHex());
+    }
+    const QString path = makeReportPdfPath(QString::fromUtf8("Аутсорс"), stem);
     QString pathError;
     if (!ensurePdfOutputPath(path, &pathError)) {
         if (result) {
@@ -396,6 +404,7 @@ bool renderOutsourcePdf(const QDate& fromDate, const QDate& toDate, ExportResult
 
     QPdfWriter pdf(path);
     pdf.setPageSize(QPageSize(QPageSize::A4));
+    pdf.setPageOrientation(QPageLayout::Landscape);
     pdf.setResolution(144);
     QPainter p(&pdf);
     p.setRenderHint(QPainter::Antialiasing, false);
@@ -408,6 +417,7 @@ bool renderOutsourcePdf(const QDate& fromDate, const QDate& toDate, ExportResult
         fromDate,
         toDate,
         groups,
+        filter.description(),
         count,
         repairTotal,
         marginTotal,

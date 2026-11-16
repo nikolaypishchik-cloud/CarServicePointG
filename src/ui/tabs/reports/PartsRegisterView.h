@@ -28,9 +28,21 @@ public:
         payment = new QComboBox(this);
         store->setAccessibleName(tr("Магазин"));
         payment->setAccessibleName(tr("Стан оплати"));
-        filters->addWidget(store);
-        filters->addWidget(payment);
+        registerTitle = new QLabel(this);
+        registerTitle->setObjectName("partsRegisterTitle");
+        QFont titleFont = registerTitle->font();
+        titleFont.setBold(true);
+        registerTitle->setFont(titleFont);
+        filters->addWidget(registerTitle);
         filters->addStretch();
+        auto* storeLabel = new QLabel(tr("Магазин"), this);
+        storeLabel->setBuddy(store);
+        filters->addWidget(storeLabel);
+        filters->addWidget(store);
+        auto* paymentLabel = new QLabel(tr("Оплата"), this);
+        paymentLabel->setBuddy(payment);
+        filters->addWidget(paymentLabel);
+        filters->addWidget(payment);
         layout->addLayout(filters);
         message = new QLabel(this);
         layout->addWidget(message);
@@ -240,6 +252,9 @@ private:
                 orderRows[key].append(r);
             }
         }
+        registerTitle->setText(byOrder ? tr("За нарядами") : tr("Усі позиції"));
+        if (state.isEmpty())
+            registerTitle->setText(tr("%1 · Показано %2 із %3").arg(registerTitle->text()).arg(visible).arg(model->rowCount()));
         if (byOrder) {
             for (const auto& key : keys) {
                 const auto& rows = orderRows.constFind(key).value();
@@ -303,6 +318,7 @@ private:
     QListWidget* orders;
     QPushButton* orderLink;
     QLabel* orderDates;
+    QLabel* registerTitle;
     QHash<QString, QList<int>> orderRows;
     QList<int> selectedRows;
     bool byOrder = false;

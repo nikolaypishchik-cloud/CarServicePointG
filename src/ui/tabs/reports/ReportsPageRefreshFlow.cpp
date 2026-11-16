@@ -592,8 +592,56 @@ void ReportsPage::refreshParts()
 
 void ReportsPage::applyOutsourceSnapshot(const OutsourceSnapshot& snapshot)
 {
-    ReportsTableSupport::applyOutsourceSnapshot(m_outsourceTable, m_outsourceModel, snapshot);
-    setTabStats(ReportTab::Outsource, snapshot.stats);
+    m_outsourceSnapshot = snapshot;
+    const QString previous = m_outsourceCompany->currentData().toString();
+    QSignalBlocker blocker(m_outsourceCompany);
+    QStringList companies;
+    for (const auto& row : snapshot.rows) companies << row.company;
+    if (!previous.isEmpty()) companies << previous;
+    companies.removeDuplicates();
+    companies.sort(Qt::CaseInsensitive);
+    m_outsourceCompany->clear();
+    m_outsourceCompany->addItem(tr("Усі компанії"));
+    for (const auto& company : companies) m_outsourceCompany->addItem(company, company);
+    m_outsourceCompany->setCurrentIndex(qMax(0, m_outsourceCompany->findData(previous)));
+    filterOutsourceRows();
+}
+
+OutsourceReportFilter ReportsPage::outsourceFilter() const
+{
+    return {m_outsourceCompany->currentData().toString(),
+            static_cast<OutsourceReportFilter::ReturnPlan>(m_outsourcePlan->currentIndex()),
+            m_outsourceSearch->text().trimmed()};
+}
+
+void ReportsPage::filterOutsourceRows()
+{
+    const auto filter = outsourceFilter();
+    OutsourceSnapshot selected;
+    double repair = 0.0, client = 0.0;
+    for (const auto& row : m_outsourceSnapshot.rows) {
+        if (!filter.accepts(row.company, row.returnDate, row.sentDate, row.orderNumber, row.partName)) continue;
+        selected.rows.append(row);
+        repair += row.repairAmount;
+        client += row.clientAmount;
+    }
+    const auto missing = std::count_if(selected.rows.cbegin(), selected.rows.cend(),
+        [](const auto& row) { return row.returnDate.isEmpty(); });
+    m_missingReturnPlan->setText(tr("План повернення не вказано для %1 записів. Визначити прострочення без дати неможливо.").arg(missing));
+    m_missingReturnPlan->setVisible(missing > 0);
+    ReportsTableSupport::applyOutsourceSnapshot(m_outsourceTable, m_outsourceModel, selected, m_outsourceGrouping->currentIndex() == 0);
+    m_outsourceTotals->setVisible(m_outsourceSnapshot.error.isEmpty());
+    m_outsourceTotals->setText(tr("Разом за вибіркою · Записів: %1 · Ремонт: %2 грн · Сума клієнта: %3 грн · Маржа: %4 грн")
+        .arg(selected.rows.size()).arg(FormatUtils::money(repair, 2), FormatUtils::money(client, 2), FormatUtils::money(client - repair, 2)));
+    if (!m_outsourceSnapshot.error.isEmpty()) {
+        m_outsourceModel->setMessageRow(m_outsourceSnapshot.error);
+        setTabStats(ReportTab::Outsource, m_outsourceSnapshot.stats);
+    } else {
+        setTabStats(ReportTab::Outsource, {tr("Відправлено на ремонт: %1 записів").arg(selected.rows.size()),
+            tr("На суму: %1 грн.").arg(FormatUtils::money(repair, 2)),
+            tr("Маржа: %1 грн.").arg(FormatUtils::money(client - repair, 2))});
+    }
+    applyCachedTabUi(ReportTab::Outsource);
 }
 
 void ReportsPage::refreshOutsource()
@@ -609,6 +657,9 @@ void ReportsPage::refreshOutsource()
     setTabDescription(ReportTab::Outsource, QString::fromUtf8("Аутсорс — перегляд відправлених на ремонт запчастин по поточному діапазону дат."));
     setTabAuxStats(ReportTab::Outsource, QString());
     updateStats({QString::fromUtf8("Завантаження аутсорсу…")});
+    m_outsourceSnapshot = {};
+    m_outsourceTotals->hide();
+    m_missingReturnPlan->hide();
     ReportsAsyncSupport::showLoadingRow(m_outsourceTable, m_outsourceModel, QString::fromUtf8("Завантаження…"));
 
     ReportsAsyncSupport::startOutsourceLoad(this, asyncHandle, dbPath, df, dt, [this, generation, key](const OutsourceSnapshot& snapshot) {

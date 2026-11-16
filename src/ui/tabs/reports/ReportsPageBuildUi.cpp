@@ -2,6 +2,7 @@
 // Compiled as a separate P2 implementation module; include-order dependencies are isolated in the module prelude.
 
 #include "ui/tabs/reports/ReportsPageModulePrelude.h"
+#include <QMenu>
 #include <QComboBox>
 #include "ui/tabs/reports/PurchaseDebtsPage.h"
 #include "ui/tabs/reports/InvoicesPage.h"
@@ -412,7 +413,64 @@ void ReportsPage::buildUi()
         updateDashboard();
     });
     m_tabs->addTab(partsPage, QString::fromUtf8("Придбання запчастин"));
-    m_tabs->addTab(makeTab(m_outsourceTable, m_outsourceModel), QString::fromUtf8("Аутсорс"));
+    auto* outsourcePage = makeTab(m_outsourceTable, m_outsourceModel);
+    m_outsourceTable->setObjectName("outsourceTable");
+    auto* outsourceControls = new QHBoxLayout;
+    m_outsourceSearch = new QLineEdit(outsourcePage);
+    m_outsourceSearch->setPlaceholderText(tr("Пошук за компанією, нарядом або запчастиною"));
+    m_outsourceSearch->setObjectName("outsourceSearch");
+    m_outsourceSearch->setAccessibleName(tr("Пошук в аутсорсі"));
+    m_outsourceSearch->setClearButtonEnabled(true);
+    m_outsourceCompany = new QComboBox(outsourcePage);
+    m_outsourceCompany->setObjectName("outsourceCompany");
+    m_outsourceCompany->setAccessibleName(tr("Компанія"));
+    m_outsourceCompany->addItem(tr("Усі компанії"));
+    m_outsourcePlan = new QComboBox(outsourcePage);
+    m_outsourcePlan->setObjectName("outsourcePlan");
+    m_outsourcePlan->setAccessibleName(tr("План повернення"));
+    m_outsourcePlan->addItems({tr("Будь-який план повернення"), tr("План вказано"), tr("План не вказано")});
+    m_outsourceGrouping = new QComboBox(outsourcePage);
+    m_outsourceGrouping->setObjectName("outsourceGrouping");
+    m_outsourceGrouping->setAccessibleName(tr("Групування аутсорсу"));
+    m_outsourceGrouping->addItems({tr("За місяцями"), tr("Список")});
+    auto* columnButton = new QPushButton(tr("Стовпці"), outsourcePage);
+    auto* columnMenu = new QMenu(columnButton);
+    columnButton->setMenu(columnMenu);
+    connect(columnMenu, &QMenu::aboutToShow, this, [this, columnMenu] {
+        columnMenu->clear();
+        for (int i = 0; i < m_outsourceModel->columnCount(); ++i) {
+            auto* action = columnMenu->addAction(m_outsourceModel->headerData(i, Qt::Horizontal).toString());
+            action->setCheckable(true);
+            action->setChecked(!m_outsourceTable->isColumnHidden(i));
+            action->setEnabled(i != 0);
+            connect(action, &QAction::toggled, m_outsourceTable, [this, i](bool visible) {
+                m_outsourceTable->setColumnHidden(i, !visible);
+            });
+        }
+    });
+    m_missingReturnPlan = new QLabel(outsourcePage);
+    m_missingReturnPlan->setWordWrap(true);
+    m_missingReturnPlan->hide();
+    qobject_cast<QVBoxLayout*>(outsourcePage->layout())->addWidget(m_missingReturnPlan);
+    auto* outsourceTitle = new QLabel(tr("Аутсорс"), outsourcePage);
+    QFont outsourceTitleFont = outsourceTitle->font();
+    outsourceTitleFont.setBold(true);
+    outsourceTitle->setFont(outsourceTitleFont);
+    outsourceControls->addWidget(outsourceTitle);
+    m_outsourceTotals = new QLabel(outsourcePage);
+    m_outsourceTotals->setWordWrap(true);
+    qobject_cast<QVBoxLayout*>(outsourcePage->layout())->addWidget(m_outsourceTotals);
+    outsourceControls->addWidget(m_outsourceSearch, 1);
+    outsourceControls->addWidget(m_outsourceCompany);
+    outsourceControls->addWidget(m_outsourcePlan);
+    outsourceControls->addWidget(m_outsourceGrouping);
+    outsourceControls->addWidget(columnButton);
+    connect(m_outsourceGrouping, &QComboBox::currentIndexChanged, this, &ReportsPage::filterOutsourceRows);
+    qobject_cast<QVBoxLayout*>(outsourcePage->layout())->insertLayout(0, outsourceControls);
+    connect(m_outsourceSearch, &QLineEdit::textChanged, this, &ReportsPage::filterOutsourceRows);
+    connect(m_outsourcePlan, &QComboBox::currentIndexChanged, this, &ReportsPage::filterOutsourceRows);
+    connect(m_outsourceCompany, &QComboBox::currentIndexChanged, this, &ReportsPage::filterOutsourceRows);
+    m_tabs->addTab(outsourcePage, tr("Аутсорс"));
     m_tabs->addTab(m_expensesPage, QString::fromUtf8("Витрати"));
     auto* totalExpensesPage = makeTab(m_totalExpensesTable, m_totalExpensesModel);
     buildAdditionalExpensesForm(totalExpensesPage);
@@ -686,6 +744,7 @@ void ReportsPage::buildUi()
     });
     connect(m_outsourceTable, &QTableView::doubleClicked, this, [this](const QModelIndex& index) {
         const int row = index.row();
+        if (!index.isValid() || m_outsourceModel->rowSpansAllColumns(row)) return;
         ReportsInteractionSupport::openOutsourceOrOrderFromReportTable(this, m_outsourceTable, row, 3, [this]() {
             markDirty();
             scheduleRefresh(0);

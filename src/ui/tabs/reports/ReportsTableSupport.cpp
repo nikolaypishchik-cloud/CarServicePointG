@@ -1,4 +1,5 @@
 #include "ui/tabs/reports/ReportsTableSupport.h"
+#include "core/util/FormatUtils.h"
 
 #include <QAbstractItemView>
 #include <QBrush>
@@ -50,7 +51,7 @@ QStringList outsourceHeaders()
     return {
         QString::fromUtf8("Відправлено"), QString::fromUtf8("План повернення"), QString::fromUtf8("Компанія"),
         QString::fromUtf8("Наряд"), QString::fromUtf8("Запчастина"),
-        QString::fromUtf8("Сума ремонту"), QString::fromUtf8("Сума клієнта")
+        QString::fromUtf8("Сума ремонту"), QString::fromUtf8("Сума клієнта"), QStringLiteral("Маржа")
     };
 }
 
@@ -380,7 +381,7 @@ void applyPartsSnapshot(QTableView* table, ReportsSnapshotTableModel* model, con
     finishSnapshotApply(table, model);
 }
 
-void applyOutsourceSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const OutsourceSnapshot& snapshot)
+void applyOutsourceSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const OutsourceSnapshot& snapshot, bool byMonth)
 {
     if (!table || !model) return;
     table->setUpdatesEnabled(false);
@@ -388,16 +389,35 @@ void applyOutsourceSnapshot(QTableView* table, ReportsSnapshotTableModel* model,
 
     QVector<ReportsSnapshotTableModel::Row> rows;
     rows.reserve(snapshot.rows.size());
-    for (const auto& row : snapshot.rows) {
+    int remainingInMonth = 0;
+    for (int index = 0; index < snapshot.rows.size(); ++index) {
+        const auto& row = snapshot.rows.at(index);
+        if (byMonth && remainingInMonth == 0) {
+            const QString month = row.sentDate.mid(3);
+            double repair = 0.0, client = 0.0;
+            for (int j = index; j < snapshot.rows.size() && snapshot.rows.at(j).sentDate.mid(3) == month; ++j) {
+                ++remainingInMonth;
+                repair += snapshot.rows.at(j).repairAmount;
+                client += snapshot.rows.at(j).clientAmount;
+            }
+            ReportsSnapshotTableModel::Row heading;
+            heading.spanAllColumns = true;
+            heading.cells = {makeCell(QObject::tr("%1 · Записів: %2 · Ремонт: %3 грн · Сума клієнта: %4 грн · Маржа: %5 грн")
+                .arg(month).arg(remainingInMonth).arg(FormatUtils::money(repair, 2), FormatUtils::money(client, 2),
+                                                       FormatUtils::money(client - repair, 2)))};
+            rows.append(heading);
+        }
+        if (byMonth) --remainingInMonth;
         ReportsSnapshotTableModel::Row out;
         out.cells = {
             makeCell(row.sentDate, int(Qt::AlignLeft | Qt::AlignVCenter), row.serviceId),
-            makeCell(row.returnDate),
+            makeCell(row.returnDate.isEmpty() ? QObject::tr("Не вказано") : row.returnDate),
             makeCell(row.company),
             makeCell(row.orderNumber, int(Qt::AlignLeft | Qt::AlignVCenter), row.internalOrderNumber),
             makeCell(row.partName),
             makeCell(row.repairCost, int(Qt::AlignRight | Qt::AlignVCenter)),
-            makeCell(row.clientPrice, int(Qt::AlignRight | Qt::AlignVCenter))
+            makeCell(row.clientPrice, int(Qt::AlignRight | Qt::AlignVCenter)),
+            makeCell(FormatUtils::money(row.clientAmount - row.repairAmount, 2), int(Qt::AlignRight | Qt::AlignVCenter))
         };
         rows.push_back(out);
     }

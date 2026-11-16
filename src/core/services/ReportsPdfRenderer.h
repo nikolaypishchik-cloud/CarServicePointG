@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/services/OutsourceReportFilter.h"
+
 #include <QDate>
 #include <QString>
 #include <QtGlobal>
@@ -41,7 +43,7 @@ struct ExpensesFormData {
 bool renderElectricityPdf(ExportResult* result);
 bool renderPeriodPdf(const QDate& fromDate, const QDate& toDate, ExportResult* result);
 bool renderPartsPdf(const QDate& fromDate, const QDate& toDate, ExportResult* result);
-bool renderOutsourcePdf(const QDate& fromDate, const QDate& toDate, ExportResult* result);
+bool renderOutsourcePdf(const QDate& fromDate, const QDate& toDate, ExportResult* result, const OutsourceReportFilter& filter = {});
 bool renderExpensesPdf(const QDate& fromDate, const QDate& toDate, const ExpensesFormData& data, ExportResult* result);
 bool renderPayrollPdf(const QDate& fromDate, const QDate& toDate, ExportResult* result, const QString& employeeId = {});
 

@@ -98,6 +98,8 @@ struct PartsSnapshot {
 };
 
 struct OutsourceSnapshotRow {
+    double repairAmount = 0.0;
+    double clientAmount = 0.0;
     int serviceId = 0;
     int internalOrderNumber = 0;
     QString sentDate;

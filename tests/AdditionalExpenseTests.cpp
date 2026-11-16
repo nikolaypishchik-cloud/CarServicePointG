@@ -383,10 +383,15 @@ private slots:
         if (!modeCapture.isEmpty()) QVERIFY(mode->grab().save(modeCapture));
         const QString capture = qEnvironmentVariable("CS_FLAT_REPORT_CAPTURE");
         if (!capture.isEmpty()) QVERIFY(page.grab().save(capture));
+        auto* title = view->findChild<QLabel*>("partsRegisterTitle");
+        QVERIFY(title);
+        QCOMPARE(title->text(), QStringLiteral("Усі позиції · Показано 2 із 2"));
         search->setText("no match");
         QVERIFY(table->isRowHidden(0));
+        QCOMPARE(title->text(), QStringLiteral("Усі позиції · Показано 0 із 2"));
         search->setText("oem-71");
         QVERIFY(!table->isRowHidden(0));
+        QCOMPARE(title->text(), QStringLiteral("Усі позиції · Показано 1 із 2"));
         QTest::mouseClick(mode, Qt::LeftButton, Qt::NoModifier, mode->tabRect(1).center());
         auto* orders = view->findChild<QListWidget*>("partsRegisterOrders");
         QVERIFY(orders && !orders->isHidden());
@@ -627,6 +632,80 @@ private slots:
         QVERIFY(q.exec("DROP TABLE settings"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());
         QVERIFY(q.exec("CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)"));
         configureFinancialReportDirectory();QVERIFY2(render(),qPrintable(result.errorText));
+    }
+    void outsourceFiltersAndMonthTotals() {
+        preparePartsPayrollPdfFixture();
+        QSqlQuery q(db);
+        QVERIFY(q.exec("CREATE TABLE IF NOT EXISTS outsource_jobs(id INTEGER PRIMARY KEY, service_id INTEGER, company_name TEXT, sent_date TEXT, return_date TEXT, order_number INTEGER, part_name TEXT, company_price REAL, client_price REAL)"));
+        const QString today = QDate::currentDate().toString(Qt::ISODate);
+        q.prepare("INSERT INTO outsource_jobs(service_id,company_name,sent_date,return_date,order_number,part_name,company_price,client_price) VALUES"
+                  "(31,'Shop',?, ?,11,'Rotor',12.25,20.75),(31,'Other',?,'',11,'Rotor',9.50,8.25),(31,'Shop',?,'',11,'Wheel',5,5)");
+        for (int i = 0; i < 4; ++i) q.addBindValue(today);
+        QVERIFY2(q.exec(), qPrintable(q.lastError().text()));
+        ReportsPage page;
+        page.resize(1350, 790);
+        page.show();
+        auto* table = page.findChild<QTableView*>("outsourceTable");
+        auto* tabs = page.findChild<QTabWidget*>();
+        auto* search = page.findChild<QLineEdit*>("outsourceSearch");
+        auto* company = page.findChild<QComboBox*>("outsourceCompany");
+        auto* plan = page.findChild<QComboBox*>("outsourcePlan");
+        auto* grouping = page.findChild<QComboBox*>("outsourceGrouping");
+        QVERIFY(table && tabs && search && company && plan && grouping);
+        for (int tab = 0; tab < tabs->count(); ++tab)
+            if (tabs->tabText(tab) == QStringLiteral("Аутсорс")) tabs->setCurrentIndex(tab);
+        page.refresh();
+        QTRY_COMPARE_WITH_TIMEOUT(company->count(), 3, 10000);
+        QCOMPARE(table->model()->rowCount(), 4);
+        search->setText("rot");
+        company->setCurrentText("Shop");
+        plan->setCurrentIndex(1);
+        QCOMPARE(table->model()->rowCount(), 2);
+        QVERIFY(table->model()->index(0,0).data().toString().contains(FormatUtils::money(8.50, 2)));
+        QCOMPARE(table->model()->index(1,4).data().toString(), QStringLiteral("Rotor"));
+        QCOMPARE(table->model()->index(1,5).data().toString(), FormatUtils::money(12.25, 2));
+        QCOMPARE(table->model()->index(1,6).data().toString(), FormatUtils::money(20.75, 2));
+        const auto capture = qEnvironmentVariable("CS_OUTSOURCE_CAPTURE");
+        if (!capture.isEmpty()) QVERIFY(page.grab().save(capture));
+        grouping->setCurrentIndex(1);
+        QCOMPARE(table->model()->rowCount(), 1);
+        QCOMPARE(table->model()->index(0,7).data().toString(), FormatUtils::money(8.50, 2));
+        company->setCurrentText("Other");
+        plan->setCurrentIndex(2);
+        QCOMPARE(table->model()->index(0,1).data().toString(), QStringLiteral("Не вказано"));
+        QCOMPARE(table->model()->index(0,7).data().toString(), FormatUtils::money(-1.25, 2));
+    }
+    void outsourcePdfUsesAllMatchingRows() {
+        QString error;
+        QVERIFY2(FinancialPdfReadFixture::run(db, &error), qPrintable(error));
+        configureFinancialReportDirectory();
+        QSqlQuery query(db);
+        QVERIFY(query.exec("UPDATE outsource_jobs SET part_name='Rotor', return_date='2026-01-29' WHERE id=1"));
+        QVERIFY(query.exec("INSERT INTO outsource_jobs VALUES(4,'Shop','2026-01-04','','11','Rotor',99,99),"
+                           "(5,'Other','2026-01-04','2026-01-29',11,'Rotor',99,99),"
+                           "(6,'Shop','2026-01-04','2026-01-29',11,'Wheel',99,99),"
+                           "(7,'Shop','2026-02-01','2026-02-20',11,'Rotor',99,99)"));
+        QVERIFY(query.exec("WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<45) "
+                           "INSERT INTO outsource_jobs SELECT 10+n,'Shop','2026-01-08','2026-01-29',11,'Rotor',1,2 FROM seq"));
+        OutsourceReportFilter filter{"Shop", OutsourceReportFilter::ReturnPlan::Scheduled, "rot"};
+        int count = 0;
+        double repair = 0.0, client = 0.0;
+        const auto groups = ReportsPdfSupport::collectOutsourceGroups("2026-01-01", "2026-01-31", count, repair, client, &error, filter);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(groups.size(), 1);
+        QCOMPARE(count, 46);
+        QCOMPARE(qRound64(repair * 100), 5725);
+        QCOMPARE(qRound64(client * 100), 11075);
+        ReportsPdfRenderer::ExportResult result;
+        QVERIFY2(ReportsPdfRenderer::renderOutsourcePdf(QDate(2026,1,1), QDate(2026,1,31), &result, filter), qPrintable(result.errorText));
+        QCOMPARE(result.recordCount, 46);
+        const QString sample = qEnvironmentVariable("CS_OUTSOURCE_FILTERED_PDF");
+        if (!sample.isEmpty()) QVERIFY(QFile::copy(result.path, sample));
+        filter.plan = OutsourceReportFilter::ReturnPlan::Missing;
+        ReportsPdfSupport::collectOutsourceGroups("2026-01-01", "2026-01-31", count, repair, client, &error, filter);
+        QVERIFY2(error.isEmpty(), qPrintable(error));
+        QCOMPARE(count, 1);
+        QCOMPARE(qRound64(repair * 100), 9900);
     }
     void outsourcePdfFailuresRightsAndRepeat() {
         QString error;QVERIFY2(FinancialPdfReadFixture::run(db,&error),qPrintable(error));

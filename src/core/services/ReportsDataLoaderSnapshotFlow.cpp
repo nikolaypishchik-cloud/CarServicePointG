@@ -730,8 +730,10 @@ OutsourceSnapshot buildOutsourceSnapshot(const QString& dbPath, const QString& d
                     row.company = q.value(3).toString();
                     row.orderNumber = q.value(5).toString();
                     row.partName = q.value(6).toString();
-                    row.repairCost = money0(repairCost);
-                    row.clientPrice = money0(clientPrice);
+                    row.repairAmount = repairCost;
+                    row.clientAmount = clientPrice;
+                    row.repairCost = FormatUtils::money(repairCost, 2);
+                    row.clientPrice = FormatUtils::money(clientPrice, 2);
                     snapshot.rows.append(row);
                     ++count;
                     repair += repairCost;

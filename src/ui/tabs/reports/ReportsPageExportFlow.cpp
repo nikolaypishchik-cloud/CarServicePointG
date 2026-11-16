@@ -454,9 +454,10 @@ void ReportsPage::exportOutsourcePdf()
 {
     const QDate fromDate = m_from->date();
     const QDate toDate = m_to->date();
-    runPdfExportTask(QString::fromUtf8("Формування PDF звіту по аутсорсу..."), [fromDate, toDate]() {
+    const auto filter = outsourceFilter();
+    runPdfExportTask(QString::fromUtf8("Формування PDF звіту по аутсорсу..."), [fromDate, toDate, filter]() {
         ReportsPdfRenderer::ExportResult result;
-        ReportsPdfRenderer::renderOutsourcePdf(fromDate, toDate, &result);
+        ReportsPdfRenderer::renderOutsourcePdf(fromDate, toDate, &result, filter);
         return result;
     });
 }

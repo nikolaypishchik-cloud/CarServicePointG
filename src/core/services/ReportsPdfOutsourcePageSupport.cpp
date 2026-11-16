@@ -8,7 +8,7 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QPainter>
-#include "core/services/PdfWebsiteFooter.h"
+#include "AppVersion.h"
 #include <QPdfWriter>
 
 namespace {
@@ -29,6 +29,7 @@ void renderOutsourcePages(
     const QDate& fromDate,
     const QDate& toDate,
     const QMap<QString, QList<ReportsPdfSupport::OutsourcePdfRow>>& groups,
+    const QString& filterDescription,
     int count,
     double repairTotal,
     double marginTotal,
@@ -46,7 +47,7 @@ void renderOutsourcePages(
     using ReportsPdfPaintingSupport::kPdfTablePenWidth;
     using ReportsPdfPaintingSupport::wrappedHeight;
 
-    bool firstPage = true;
+    int pageNumber = 0;
     int y = theme.top;
 
     const QVector<int> widths = {
@@ -72,18 +73,38 @@ void renderOutsourcePages(
     const int summaryReserve = mmToPx(&pdf, 34);
 
     auto drawDocHeader = [&](int& yy) {
-        drawCenteredText(painter, QRect(theme.left, yy, theme.contentWidth, 34), QStringLiteral("CarService PointG 2.1.2"), titleFont);
-        yy += 36;
-        drawCenteredText(painter, QRect(theme.left, yy, theme.contentWidth, 28),
-                         QString::fromUtf8("АУТСОРС: %1 — %2")
-                             .arg(fromDate.toString(QStringLiteral("dd.MM.yy")), toDate.toString(QStringLiteral("dd.MM.yy"))),
-                         subtitleFont);
-        yy += 34;
+        const int third = theme.contentWidth / 3;
+        const int height = mmToPx(&pdf, 12);
+        painter.save();
+        painter.setFont(subtitleFont);
+        painter.drawText(QRect(theme.left, yy, third, height), Qt::AlignLeft | Qt::AlignVCenter,
+                         QStringLiteral("CarService PointG %1").arg(CarService::AppVersion::versionString()));
+        painter.drawText(QRect(theme.left + 2 * third, yy, third, height), Qt::AlignRight | Qt::AlignVCenter,
+                         fromDate.toString("dd.MM.yy") + " — " + toDate.toString("dd.MM.yy"));
+        drawCenteredText(painter, QRect(theme.left + third, yy, third, height), QStringLiteral("АУТСОРС"), titleFont);
+        yy += height;
+        painter.drawLine(theme.left, yy, theme.left + theme.contentWidth, yy);
+        yy += mmToPx(&pdf, 3);
+        painter.restore();
+        if (!filterDescription.isEmpty()) {
+            painter.save();
+            painter.setFont(cellFont);
+            const int flags = Qt::AlignLeft | Qt::TextWrapAnywhere;
+            const int height = painter.fontMetrics().boundingRect(QRect(0, 0, theme.contentWidth, 0), flags, filterDescription).height();
+            painter.drawText(QRect(theme.left, yy, theme.contentWidth, height), flags, filterDescription);
+            yy += height + 8;
+            painter.restore();
+        }
     };
 
     auto startPage = [&]() {
-        if (!firstPage) pdf.newPage();
-        firstPage = false;
+        if (pageNumber > 0) pdf.newPage();
+        ++pageNumber;
+        painter.save();
+        painter.setFont(headerFont);
+        painter.drawText(QRect(theme.left, theme.bottom, theme.contentWidth, theme.pageHeight - theme.bottom),
+                         Qt::AlignVCenter | Qt::AlignRight, QStringLiteral("Сторінка %1").arg(pageNumber));
+        painter.restore();
         y = theme.top;
         drawDocHeader(y);
     };

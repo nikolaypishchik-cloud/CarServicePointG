@@ -310,7 +310,7 @@ bool validateExpensesPdfSource(const QDate& from, const QDate& to, QString* erro
     return snapshot.error.isEmpty();
 }
 
-QMap<QString, QList<OutsourcePdfRow>> collectOutsourceGroups(const QString& df, const QString& dt, int& count, double& repairTotal, double& clientTotal, QString* error)
+QMap<QString, QList<OutsourcePdfRow>> collectOutsourceGroups(const QString& df, const QString& dt, int& count, double& repairTotal, double& clientTotal, QString* error, const OutsourceReportFilter& filter)
 {
     QMap<QString, QList<OutsourcePdfRow>> groups; count=0; repairTotal=0.0; clientTotal=0.0;
     if(error)error->clear();
@@ -326,6 +326,7 @@ QMap<QString, QList<OutsourcePdfRow>> collectOutsourceGroups(const QString& df, 
         if (!eff.isValid() || eff < from || eff > to) continue;
         const QDate ret = ReportsDateUtils::effectiveDate(q.value(2).toString());
         OutsourcePdfRow r; r.company=q.value(0).toString(); r.date=eff.toString(QStringLiteral("dd.MM.yy")); r.returnDate=ret.isValid()?ret.toString(QStringLiteral("dd.MM.yy")):QString(); r.orderNumber=q.value(3).toString(); r.partName=q.value(4).toString(); r.repairCost=q.value(5).toDouble(); r.clientPrice=q.value(6).toDouble();
+        if (!filter.accepts(r.company, r.returnDate, r.date, r.orderNumber, r.partName)) continue;
         groups[r.company].append(r); ++count; repairTotal += r.repairCost; clientTotal += r.clientPrice;
     }
     if(q.lastError().isValid()){if(error)*error=q.lastError().text();count=0;repairTotal=clientTotal=0;return {};}

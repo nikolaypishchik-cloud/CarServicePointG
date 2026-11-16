@@ -20,6 +20,7 @@ void renderOutsourcePages(
     const QDate& fromDate,
     const QDate& toDate,
     const QMap<QString, QList<ReportsPdfSupport::OutsourcePdfRow>>& groups,
+    const QString& filterDescription,
     int count,
     double repairTotal,
     double marginTotal,

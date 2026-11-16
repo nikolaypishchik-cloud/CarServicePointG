@@ -72,7 +72,7 @@ void showLoadingRow(QTableView* table, ReportsSnapshotTableModel* model, const Q
 void applyPeriodSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const PeriodSnapshot& snapshot);
 void applyOrdersSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const OrdersSnapshot& snapshot);
 void applyPartsSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const PartsSnapshot& snapshot);
-void applyOutsourceSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const OutsourceSnapshot& snapshot);
+void applyOutsourceSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const OutsourceSnapshot& snapshot, bool byMonth = false);
 void applyPayrollSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const PayrollSnapshot& snapshot, bool byEmployee = false);
 void applyTotalExpensesSnapshot(QTableView* table, ReportsSnapshotTableModel* model, const TotalExpensesSnapshot& snapshot,
                                 const QSet<QString>* collapsedMonths);
