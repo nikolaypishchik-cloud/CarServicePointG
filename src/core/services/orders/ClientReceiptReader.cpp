@@ -34,7 +34,7 @@ Result read(QSqlDatabase db, const QSet<QString>& orderUids) {
     // One statement provides a consistent receipt snapshot; never SQL SUM on unchecked values.
     QString parts="SELECT order_uid,amount_cents,0 AS refund FROM main.client_payments";
     if(db.tables().contains("cash_outflows"))
-        parts+=" UNION ALL SELECT order_uid,cents,kind='payment' FROM main.cash_outflows WHERE kind IN ('payment','undo_payment')";
+        parts+=" UNION ALL SELECT order_uid,cents,kind<>'undo_payment' FROM main.cash_outflows WHERE kind IN ('payment','undo_payment','void_payment','void_allocation')";
     QString sql="SELECT order_uid,amount_cents,typeof(amount_cents),refund FROM ("+parts+")";
     if (orderUids.size() == 1) sql += " WHERE order_uid=?";
     if (!query.prepare(sql)) return fail(query.lastError().text());
@@ -116,7 +116,7 @@ PaymentHistory readPeriod(QSqlDatabase db, const QString& orderUid, QDate firstD
     if (!history.available) return history;
     QString parts="SELECT payment_uid,paid_on,amount_cents,method,order_uid,recorded_ms,0 AS refund FROM main.client_payments";
     if(db.tables().contains("cash_outflows"))
-        parts+=" UNION ALL SELECT uid,day,cents,CASE WHEN kind='undo_payment' THEN 'refund_reversal' ELSE method END,order_uid,recorded_ms,kind='payment' FROM main.cash_outflows WHERE kind IN ('payment','undo_payment')";
+        parts+=" UNION ALL SELECT uid,day,cents,CASE WHEN kind='undo_payment' THEN 'refund_reversal' WHEN kind LIKE 'void_%' THEN 'void' ELSE method END,order_uid,recorded_ms,kind<>'undo_payment' FROM main.cash_outflows WHERE kind IN ('payment','undo_payment','void_payment','void_allocation')";
     if (!query.prepare("SELECT payment_uid,paid_on,amount_cents,typeof(amount_cents),method,refund FROM ("+parts+") "
                        "WHERE order_uid=? ORDER BY paid_on,recorded_ms,payment_uid")) return fail(query.lastError().text());
     query.addBindValue(orderUid);
@@ -131,7 +131,7 @@ PaymentHistory readPeriod(QSqlDatabase db, const QString& orderUid, QDate firstD
             return fail(QStringLiteral("Некоректна ідентичність або сума оплати."));
         const auto net=query.value(5).toBool()?-cents:cents;
         if (day >= firstDay) {
-            history.payments.append({uid, day, net, query.value(5).toBool()?QStringLiteral("refund"):query.value(4).toString()});
+            history.payments.append({uid, day, net, query.value(5).toBool() && query.value(4)!="void"?QStringLiteral("refund"):query.value(4).toString()});
         } else {
             const auto sum = ExactMoney::sum({history.receivedBefore, net});
             const auto* value = std::get_if<ExactMoney::Cents>(&sum);

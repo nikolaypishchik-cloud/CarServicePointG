@@ -63,9 +63,10 @@ QList<Pending> pending(QString& error)
     if(tables.contains("client_payments"))sources<<"SELECT payment_uid AS uid,'payment' AS type,paid_on AS day,amount_cents AS cents FROM main.client_payments WHERE method='card'";
     if(tables.contains("cash_advance_events"))sources<<"SELECT uid,'advance' AS type,day,cents FROM main.cash_advance_events WHERE source_uid IS NULL AND method='card'";
     if(sources.isEmpty())return {};
+    const QString valid=tables.contains("cash_outflows")?" WHERE NOT EXISTS(SELECT 1 FROM main.cash_outflows v WHERE v.source=s.uid AND v.kind='void_'||s.type)":"";
     const QString matched=tables.contains("cash_bank_events")?"COALESCE((SELECT SUM(matched) FROM main.cash_bank_events m WHERE m.action='match' AND m.source_type=s.type AND m.source=s.uid),0)":"0";
     QSqlQuery q(db);
-    if(!q.exec("WITH source_rows AS ("+sources.join(" UNION ALL ")+"), pending AS (SELECT uid,type,day,cents-"+matched+" AS remaining FROM source_rows s) SELECT * FROM pending WHERE remaining>0 ORDER BY day,uid")){error=q.lastError().text();return {};}
+    if(!q.exec("WITH source_rows AS ("+sources.join(" UNION ALL ")+"), pending AS (SELECT uid,type,day,cents-"+matched+" AS remaining FROM source_rows s"+valid+") SELECT * FROM pending WHERE remaining>0 ORDER BY day,uid")){error=q.lastError().text();return {};}
     QList<Pending> result;
     while(q.next())result.append({q.value(0).toString(),q.value(1).toString(),q.value(2).toString(),q.value(3).toLongLong()});
     error=q.lastError().text();return result;
@@ -103,6 +104,10 @@ Result post(const Command& c)
                 return {QStringLiteral("Перевірте фактичне зарахування й комісію.")};
         }else{
             if(c.net || c.fee || c.matched<=0 || (c.sourceType!="advance" && c.sourceType!="payment"))return {QStringLiteral("Оберіть первинну карткову оплату і суму звірки.")};
+            if(db.tables().contains("cash_outflows")){
+                if(!run(q,"SELECT 1 FROM main.cash_outflows WHERE source=? AND kind=?",{c.source,"void_"+c.sourceType}))return {q.lastError().text()};
+                if(q.next())return {QStringLiteral("Оплату сторновано.")};
+            }
             const QString sql=c.sourceType=="advance"?"SELECT cents,day FROM main.cash_advance_events WHERE uid=? AND source_uid IS NULL AND method='card'":
                 "SELECT amount_cents,paid_on FROM main.client_payments WHERE payment_uid=? AND method='card'";
             if(!run(q,sql,{c.source}) || !q.next())return {QStringLiteral("Карткове надходження не знайдено.")};

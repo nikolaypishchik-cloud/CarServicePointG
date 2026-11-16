@@ -36,8 +36,8 @@ Totals totals(QDate first,QDate last)
                  "CASE WHEN source_uid IS NULL THEN cents ELSE 0 END AS net,CASE WHEN source_uid IS NULL THEN cents ELSE -cents END AS free FROM main.cash_advance_events";
     if(tables.contains("cash_outflows"))
         sources<<"SELECT day,0 AS gross,CASE WHEN kind IN ('advance','payment') THEN cents ELSE 0 END AS refund,"
-                 "CASE WHEN reversed_uid IS NULL THEN -cents ELSE cents END AS net,"
-                 "CASE kind WHEN 'advance' THEN -cents WHEN 'undo_advance' THEN cents ELSE 0 END AS free FROM main.cash_outflows WHERE kind<>'expense'";
+                 "CASE WHEN kind='void_allocation' THEN 0 WHEN reversed_uid IS NULL THEN -cents ELSE cents END AS net,"
+                 "CASE kind WHEN 'advance' THEN -cents WHEN 'undo_advance' THEN cents WHEN 'void_advance' THEN -cents WHEN 'void_allocation' THEN cents ELSE 0 END AS free FROM main.cash_outflows WHERE kind<>'expense'";
     if(sources.isEmpty()){result.error=QStringLiteral("Журнал коштів ще не ініціалізовано.");return result;}
     QSqlQuery query(db);
     const auto sql="WITH movements AS ("+sources.join(" UNION ALL ")+"), scoped AS "
@@ -80,7 +80,8 @@ Result post(const Command& c)
 {
     const bool expense=c.kind=="expense";
     const bool reverse=c.kind=="reverse";
-    if(!expense && !reverse && c.kind!="payment" && c.kind!="advance")return {QStringLiteral("Невідомий тип операції.")};
+    const bool voidReceipt=QStringList{"void_payment","void_advance","void_allocation"}.contains(c.kind);
+    if(!expense && !reverse && !voidReceipt && c.kind!="payment" && c.kind!="advance")return {QStringLiteral("Невідомий тип операції.")};
     const QString reason=c.reason.trimmed(),category=c.category.trimmed();
     if(expense==category.isEmpty() || category.size()>300)return {QStringLiteral("Перевірте статтю господарської витрати.")};
     if(QUuid(c.uid).isNull() || reason.isEmpty() || reason.size()>300 || c.cents<=0 || !c.date.isValid() || expense!=c.source.isEmpty())
@@ -89,7 +90,7 @@ Result post(const Command& c)
     QSqlQuery q(db);
     if(!q.exec("BEGIN IMMEDIATE"))return {q.lastError().text()};
     auto rollback=qScopeGuard([&]{db.rollback();});
-    if(reverse?!canReverse():!allowed(expense))return {QStringLiteral("Недостатньо прав для цієї операції.")};
+    if((reverse || voidReceipt)?!canReverse():!allowed(expense))return {QStringLiteral("Недостатньо прав для цієї операції.")};
     if(const auto error=CashAdvanceService::stationError();!error.isEmpty())return {error};
     const auto actor=ActivityAuditService::currentActor().accountId;
     const auto day=c.date.toString(Qt::ISODate);
@@ -97,6 +98,7 @@ Result post(const Command& c)
                "cents INTEGER NOT NULL CHECK(cents>0),day TEXT NOT NULL,reason TEXT NOT NULL,method TEXT NOT NULL,actor TEXT NOT NULL,"
                "order_uid TEXT,client_uid TEXT,shift_uid TEXT,recorded_ms INTEGER NOT NULL,category TEXT,reversed_uid TEXT UNIQUE REFERENCES cash_outflows(uid))"))return {q.lastError().text()};
     if(!q.exec("CREATE INDEX IF NOT EXISTS main.cash_outflows_source ON cash_outflows(kind,source)"))return {q.lastError().text()};
+    if(!q.exec("CREATE UNIQUE INDEX IF NOT EXISTS main.cash_receipt_void ON cash_outflows(kind,source) WHERE kind IN ('void_advance','void_payment','void_allocation')"))return {q.lastError().text()};
     if(!execute(q,"SELECT CASE WHEN reversed_uid IS NULL THEN kind ELSE 'reverse' END,COALESCE(reversed_uid,source),cents,day,reason,actor,category FROM main.cash_outflows WHERE uid=?",{c.uid}))return {q.lastError().text()};
     if(q.next()){
         if(q.value(0)!=c.kind || q.value(1).toString()!=c.source || q.value(2).toLongLong()!=c.cents ||
@@ -113,8 +115,11 @@ Result post(const Command& c)
         if(!execute(q,"SELECT 1 FROM main.cash_outflows WHERE reversed_uid=?",{reversed}))return {q.lastError().text()};
         if(q.next())return {QStringLiteral("Повернення вже сторновано.")};
     }else if(!expense){
-        const auto sql=c.kind=="advance"?
-            "SELECT method,day,order_uid,client_uid,cents-COALESCE((SELECT SUM(cents) FROM main.cash_advance_events b WHERE b.source_uid=a.uid),0) "
+        const auto sourceKind=voidReceipt?c.kind.mid(5):c.kind;
+        const auto sql=sourceKind=="allocation"?
+            "SELECT method,day,order_uid,client_uid,cents FROM main.cash_advance_events WHERE uid=? AND method='allocation' AND source_uid IS NOT NULL":
+            sourceKind=="advance"?
+            "SELECT method,day,order_uid,client_uid,cents-COALESCE((SELECT SUM(cents) FROM main.cash_advance_events b WHERE b.source_uid=a.uid AND NOT EXISTS(SELECT 1 FROM main.cash_outflows v WHERE v.kind='void_allocation' AND v.source=b.uid)),0) "
             "FROM main.cash_advance_events a WHERE uid=? AND source_uid IS NULL":
             "SELECT p.method,p.paid_on,p.order_uid,o.client_uid,p.amount_cents FROM main.client_payments p JOIN main.work_orders o ON o.order_uid=p.order_uid "
             "WHERE p.payment_uid=? AND p.method<>'advance_allocation'";
@@ -123,10 +128,22 @@ Result post(const Command& c)
         method=q.value(0).toString(); const auto received=QDate::fromString(q.value(1).toString(),Qt::ISODate);
         order=q.value(2).toString();client=q.value(3).toString();
         const auto available=q.value(4).toLongLong();
-        if(q.next() || client.isEmpty() || !received.isValid() || received>c.date || !QStringList{"cash","card","bank_transfer","transfer"}.contains(method))
+        if(q.next() || client.isEmpty() || !received.isValid() || received>c.date || !(QStringList{"cash","card","bank_transfer","transfer"}.contains(method) || (sourceKind=="allocation" && method=="allocation")))
             return {QStringLiteral("Потрібна звірка клієнта, дати або способу надходження.")};
-        if(!execute(q,"SELECT COALESCE(SUM(CASE WHEN reversed_uid IS NULL THEN cents ELSE -cents END),0) FROM main.cash_outflows WHERE kind IN (?,?) AND source=?",{c.kind,"undo_"+c.kind,c.source}) || !q.next())return {q.lastError().text()};
-        if(c.cents>available-q.value(0).toLongLong())return {QStringLiteral("Сума перевищує доступний залишок джерела.")};
+        if(!execute(q,"SELECT 1 FROM main.cash_outflows WHERE kind=? AND source=?",{"void_"+sourceKind,c.source}))return {q.lastError().text()};
+        if(q.next())return {QStringLiteral("Початкову операцію вже сторновано.")};
+        if(!execute(q,"SELECT COALESCE(SUM(CASE WHEN reversed_uid IS NULL THEN cents ELSE -cents END),0) FROM main.cash_outflows WHERE kind IN (?,?) AND source=?",{sourceKind,"undo_"+sourceKind,c.source}) || !q.next())return {q.lastError().text()};
+        const auto returned=q.value(0).toLongLong();
+        if(voidReceipt){
+            if(returned!=0 || c.cents!=available)return {QStringLiteral("Потрібно скасувати залежні операції та обрати повну суму джерела.")};
+            if(sourceKind=="advance"){
+                if(!execute(q,"SELECT cents FROM main.cash_advance_events WHERE uid=?",{c.source}) || !q.next() || q.value(0).toLongLong()!=c.cents)return {QStringLiteral("Спочатку сторнуйте залежні зарахування.")};
+            }
+            if(db.tables().contains("cash_bank_events")){
+                if(!execute(q,"SELECT 1 FROM main.cash_bank_events WHERE action='match' AND source_type=? AND source=? LIMIT 1",{sourceKind,c.source}))return {q.lastError().text()};
+                if(q.next())return {QStringLiteral("Оплату звірено з банком. Потрібне документоване виправлення звірки.")};
+            }
+        }else if(c.cents>available-returned)return {QStringLiteral("Сума перевищує доступний залишок джерела.")};
     }
     if(method=="cash"){
         if(!db.tables().contains("cash_shifts"))return {QStringLiteral("Потрібна відкрита касова зміна.")};
@@ -142,7 +159,7 @@ Result post(const Command& c)
         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",{c.uid,kind,source,c.cents,day,reason,method,actor,order,client,shift,QDateTime::currentMSecsSinceEpoch(),category,reversed}))
         return {q.lastError().text()};
     QString error;
-    if(!ActivityAuditService::record(db,"cash",reverse?"reverse_refund":expense?"expense":"refund",reason,0,"cash_outflow",c.uid,c.source,"{}",&error))return {error};
+    if(!ActivityAuditService::record(db,"cash",voidReceipt?"void_receipt":reverse?"reverse_refund":expense?"expense":"refund",reason,0,"cash_outflow",c.uid,c.source,"{}",&error))return {error};
     if(!db.commit())return {db.lastError().text()};
     rollback.dismiss();
     return {};

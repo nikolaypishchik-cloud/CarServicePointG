@@ -13,13 +13,13 @@ void openOutflowDialog(CashJournalPage* page,QString kind,QString uid,QString la
 {
     const bool expense=kind=="expense";
     auto* dialog=new QDialog(page);
-    const bool reverse=kind=="reverse";
+    const bool reverse=kind=="reverse" || kind.startsWith("void_");
     dialog->setObjectName("outflowDialog");
-    dialog->setWindowTitle(reverse?QObject::tr("Сторно помилкового повернення"):expense?QObject::tr("Видаток готівки"):QObject::tr("Повернення клієнту"));
+    dialog->setWindowTitle(reverse?QObject::tr("Повне сторно операції"):expense?QObject::tr("Видаток готівки"):QObject::tr("Повернення клієнту"));
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setWindowModality(Qt::WindowModal);
     auto* form=new QFormLayout(dialog);
-    form->addRow(reverse?QObject::tr("Повернення"):expense?QObject::tr("Каса"):QObject::tr("Надходження"),new QLabel(label,dialog));
+    form->addRow(reverse?QObject::tr("Початкова операція"):expense?QObject::tr("Каса"):QObject::tr("Надходження"),new QLabel(label,dialog));
     const auto day=QDate::currentDate();
     form->addRow(QObject::tr("Дата"),new QLabel(day.toString("dd.MM.yyyy"),dialog));
     auto* amount=new QLineEdit(dialog);

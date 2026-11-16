@@ -21,4 +21,5 @@ Choices clients();
 Choices orders(const QString& clientUid);
 Choices advances(const QString& clientUid);
 Result post(const Command& command);
+Result postPayment(const Command& command);
 }

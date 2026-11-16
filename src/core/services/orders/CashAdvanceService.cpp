@@ -34,6 +34,14 @@ bool exec(QSqlQuery& q, const QString& sql, const QVariantList& args)
     for (const auto& arg : args) q.addBindValue(arg);
     return q.exec();
 }
+QString advanceCorrections(QSqlDatabase db)
+{
+    if(!db.tables().contains("cash_outflows"))return {};
+    return "-COALESCE((SELECT SUM(CASE WHEN kind='undo_advance' THEN -cents ELSE cents END) FROM main.cash_outflows "
+           "WHERE kind IN ('advance','undo_advance','void_advance') AND source=a.uid),0)"
+           "+COALESCE((SELECT SUM(v.cents) FROM main.cash_outflows v JOIN main.cash_advance_events b ON b.uid=v.source "
+           "WHERE v.kind='void_allocation' AND b.source_uid=a.uid),0)";
+}
 Choices choices(const QString& sql, const QVariantList& args)
 {
     auto db = Database::db();
@@ -87,7 +95,7 @@ Choices advances(const QString& client)
     auto db = Database::db();
     if (!authorized(db)) return {{},QStringLiteral("Немає доступу.")};
     if (!db.tables().contains("cash_advance_events")) return {};
-    const QString refunds=db.tables().contains("cash_outflows")?"-COALESCE((SELECT SUM(CASE WHEN kind='advance' THEN cents ELSE -cents END) FROM main.cash_outflows WHERE kind IN ('advance','undo_advance') AND source=a.uid),0)":"";
+    const QString refunds=advanceCorrections(db);
     return choices("SELECT uid,day || ' · ' || printf('%lld,%02lld грн',remaining/100,remaining%100) || ' · ' || uid "
                    "FROM (SELECT a.uid,a.day,a.cents-COALESCE((SELECT SUM(b.cents) FROM main.cash_advance_events b "
                    "WHERE b.source_uid=a.uid),0)"+refunds+" AS remaining FROM main.cash_advance_events a "
@@ -106,6 +114,47 @@ QString stationError()
     if (!CloudSyncSettings::localBackendEnabled() || key.isEmpty() || Database::getSetting("cash.single_station",QString()).toString()!=key)
         return QStringLiteral("Для проведення потрібен підтверджений єдиний ПК або відповідь сервера.");
     return {};
+}
+Result postPayment(const Command& c)
+{
+    auto db=Database::db();
+    const auto actor=ActivityAuditService::currentActor().accountId;
+    auto fail=[](QString error){return Result{{},error,false};};
+    if(QUuid(c.requestUid).isNull() || !c.advanceUid.isEmpty() || c.cents<=0 || c.cents>9000000000000000LL || c.clientUid.isEmpty() || c.orderUid.isEmpty() || c.note.size()>300 ||
+       !QStringList{"cash","card","transfer"}.contains(c.method))return fail(QStringLiteral("Перевірте клієнта, наряд, спосіб і суму оплати."));
+    QSqlQuery q(db);
+    if(!q.exec("BEGIN IMMEDIATE"))return fail(q.lastError().text());
+    auto rollback=qScopeGuard([&]{db.rollback();});
+    if(auto error=postingAuthorityError("cash.receive");!error.isEmpty())return fail(error);
+    QString error;
+    if(!OrderClosureJournal::ensureSchema(db,&error))return fail(error);
+    if(!q.exec("CREATE TABLE IF NOT EXISTS main.cash_payment_details(payment_uid TEXT PRIMARY KEY REFERENCES client_payments(payment_uid),client_uid TEXT NOT NULL,note TEXT NOT NULL)"))return fail(q.lastError().text());
+    const auto method=c.method=="transfer"?QStringLiteral("bank_transfer"):c.method;
+    const auto day=c.day.toString(Qt::ISODate);
+    if(!exec(q,"SELECT p.order_uid,p.amount_cents,p.method,p.paid_on,p.actor,d.client_uid,d.note FROM main.client_payments p LEFT JOIN main.cash_payment_details d ON p.payment_uid=d.payment_uid WHERE p.request_uid=?",{c.requestUid}))return fail(q.lastError().text());
+    if(q.next()){
+        if(q.value(0)!=c.orderUid || q.value(1).toLongLong()!=c.cents || q.value(2)!=method || q.value(3)!=day || q.value(4)!=actor || q.value(5)!=c.clientUid || q.value(6).toString()!=c.note)
+            return fail(QStringLiteral("Запит має інші реквізити."));
+        return {c.requestUid,{},true};
+    }
+    if(c.day!=QDate::currentDate())return fail(QStringLiteral("Для нової оплати потрібна поточна дата."));
+    if(!exec(q,"SELECT client_uid FROM main.work_orders WHERE order_uid=?",{c.orderUid}) || !q.next() || q.value(0)!=c.clientUid || q.next())return fail(QStringLiteral("Перевірте клієнта наряду."));
+    const auto snapshot=CrmFinancialService::readOrder(db,c.orderUid);
+    if(!snapshot.error.isEmpty())return fail(snapshot.error);
+    if(!snapshot.documentedOrderReceipts || snapshot.orders.size()!=1 || c.cents>snapshot.orders.front().balanceCents())return fail(QStringLiteral("Потрібна підтверджена заборгованість на суму оплати."));
+    if(!exec(q,"INSERT INTO main.client_payments(payment_uid,request_uid,order_uid,amount_cents,method,paid_on,actor,recorded_ms) VALUES(?,?,?,?,?,?,?,?)",
+        {c.requestUid,c.requestUid,c.orderUid,c.cents,method,day,actor,QDateTime::currentMSecsSinceEpoch()}))return fail(q.lastError().text());
+    if(!exec(q,"INSERT INTO main.cash_payment_details VALUES(?,?,?)",{c.requestUid,c.clientUid,c.note.isNull()?QStringLiteral(""):c.note}))return fail(q.lastError().text());
+    if(c.method=="cash"){
+        if(!db.tables().contains("cash_shifts") || !exec(q,"SELECT shift_uid FROM main.cash_shifts WHERE state='open' AND operator_uid=?",{actor}) || !q.next())return fail(QStringLiteral("Потрібна відкрита зміна оператора."));
+        const auto shift=q.value(0).toString();
+        if(q.next())return fail(QStringLiteral("Потрібна звірка касових змін."));
+        if(!q.exec("CREATE TABLE IF NOT EXISTS main.cash_shift_receipts(payment_uid TEXT PRIMARY KEY NOT NULL,shift_uid TEXT NOT NULL REFERENCES cash_shifts(shift_uid))") ||
+           !exec(q,"INSERT INTO main.cash_shift_receipts VALUES(?,?)",{c.requestUid,shift}))return fail(q.lastError().text());
+    }
+    if(!ActivityAuditService::record(db,"cash","payment",QStringLiteral("Оплата наряду"),0,"client_payment",c.requestUid,c.orderUid,"{}",&error))return fail(error);
+    if(!db.commit())return fail(db.lastError().text());
+    rollback.dismiss();return {c.requestUid,{},false};
 }
 Result post(const Command& c)
 {
@@ -152,7 +201,7 @@ Result post(const Command& c)
     }
     QString error;
     if (allocation) {
-        const QString refunds=db.tables().contains("cash_outflows")?"-COALESCE((SELECT SUM(CASE WHEN kind='advance' THEN cents ELSE -cents END) FROM main.cash_outflows WHERE kind IN ('advance','undo_advance') AND source=a.uid),0)":"";
+        const QString refunds=advanceCorrections(db);
         if (!exec(q,"SELECT a.client_uid,a.cents-COALESCE((SELECT SUM(b.cents) FROM main.cash_advance_events b WHERE b.source_uid=a.uid),0)"+refunds+" "
                     "FROM main.cash_advance_events a WHERE a.uid=? AND a.source_uid IS NULL",{c.advanceUid}) || !q.next())
             return fail(QStringLiteral("Не знайдено джерело авансу."));

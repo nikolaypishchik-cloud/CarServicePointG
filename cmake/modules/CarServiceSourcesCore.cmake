@@ -70,7 +70,9 @@ set(CS_CORE_SOURCES
     src/core/crm/CrmModule.cpp
     src/core/crm/CrmClientService.cpp
     src/core/services/orders/CashOpeningService.cpp
+    src/core/services/orders/CashAccountMovement.cpp
     src/core/services/orders/CashBankService.cpp
+    src/core/services/orders/CashOperations.cpp
     src/core/services/orders/CashOutflow.cpp
     src/core/services/orders/CashShiftService.cpp
     src/core/services/orders/CashAdvanceService.cpp

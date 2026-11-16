@@ -97,7 +97,7 @@ bool apply(QSqlDatabase db,const QJsonObject& result,QString* error) {
     }
     if(result.contains("refund_cents")){
         QSqlQuery refunds(db);
-        if(!refunds.prepare("SELECT COALESCE(SUM(CASE WHEN kind='payment' THEN cents ELSE -cents END),0) FROM main.cash_outflows WHERE kind IN ('payment','undo_payment') AND order_uid=?"))return fail(error,refunds.lastError().text());
+        if(!refunds.prepare("SELECT COALESCE(SUM(CASE WHEN kind='undo_payment' THEN -cents ELSE cents END),0) FROM main.cash_outflows WHERE kind IN ('payment','undo_payment','void_payment','void_allocation') AND order_uid=?"))return fail(error,refunds.lastError().text());
         refunds.addBindValue(uid);
         if(!refunds.exec() || !refunds.next() || refunds.value(0).toLongLong()!=result["refund_cents"].toInteger(-1))return fail(error,"Refund total mismatch");
         receiptTotal-=refunds.value(0).toLongLong();

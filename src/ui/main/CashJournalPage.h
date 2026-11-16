@@ -1,5 +1,6 @@
 #pragma once
 #include <QWidget>
+class CashOperationsWidget;
 class QDateEdit;
 class QLabel;
 class QTableWidget;
@@ -14,6 +15,7 @@ private:
     QTableWidget* outflowTable;
     QTableWidget* advanceTable;
     QLabel* advanceStatus;
+    CashOperationsWidget* operations;
     QList<QLabel*> metricValues;
     QLabel* summary;
 };

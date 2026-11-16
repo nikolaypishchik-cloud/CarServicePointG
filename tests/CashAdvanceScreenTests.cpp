@@ -13,6 +13,8 @@
 #include <QTabWidget>
 #include "core/services/orders/CashOutflow.h"
 #include "core/services/orders/CashBankService.h"
+#include "core/services/orders/CashOperations.h"
+#include "core/services/orders/CashAccountMovement.h"
 #include <QTemporaryDir>
 #include "app/App.h"
 #include "core/services/AccessControlService.h"
@@ -236,6 +238,7 @@ private slots:
         };
         auto* receipts=page.findChild<QTableWidget*>("directCashPayments");
         QCOMPARE(receipts->rowCount(),1);
+        page.findChild<QTabWidget*>()->setCurrentWidget(receipts);
         receipts->selectRow(0);
         throughForm("refundReceipt","30,00");
         throughForm("postExpense","40,00");
@@ -274,7 +277,7 @@ private slots:
         QVERIFY(!CashOutflow::post({id(),"expense",{},"QA",day,1,"Матеріали"}).error.isEmpty());
         QVERIFY(CashOutflow::allowed(false));
         page.refresh();
-        page.findChild<QTabWidget*>()->setCurrentIndex(1);
+        page.findChild<QTabWidget*>()->setCurrentIndex(2);
         QVERIFY(q.exec("SELECT uid FROM cash_advance_events WHERE method='cash' AND cents=10000") && q.next());
         const auto originalCash=q.value(0).toString();
         q.finish();
@@ -292,7 +295,7 @@ private slots:
         QVERIFY(!CashOutflow::post(reverse).error.isEmpty());
         reverse.cents=2101;
         auto* tabs=page.findChild<QTabWidget*>();
-        tabs->setCurrentIndex(2);
+        tabs->setCurrentIndex(3);
         auto* outflows=qobject_cast<QTableWidget*>(tabs->currentWidget());
         QVERIFY(outflows);
         for(int row=0;row<outflows->rowCount();++row)
@@ -333,6 +336,37 @@ private slots:
         QCOMPARE(earlier.freeAdvances,summary.freeAdvances);
         QCOMPARE(earlier.allNet,summary.net);
         QVERIFY(q.exec("PRAGMA query_only=OFF"));
+        page.findChild<QPushButton*>("receiveOrderPayment")->click();
+        auto* payForm=page.findChild<QDialog*>("cashAdvanceForm");
+        QVERIFY(payForm);
+        payForm->findChild<QComboBox*>("advanceClient")->setCurrentIndex(1);
+        payForm->findChild<QComboBox*>("advanceOrder")->setCurrentIndex(1);
+        payForm->findChild<QComboBox*>("advanceMethod")->setCurrentIndex(2);
+        payForm->findChild<QLineEdit*>("advanceAmount")->setText("10,50");
+        auto* postPayment=payForm->findChild<QPushButton*>("advancePost");
+        postPayment->click();
+        auto* paymentNotice=payForm->findChild<QLabel*>("advanceStatus");
+        QVERIFY2(paymentNotice->text().startsWith(QStringLiteral("Проведено")),qPrintable(paymentNotice->text()));
+        postPayment->click();
+        QVERIFY(paymentNotice->text().startsWith(QStringLiteral("Уже проведено")));
+        QVERIFY(q.exec("SELECT COUNT(*),SUM(amount_cents) FROM cash_payment_details JOIN client_payments USING(payment_uid)") && q.next());
+        QCOMPARE(q.value(0).toInt(),1);QCOMPARE(q.value(1).toLongLong(),1050);q.finish();
+        payForm->close();
+        QVERIFY(!CashOutflow::post({id(),"void_advance",sourceUid,"Перевірка",day,10000}).error.isEmpty());
+        auto voidAllocation=CashOutflow::Command{id(),"void_allocation",allocationUid,"Виправлення зарахування",day,4001};
+        auto voided=CashOutflow::post(voidAllocation);
+        QVERIFY2(voided.error.isEmpty(),qPrintable(voided.error));
+        QVERIFY(CashOutflow::post(voidAllocation).replay);
+        auto adjusted=CashOutflow::totals(day,day);
+        QCOMPARE(adjusted.freeAdvances,summary.freeAdvances+4001);
+        QCOMPARE(adjusted.net,summary.net+1050);
+        QVERIFY(q.exec("SELECT payment_uid FROM cash_payment_details") && q.next());
+        const auto directUid=q.value(0).toString();q.finish();
+        auto voidPayment=CashOutflow::Command{id(),"void_payment",directUid,"Помилка оплати",day,1050};
+        QVERIFY(CashOutflow::post(voidPayment).error.isEmpty());
+        QVERIFY(CashOutflow::post(voidPayment).replay);
+        QCOMPARE(CashOutflow::totals(day,day).net,summary.net);
+        QVERIFY(!CashOutflow::post({id(),"payment",directUid,"QA",day,1}).error.isEmpty());
         const auto bank=id();
         using Bank=CashBankService::Command;
         QVERIFY(CashBankService::post(Bank{id(),"account",bank,"QA bank","bank",{},"Налаштування",day}).error.isEmpty());
@@ -359,6 +393,10 @@ private slots:
         QCOMPARE(creditedRows.front().net,98000);
         QCOMPARE(creditedRows.front().fee,2000);
         QCOMPARE(ClientReceiptReader::read(db,{"order"}).centsByOrder,beforeBank.centsByOrder);
+        const auto searchBank=CashOperations::read(day,day,"QA-82","match","transfer",0);
+        QVERIFY2(searchBank.error.isEmpty(),qPrintable(searchBank.error));
+        QCOMPARE(searchBank.rows.size(),1);QCOMPARE(searchBank.rows.front().net,0);
+        QCOMPARE(searchBank.rows.front().amount,100000);
         auto grants=AccessControlService::grantedPermissions(db,"manager",&error);
         grants.unite({"cash.view","cash.receive","cash.shift","cash.configure"});
         QVERIFY2(AccessControlService::setRolePermissions(db,"manager",grants,&error),qPrintable(error));
@@ -374,6 +412,24 @@ private slots:
         CashJournalPage delegatedPage(nullptr);
         QVERIFY(delegatedPage.findChild<QPushButton*>("receiveAdvance")->isEnabled());
         QVERIFY(!delegatedPage.findChild<QPushButton*>("allocateAdvance")->isEnabled());
+        ActivityAuditService::setCurrentActor({"worker","Operator","owner","test"});
+        const auto safe=id();
+        QVERIFY(CashBankService::post(Bank{id(),"account",safe,"QA сейф","safe",{},"Окремий рахунок",day}).error.isEmpty());
+        using Move=CashAccountMovement::Command;
+        QVERIFY(CashAccountMovement::post(Move{id(),{},safe,"Перерахунок",day,0}).error.isEmpty());
+        Move move{id(),"primary-cash",safe,"Інкасація",day,12345};
+        QVERIFY(!CashAccountMovement::post(move).error.isEmpty());
+        grants.insert("cash.transfer");
+        QVERIFY(AccessControlService::setRolePermissions(db,"manager",grants,&error));
+        ActivityAuditService::setCurrentActor({"delegated","Responsible","manager","test"});
+        const auto moved=CashAccountMovement::post(move);
+        QVERIFY2(moved.error.isEmpty(),qPrintable(moved.error));
+        QVERIFY(CashAccountMovement::post(move).replay);
+        qint64 safeBalance=0,drawerBalance=0;
+        QVERIFY(CashAccountMovement::balance(db,safe,safeBalance).isEmpty());
+        QVERIFY(CashShiftService::currentBalance(drawerBalance).isEmpty());
+        QCOMPARE(safeBalance,12345);QCOMPARE(drawerBalance,55001-12345);
+        QVERIFY(!CashAccountMovement::post({id(),safe,"primary-cash","Більше за наявне",day,12346}).error.isEmpty());
         ActivityAuditService::setCurrentActor({"worker","Operator","owner","test"});
         grants.remove("cash.receive");
         QVERIFY(AccessControlService::setRolePermissions(db,"manager",grants,&error));

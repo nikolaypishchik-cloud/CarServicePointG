@@ -175,7 +175,7 @@ QJsonObject preview(QSqlDatabase db,const QJsonObject& s,const QString& uid) {
     for(const auto& v:services){auto p=v.toObject();bs.append(QJsonObject{{"uid",p["service_uid"]},{"qty",p["qty"]},{"price",p["price"]}});}
     qint64 refunds=0;
     if(db.tables().contains("cash_outflows")){
-        auto refunded=query(db,"SELECT COALESCE(SUM(CASE WHEN kind='payment' THEN cents ELSE -cents END),0) FROM main.cash_outflows WHERE kind IN ('payment','undo_payment') AND order_uid=?",{uid});
+        auto refunded=query(db,"SELECT COALESCE(SUM(CASE WHEN kind='undo_payment' THEN -cents ELSE cents END),0) FROM main.cash_outflows WHERE kind IN ('payment','undo_payment','void_payment','void_allocation') AND order_uid=?",{uid});
         require(refunded.next(),refunded.lastError().text());
         refunds=refunded.value(0).toLongLong();
         require(refunds<=received,QStringLiteral("Повернення перевищують оплати."));

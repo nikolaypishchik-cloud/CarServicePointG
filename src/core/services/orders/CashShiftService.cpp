@@ -69,6 +69,7 @@ QString balance(QSqlDatabase db,const QString& shift,qint64& amount,bool allowUn
         return q.lastError().text();
     if(db.tables().contains("cash_shift_transitions") && !addSum("SELECT COALESCE(SUM(delta),0) FROM main.cash_shift_transitions WHERE shift_uid=?"))return q.lastError().text();
     if(db.tables().contains("cash_outflows") && !addSum("SELECT COALESCE(SUM(CASE WHEN reversed_uid IS NULL THEN -cents ELSE cents END),0) FROM main.cash_outflows WHERE shift_uid=?"))return q.lastError().text();
+    if(db.tables().contains("cash_account_moves") && !addSum("SELECT COALESCE(SUM(CASE WHEN dest='primary-cash' THEN cents ELSE -cents END),0) FROM main.cash_account_moves WHERE shift_uid=?"))return q.lastError().text();
     const auto total=ExactMoney::sum(amounts);
     const auto* balance=std::get_if<ExactMoney::Cents>(&total);
     if(!balance || *balance<0)return QStringLiteral("Некоректний обліковий залишок.");
