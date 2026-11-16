@@ -170,6 +170,39 @@ Rows statementPartHistory(const QString& clientUid, const QString& vehicleUid, Q
     if (!collect(query,&events,error)) events.clear();
     return events;
 }
+IssueSource statementIssueSource(const QString& clientUid, const QString& orderUid, const QString& partUid, qint64 issueId) {
+    IssueSource result;
+    auto db = Database::db();
+    const auto orders = crmOrderHistorySource(db);
+    const QString parts = orders=="router_work_orders" ? QStringLiteral("router_work_order_parts") : QStringLiteral("work_order_parts");
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral(
+        "SELECT m.id AS issue_id,m.moved_on,m.quantity AS issued,m.actor,s.id AS reserve_id,s.name,s.ordered_on,s.expected_on,"
+        "r.id,r.moved_on,r.quantity,r.actor FROM workshop_spare_movements m "
+        "JOIN %1 o ON o.number=m.order_number JOIN %2 p ON p.id=m.part_id AND p.order_number=o.number AND p.order_uid=o.order_uid "
+        "JOIN workshop_spare_orders s ON s.id=m.spare_id LEFT JOIN workshop_spare_movements r ON r.spare_id=s.id AND r.operation='receipt' "
+        "WHERE m.id=? AND m.operation='issue' AND o.client_uid=? AND o.order_uid=? AND p.part_uid=? "
+        "AND (SELECT count(*) FROM %1 x WHERE x.order_uid=o.order_uid)=1 "
+        "AND (SELECT count(*) FROM %2 x WHERE x.part_uid=p.part_uid)=1 "
+        "AND (SELECT count(*) FROM %2 x WHERE x.order_number=m.order_number AND x.id=m.part_id)=1 "
+        "ORDER BY r.moved_on,r.id").arg(orders,parts));
+    query.addBindValue(issueId);
+    query.addBindValue(clientUid);
+    query.addBindValue(orderUid);
+    query.addBindValue(partUid);
+    if (!query.exec()) { result.error=query.lastError().text(); return result; }
+    while (query.next()) {
+        if (result.issue.isEmpty()) {
+            const auto fields=query.record();
+            for (int i=0;i<8;++i) result.issue.insert(fields.fieldName(i),query.value(i));
+        }
+        if (!query.value(8).isNull())
+            result.receipts.append({query.value(8),query.value(9),query.value(10),query.value(11)});
+    }
+    if (query.lastError().isValid()) result.error=query.lastError().text();
+    else if (result.issue.isEmpty()) result.error=QStringLiteral("Первинну видачу або її зв’язок із позицією не підтверджено.");
+    return result;
+}
 Rows statementVehicles(const QString& clientUid, QString* error) {
     QSqlQuery query(Database::db());
     query.prepare("SELECT vehicle_uid, TRIM(brand || ' ' || model),plate FROM crm_vehicles WHERE client_uid=? ORDER BY brand,model,plate,vehicle_uid");

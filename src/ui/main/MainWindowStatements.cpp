@@ -169,6 +169,7 @@ void MainWindow::openHeaderStatements()
                     const auto text=c==6 ? (issued?tr("Складська видача №%1"):tr("Позиція наряду №%1")).arg(event[c].toString()) : event[c].toString();
                     issues->setItem(row,c,new QTableWidgetItem(text.isEmpty()?tr("Немає даних"):text));
                 }
+                if (issued) issues->item(row,6)->setData(Qt::UserRole,event[6]);
                 issues->item(row,4)->setData(Qt::UserRole,event[4]);
                 issues->setItem(row,9,new QTableWidgetItem(issued?tr("Видано зі складу"):tr("Встановлено")));
             }
@@ -239,6 +240,56 @@ void MainWindow::openHeaderStatements()
     };
     connect(openOrder,&QPushButton::clicked,dialog,showOrder);
     connect(table,&QTableWidget::cellActivated,dialog,showOrder);
+    auto* sourceButton = new QPushButton(tr("Первинна видача"),dialog);
+    layout->addWidget(sourceButton);
+    sourceButton->setVisible(false);
+    connect(issues,&QTableWidget::itemSelectionChanged,dialog,[=] {
+        const auto* source=issues->item(issues->currentRow(),6);
+        sourceButton->setVisible(tabs->currentWidget()==issues && !issues->selectedItems().isEmpty()
+                                 && source && source->data(Qt::UserRole).isValid());
+    });
+    connect(sourceButton,&QPushButton::clicked,dialog,[=] {
+        const int row=issues->currentRow();
+        if (!canAccessPage(9) || tabs->currentWidget()!=issues || row<0) return;
+        const auto source=CrmPageReadService::statementIssueSource(client->currentData().toString(),issues->item(row,4)->text(),
+            issues->item(row,5)->text(),issues->item(row,6)->data(Qt::UserRole).toLongLong());
+        if (!source.error.isEmpty()) { message->setText(source.error); return; }
+        auto* card=new QDialog(dialog);
+        card->setAttribute(Qt::WA_DeleteOnClose);
+        card->setObjectName("statementIssueSource");
+        card->setWindowTitle(tr("Складська видача №%1").arg(source.issue.value("issue_id").toString()));
+        auto* body=new QVBoxLayout(card);
+        auto* fields=new QFormLayout;
+        body->addLayout(fields);
+        auto field=[&](const QString& label,const QString& key) {
+            auto* value=new QLabel(card);
+            value->setTextFormat(Qt::PlainText);
+            const auto text=source.issue.value(key).toString();
+            value->setText(text.isEmpty()?tr("Немає даних"):text);
+            fields->addRow(label,value);
+        };
+        field(tr("Запчастина"),"name");
+        field(tr("Резерв №"),"reserve_id");
+        field(tr("Замовлено"),"ordered_on");
+        field(tr("Очікуване надходження (план)"),"expected_on");
+        field(tr("Видано за нарядом"),"moved_on");
+        field(tr("Кількість видачі"),"issued");
+        field(tr("Видав"),"actor");
+        body->addWidget(new QLabel(tr("Фактичні надходження всього резерву"),card));
+        auto* receipts=new QTableWidget(source.receipts.size(),4,card);
+        receipts->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        receipts->setHorizontalHeaderLabels({tr("ID надходження"),tr("Прийнято"),tr("Кількість"),tr("Виконавець")});
+        for (int r=0;r<source.receipts.size();++r) {
+            for (int c=0;c<4;++c) {
+                const auto text=source.receipts[r][c].toString();
+                receipts->setItem(r,c,new QTableWidgetItem(text.isEmpty()?tr("Немає даних"):text));
+            }
+        }
+        body->addWidget(receipts);
+        if (source.receipts.isEmpty()) body->addWidget(new QLabel(tr("Надходжень у журналі немає."),card));
+        card->resize(610,480);
+        card->open();
+    });
     connect(issues,&QTableWidget::cellActivated,dialog,showOrder);
     auto invalidate = [=] { pdf->setEnabled(false); table->setRowCount(0); issues->setRowCount(0); openOrder->setEnabled(false); message->clear(); };
     connect(tabs,&QTabWidget::currentChanged,dialog,invalidate);

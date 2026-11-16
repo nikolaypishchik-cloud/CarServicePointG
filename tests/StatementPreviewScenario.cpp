@@ -122,6 +122,15 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
               "(13,82,1,?,'issue',1,''),(14,999,1,?,'issue',1,'QA'),(15,81,1,?,'receipt',9,'QA')");
     for (int i=0;i<5;++i) q.addBindValue(day.toString(Qt::ISODate));
     QVERIFY2(q.exec(),qPrintable(q.lastError().text()));
+    QVERIFY(q.exec("ALTER TABLE workshop_spare_movements ADD COLUMN spare_id INTEGER"));
+    QVERIFY(q.exec("UPDATE workshop_spare_movements SET spare_id=101 WHERE id IN (11,12,15)"));
+    QVERIFY(q.exec("UPDATE workshop_spare_movements SET moved_on='2026-10-09' WHERE id=15"));
+    QVERIFY(q.exec("UPDATE workshop_spare_movements SET spare_id=102 WHERE id=13"));
+    QVERIFY(q.exec("CREATE TABLE workshop_spare_orders(id INTEGER PRIMARY KEY,name TEXT,ordered_on TEXT,expected_on TEXT)"));
+    QVERIFY(q.exec("INSERT INTO workshop_spare_orders VALUES(101,'Filter','2026-10-01','2026-10-08'),"
+                   "(102,'Filter','2026-10-02','2026-10-12')"));
+    QVERIFY(q.exec("INSERT INTO workshop_spare_movements(id,spare_id,moved_on,operation,quantity,actor) VALUES"
+                   "(16,101,'2026-10-06','receipt',2,'Receiver'),(17,102,'2026-10-07','receipt',8,'Other')"));
     QVERIFY(q.exec("PRAGMA query_only=ON"));
     for (const auto& vehicle : {QStringLiteral("vehicle-a"),QStringLiteral("other")}) {
         error.clear();
@@ -147,5 +156,26 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     QCOMPARE(issues->item(3,3)->text(),QStringLiteral("Немає даних"));
     QCOMPARE(issues->item(3,9)->text(),QStringLiteral("Встановлено"));
     QVERIFY(pdf->isEnabled());
+    issues->setCurrentCell(0,0);
+    auto* showSource=button(QStringLiteral("Первинна видача"));
+    QVERIFY(showSource && showSource->isVisibleTo(dialog));
+    showSource->click();
+    auto* source=dialog->findChild<QDialog*>("statementIssueSource");
+    QVERIFY(source && source->isVisible());
+    QCOMPARE(source->windowTitle(),QStringLiteral("Складська видача №11"));
+    QStringList labels;
+    for (auto* label:source->findChildren<QLabel*>()) labels.append(label->text());
+    QVERIFY(labels.contains("2026-10-08"));
+    QVERIFY(labels.contains(QStringLiteral("Очікуване надходження (план)")));
+    auto* received=source->findChild<QTableWidget*>();
+    QVERIFY(received);
+    QCOMPARE(received->rowCount(),2);
+    QCOMPARE(received->item(0,0)->text(),QStringLiteral("16"));
+    QCOMPARE(received->item(0,2)->text(),QStringLiteral("2"));
+    QCOMPARE(received->item(1,0)->text(),QStringLiteral("15"));
+    QCOMPARE(received->item(1,2)->text(),QStringLiteral("9"));
+    source->close();
+    QVERIFY(!CrmPageReadService::statementIssueSource("other","order-a","part-81",11).error.isEmpty());
+    QVERIFY(!CrmPageReadService::statementIssueSource("client-a","order-a","part-82",11).error.isEmpty());
     QVERIFY(q.exec("PRAGMA query_only=OFF"));
 }
