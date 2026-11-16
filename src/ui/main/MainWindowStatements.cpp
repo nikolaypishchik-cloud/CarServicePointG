@@ -224,13 +224,20 @@ void MainWindow::openHeaderStatements()
                 const int row = issues->rowCount();
                 issues->insertRow(row);
                 const bool issued = event[9].toString()=="issue";
+                const bool batchReceipt = event[9].toString()=="batch_receipt";
+                QString sourceName = tr("Позиція наряду №%1");
+                if (issued) sourceName = tr("Складська видача №%1");
+                if (batchReceipt) sourceName = tr("Надходження партії №%1");
                 for (int c=0;c<9;++c) {
-                    const auto text=c==6 ? (issued?tr("Складська видача №%1"):tr("Позиція наряду №%1")).arg(event[c].toString()) : event[c].toString();
+                    auto text = c==6 ? sourceName.arg(event[c].toString()) : event[c].toString();
+                    if (c==2 && batchReceipt) text = tr("не встановлено");
                     issues->setItem(row,c,new QTableWidgetItem(text.isEmpty()?tr("Немає даних"):text));
                 }
-                if (issued) issues->item(row,6)->setData(Qt::UserRole,event[6]);
+                if (issued || batchReceipt) issues->item(row,6)->setData(Qt::UserRole,event[10]);
+                if (batchReceipt) issues->item(row,6)->setData(Qt::UserRole+1,event[6]);
                 issues->item(row,4)->setData(Qt::UserRole,event[4]);
-                issues->setItem(row,9,new QTableWidgetItem(issued?tr("Видано зі складу"):tr("Встановлено")));
+                const auto operation = batchReceipt ? tr("Надходження партії") : issued ? tr("Видано зі складу") : tr("Встановлено");
+                issues->setItem(row,9,new QTableWidgetItem(operation));
             }
             message->setText(events.isEmpty()?tr("Збережених подій за цей період немає."):QString());
             pdf->setEnabled(true);
@@ -323,6 +330,8 @@ void MainWindow::openHeaderStatements()
     sourceButton->setVisible(false);
     connect(issues,&QTableWidget::itemSelectionChanged,dialog,[=] {
         const auto* source=issues->item(issues->currentRow(),6);
+        sourceButton->setText(source && source->data(Qt::UserRole+1).isValid()
+            ? tr("Первинне надходження") : tr("Первинна видача"));
         sourceButton->setVisible(tabs->currentWidget()==issues && !issues->selectedItems().isEmpty()
                                  && source && source->data(Qt::UserRole).isValid());
     });
@@ -332,6 +341,29 @@ void MainWindow::openHeaderStatements()
         const auto source=CrmPageReadService::statementIssueSource(client->currentData().toString(),issues->item(row,4)->text(),
             issues->item(row,5)->text(),issues->item(row,6)->data(Qt::UserRole).toLongLong());
         if (!source.error.isEmpty()) { message->setText(source.error); return; }
+        const auto receiptId = issues->item(row,6)->data(Qt::UserRole+1);
+        if (receiptId.isValid()) {
+            for (const auto& receipt : source.receipts) {
+                if (receipt[0].toLongLong()!=receiptId.toLongLong()) continue;
+                auto* card=new QDialog(dialog);
+                card->setAttribute(Qt::WA_DeleteOnClose);
+                card->setObjectName("statementBatchReceipt");
+                card->setWindowTitle(tr("Надходження партії №%1").arg(receiptId.toString()));
+                auto* fields=new QFormLayout(card);
+                const QStringList labels={tr("ID надходження"),tr("Фактично прийнято"),tr("Кількість партії"),tr("Виконавець")};
+                for (int i=0;i<labels.size();++i) {
+                    auto* value=new QLabel(card);
+                    value->setTextFormat(Qt::PlainText);
+                    value->setText(receipt[i].toString().isEmpty()?tr("Немає даних"):receipt[i].toString());
+                    fields->addRow(labels[i],value);
+                }
+                fields->addRow(tr("Кількість для клієнта"),new QLabel(tr("не встановлено"),card));
+                card->open();
+                return;
+            }
+            message->setText(tr("Зв’язок з первинним надходженням більше не підтверджено."));
+            return;
+        }
         auto* card=new QDialog(dialog);
         card->setAttribute(Qt::WA_DeleteOnClose);
         card->setObjectName("statementIssueSource");

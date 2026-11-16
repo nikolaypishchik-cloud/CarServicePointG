@@ -235,8 +235,9 @@ void ReportsPage::buildUi()
     auto* periodPage = makeTab(m_periodTable, m_periodModel);
     m_weekComparison = new QLabel(periodPage);
     m_weekComparison->setWordWrap(true);
+    m_weekComparison->setStyleSheet(QStringLiteral("background:#202c38;color:#f2f6fa;padding:5px 8px;"));
     m_weekComparison->hide();
-    periodPage->layout()->addWidget(m_weekComparison);
+    static_cast<QVBoxLayout*>(periodPage->layout())->insertWidget(0, m_weekComparison);
     m_tabs->addTab(periodPage, QString::fromUtf8("Звіт за період"));
     m_tabs->addTab(makeTab(m_ordersTable, m_ordersModel), QString::fromUtf8("Наряди"));
     m_invoicesPage = new InvoicesPage(this);

@@ -1,3 +1,4 @@
+#include "ui/tabs/reports/ReportsPage.h"
 #include <QtTest>
 #include <QApplication>
 #include <QDateEdit>
@@ -136,6 +137,17 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     QVERIFY(q.exec("INSERT INTO workshop_spare_movements(id,spare_id,moved_on,operation,quantity,actor) VALUES"
                    "(16,101,'2026-10-06','receipt',2,'Receiver'),(17,102,'2026-10-07','receipt',8,'Other')"));
     QVERIFY(q.exec("PRAGMA query_only=ON"));
+    const auto receipts=CrmPageReadService::statementPartHistory("client-a","vehicle-a",
+        QDate(2026,10,6),QDate(2026,10,9),&error);
+    QVERIFY2(error.isEmpty(),qPrintable(error));
+    QList<int> receiptIds;
+    for (const auto& row:receipts) {
+        if (row[9].toString()!="batch_receipt") continue;
+        receiptIds.append(row[6].toInt());
+        QVERIFY(row[2].isNull());
+        QCOMPARE(row[5].toString(),row[6].toInt()==17 ? QStringLiteral("part-82") : QStringLiteral("part-81"));
+    }
+    QCOMPARE(receiptIds,QList<int>({16,17,15}));
     for (const auto& vehicle : {QStringLiteral("vehicle-a"),QStringLiteral("other")}) {
         error.clear();
         const auto events=CrmPageReadService::statementPartHistory("client-a",vehicle,day,day,&error);
@@ -179,6 +191,26 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     QCOMPARE(received->item(1,0)->text(),QStringLiteral("15"));
     QCOMPARE(received->item(1,2)->text(),QStringLiteral("9"));
     source->close();
+    const auto savedFrom=date->date();
+    date->setDate(QDate(2026,10,1));
+    generate->click();
+    int receiptRow=-1;
+    for (int i=0;i<issues->rowCount();++i)
+        if (issues->item(i,6)->text()==QStringLiteral("Надходження партії №16")) receiptRow=i;
+    QVERIFY(receiptRow>=0);
+    QCOMPARE(issues->item(receiptRow,2)->text(),QStringLiteral("не встановлено"));
+    issues->setCurrentCell(receiptRow,0);
+    QCOMPARE(showSource->text(),QStringLiteral("Первинне надходження"));
+    showSource->click();
+    auto* batch=dialog->findChild<QDialog*>("statementBatchReceipt");
+    QVERIFY(batch && batch->isVisible());
+    QCOMPARE(batch->windowTitle(),QStringLiteral("Надходження партії №16"));
+    QStringList batchFields;
+    for (const auto* label:batch->findChildren<QLabel*>()) batchFields.append(label->text());
+    for (const QString& value:QStringList{"2026-10-06","Receiver","2","Кількість партії","не встановлено"})
+        QVERIFY(batchFields.contains(value));
+    batch->close();
+    date->setDate(savedFrom);
     QVERIFY(!CrmPageReadService::statementIssueSource("other","order-a","part-81",11).error.isEmpty());
     QVERIFY(!CrmPageReadService::statementIssueSource("client-a","order-a","part-82",11).error.isEmpty());
     QVERIFY(q.exec("PRAGMA query_only=OFF"));
@@ -253,4 +285,39 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     QVERIFY(exportButton);
     saveStatementPreview(financialPreview,exportButton,output.filePath("financial.pdf"),"CS_FINANCIAL_PDF_EVIDENCE");
     financialPreview->close();
+}
+
+void checkWeeklyReportScreen(QSqlDatabase db) {
+    QSqlQuery q(db);
+    QVERIFY(q.exec("DROP VIEW IF EXISTS router_work_orders"));
+    QVERIFY(q.exec("CREATE TABLE IF NOT EXISTS masters(id INTEGER, name TEXT)"));
+    QVERIFY2(q.exec("CREATE VIEW router_work_orders AS SELECT 10 AS number, 10 AS order_number,"
+        "'2025-01-08' AS opened_at,'' AS closed_at,'Car' AS car,'M' AS master_name_closed,"
+        "NULL AS master_id,100 AS works_sum,20 AS parts_sum UNION ALL "
+        "SELECT 9,9,'2025-01-01','','B','M',NULL,30,30 UNION ALL "
+        "SELECT 8,8,'2025-01-02','','C','M',NULL,900,900 UNION ALL "
+        "SELECT 7,7,'2024-12-25','','D','M',NULL,0,0"),qPrintable(q.lastError().text()));
+    ReportsPage page;
+    page.resize(1280,800);
+    page.show();
+    auto* from=page.findChild<QDateEdit*>("dashboardFrom");
+    auto* to=page.findChild<QDateEdit*>("dashboardTo");
+    QVERIFY(from && to);
+    from->setDate(QDate(2025,1,6));
+    to->setDate(QDate(2025,1,8));
+    auto text=[&]() -> QString {
+        for (auto* label:page.findChildren<QLabel*>())
+            if (label->isVisible() && label->text().contains("30.12.2024")) return label->text();
+        return {};
+    };
+    QTRY_VERIFY_WITH_TIMEOUT(!text().isEmpty(),15000);
+    const auto weeks=text().split('\n');
+    QCOMPARE(weeks.size(),4);
+    QVERIFY(weeks[0].contains("01.01.2025") && weeks[0].contains("100")
+        && weeks[0].contains('%') && !weeks[0].contains("900"));
+    QVERIFY(weeks[1].contains("25.12.2024") && weeks[1].contains("Зміна: —"));
+    QVERIFY(weeks[2].contains("18.12.2024") && weeks[2].contains("немає нарядів"));
+    QVERIFY(weeks[3].contains("11.12.2024") && weeks[3].contains("немає нарядів"));
+    const auto output=qEnvironmentVariable("CS_TEST_SCREENSHOTS");
+    if (!output.isEmpty()) QVERIFY(page.grab().save(QDir(output).filePath("four-weeks.png")));
 }

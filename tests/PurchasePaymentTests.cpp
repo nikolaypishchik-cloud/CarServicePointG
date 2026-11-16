@@ -201,6 +201,7 @@ static void expectRejectedTransaction(const QString& reason)
         + QRegularExpression::escape(reason) + "$"));
 }
 
+void checkWeeklyReportScreen(QSqlDatabase db);
 void checkStatementApprovalAndPreview(QSqlDatabase db);
 
 class PurchasePaymentTests final : public QObject {
@@ -921,6 +922,7 @@ private slots:
         }
         error.clear();QCOMPARE(PurchasePaymentService::balances(db,&error),before);QVERIFY(error.isEmpty());
     }
+    void periodReportShowsFourWeeklyComparisons() { checkWeeklyReportScreen(db); }
     void reportPartsMeasuredSpacing() {
         preparePartsReportFixture();
         const auto initial = ReportsDataLoader::buildPartsSnapshot(db.databaseName(), "2026-10-29", "2026-11-07", 0, 0, {}, {});

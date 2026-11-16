@@ -171,13 +171,21 @@ Rows statementPartHistory(const QString& clientUid, const QString& vehicleUid, Q
         "AND (SELECT count(*) FROM %2 x WHERE x.order_number=p.order_number AND x.id=p.id)=1 "
         "AND (SELECT count(*) FROM %2 x WHERE x.part_uid=p.part_uid)=1 ").arg(orders,parts);
     if (!vehicleUid.isEmpty()) sql += QStringLiteral("AND o.vehicle_uid=? ");
-    sql += QStringLiteral("), events(event_date,name,quantity,actor,order_uid,part_uid,source_id,car,visible,kind) AS ("
-        "SELECT installed_at,name,NULL,NULL,order_uid,part_uid,id,car,visible,'installed' FROM positions "
+    sql += QStringLiteral("), events(event_date,name,quantity,actor,order_uid,part_uid,source_id,car,visible,kind,issue_id) AS ("
+        "SELECT installed_at,name,NULL,NULL,order_uid,part_uid,id,car,visible,'installed',NULL FROM positions "
         "WHERE trim(installed_at)<>'' ");
     if (tableOrViewExists(db,QStringLiteral("workshop_spare_movements"))) {
         sql += QStringLiteral("UNION ALL SELECT m.moved_on,p.name,m.quantity,m.actor,p.order_uid,p.part_uid,"
-            "m.id,p.car,p.visible,'issue' FROM workshop_spare_movements m JOIN positions p "
+            "m.id,p.car,p.visible,'issue',m.id FROM workshop_spare_movements m JOIN positions p "
             "ON p.id=m.part_id AND p.order_number=m.order_number WHERE m.operation='issue' ");
+        if (tableOrViewExists(db,QStringLiteral("workshop_spare_orders"))) {
+            sql += QStringLiteral("UNION ALL SELECT r.moved_on,p.name,NULL,r.actor,p.order_uid,p.part_uid,"
+                "r.id,p.car,p.visible,'batch_receipt',link.issue_id FROM positions p JOIN "
+                "(SELECT i.part_id,i.order_number,i.spare_id,min(i.id) AS issue_id FROM workshop_spare_movements i "
+                "JOIN workshop_spare_orders s ON s.id=i.spare_id WHERE i.operation='issue' "
+                "GROUP BY i.part_id,i.order_number,i.spare_id) link ON link.part_id=p.id AND link.order_number=p.order_number "
+                "JOIN workshop_spare_movements r ON r.spare_id=link.spare_id AND r.operation='receipt' ");
+        }
     }
     sql += QStringLiteral(") SELECT * FROM events WHERE substr(event_date,1,10) BETWEEN ? AND ? "
                           "ORDER BY event_date,kind DESC,source_id,part_uid");
