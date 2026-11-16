@@ -16,6 +16,7 @@
 #include "core/services/ActivityAuditService.h"
 #include "core/services/orders/CashAdvanceService.h"
 #include "core/services/orders/CashOpeningService.h"
+#include "core/services/orders/CashShiftService.h"
 #include "core/services/orders/ClientReceiptReader.h"
 #include "core/services/orders/OrderClosureJournal.h"
 #include "infrastructure/db/sqlite/Db.h"
@@ -153,6 +154,58 @@ private slots:
         QVERIFY2(firstCash.error.isEmpty(),qPrintable(firstCash.error));
         QVERIFY(CashAdvanceService::post(cash).replay);
         QVERIFY(q.exec("SELECT COUNT(*),SUM(cents) FROM cash_advance_events WHERE method='cash' AND shift_uid IS NOT NULL") && q.next());
+        QCOMPARE(q.value(0).toInt(),2);
+        QCOMPARE(q.value(1).toLongLong(),10001);
+        q.finish();
+        using Step=CashShiftService::Action;
+        auto id=[] {return QUuid::createUuid().toString(QUuid::WithoutBraces);};
+        auto prior=CashShiftService::current().uid;
+        auto transition=[&](Step action,qint64 count,QString target={},QString reason={}){
+            return CashShiftService::apply({id(),prior,action,count,target,reason});
+        };
+        QVERIFY(q.exec("INSERT INTO staff_accounts VALUES('next','','Second operator','administrator',1)"));
+        QVERIFY(transition(Step::Freeze,0).recorded);
+        cash.requestUid=id();
+        QVERIFY(!CashAdvanceService::post(cash).error.isEmpty());
+        QVERIFY(transition(Step::Close,59000,{},"незбіг").recorded);
+        QCOMPARE(CashShiftService::current().phase,"closing");
+        auto handOverButton=page.findChild<QPushButton*>("cashShift");
+        QVERIFY(handOverButton);
+        handOverButton->click();
+        auto* handover=page.findChild<QDialog*>("cashShiftForm");
+        QVERIFY(handover);
+        auto* actions=handover->findChild<QComboBox*>("shiftAction");
+        auto* recipients=handover->findChild<QComboBox*>("shiftRecipient");
+        actions->setCurrentIndex(actions->findData(int(Step::HandOver)));
+        recipients->setCurrentIndex(recipients->findData("next"));
+        handover->findChild<QLineEdit*>("shiftCount")->setText("590,01");
+        handover->findChild<QLineEdit*>("shiftReason")->setText("повторний перерахунок");
+        handover->findChild<QPushButton*>("shiftSubmit")->click();
+        QCOMPARE(CashShiftService::current().phase,"handover");
+        handover->close();
+        QTRY_VERIFY(!page.findChild<QDialog*>("cashShiftForm"));
+        QVERIFY(!transition(Step::Accept,59001).recorded);
+        ActivityAuditService::setCurrentActor({"next","Second operator","administrator","test"});
+        CashShiftService::Command accept{id(),prior,Step::Accept,59001,{},{}};
+        QVERIFY(q.exec("CREATE TRIGGER fail_successor BEFORE INSERT ON cash_shifts BEGIN SELECT RAISE(ABORT,'fixture'); END"));
+        QVERIFY(!CashShiftService::apply(accept).recorded);
+        QCOMPARE(CashShiftService::current().phase,"handover");
+        QVERIFY(q.exec("DROP TRIGGER fail_successor"));
+        auto accepted=CashShiftService::apply(accept);
+        QVERIFY2(accepted.recorded,qPrintable(accepted.message));
+        QVERIFY(CashShiftService::apply(accept).recorded);
+        QVERIFY(!transition(Step::Accept,59001).recorded);
+        prior=CashShiftService::current().uid;
+        QVERIFY(transition(Step::Freeze,0).recorded);
+        QVERIFY(transition(Step::Close,59001).recorded);
+        QVERIFY(transition(Step::OpenNext,59001).recorded);
+        QVERIFY(q.exec("SELECT COUNT(*),MIN(opening_cents) FROM cash_shifts WHERE state='open'") && q.next());
+        QCOMPARE(q.value(0).toInt(),1);
+        QCOMPARE(q.value(1).toLongLong(),59001);
+        QVERIFY(q.exec("SELECT COUNT(*),SUM(amount_cents) FROM client_payments") && q.next());
+        QCOMPARE(q.value(0).toInt(),2);
+        QCOMPARE(q.value(1).toLongLong(),6001);
+        QVERIFY(q.exec("SELECT COUNT(*),SUM(cents) FROM cash_advance_events WHERE method='cash'") && q.next());
         QCOMPARE(q.value(0).toInt(),2);
         QCOMPARE(q.value(1).toLongLong(),10001);
     }

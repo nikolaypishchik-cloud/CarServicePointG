@@ -283,6 +283,21 @@ private slots:
         const auto again=command(db,"o1",amount==500000?-1:500000-qMax(qint64(0),amount));
         const auto paid=LocalWorkshopBackend::request(db,"closure-commit",again);QVERIFY(paid.ok);QCOMPARE(paid.body["balance_cents"].toInteger(),qint64(0));
     }
+    void managedCashReceiptRequiresOperatorAndOpenShift() {
+        QSqlQuery q(db);
+        QVERIFY(q.exec("CREATE TABLE cash_shifts(shift_uid TEXT PRIMARY KEY,state TEXT,operator_uid TEXT)"));
+        QVERIFY(q.exec("INSERT INTO cash_shifts VALUES('shift','closing','local-test-owner')"));
+        auto pay=command(db,"o1",1050);
+        QVERIFY(!LocalWorkshopBackend::request(db,"closure-commit",pay).ok);
+        QCOMPARE(scalar(db,"SELECT COUNT(*) FROM client_payments").toInt(),0);
+        QVERIFY(q.exec("UPDATE cash_shifts SET state='open',operator_uid='other'"));
+        QVERIFY(!LocalWorkshopBackend::request(db,"closure-commit",pay).ok);
+        QVERIFY(q.exec("UPDATE cash_shifts SET operator_uid='local-test-owner'"));
+        const auto posted=LocalWorkshopBackend::request(db,"closure-commit",pay);
+        QVERIFY2(posted.ok,qPrintable(QJsonDocument(posted.body).toJson()));
+        QCOMPARE(LocalWorkshopBackend::request(db,"closure-commit",pay).body,posted.body);
+        QCOMPARE(scalar(db,"SELECT SUM(amount_cents) FROM client_payments JOIN cash_shift_receipts USING(payment_uid) WHERE shift_uid='shift'").toInt(),1050);
+    }
     void conflictAndFailures() {
         QVERIFY(action(db,"provision").ok);
         QVERIFY(action(db,"confirm-occupied",{{"order_uid","o1"},{"target_state","on_bay"},{"target_bay_uid","1"},{"expected_version",0}}).ok);

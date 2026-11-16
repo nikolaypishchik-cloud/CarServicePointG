@@ -38,9 +38,10 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     actions->addWidget(receive);
     actions->addWidget(allocate);
     if (receive->isEnabled()) {
-        auto* opening=new QPushButton(tr("Перша касова зміна"),this);
+        auto* opening=new QPushButton(tr("Касова зміна"),this);
+        opening->setObjectName("cashShift");
         actions->addWidget(opening);
-        connect(opening,&QPushButton::clicked,this,[this]{openCashOpeningDialog(this);});
+        connect(opening,&QPushButton::clicked,this,[this]{openCashShiftDialog(this);});
     }
     if (ActivityAuditService::currentActor().role=="owner") {
         auto* station = new QPushButton(tr("Підтвердити єдиний ПК"),this);

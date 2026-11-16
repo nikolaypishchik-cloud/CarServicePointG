@@ -188,7 +188,17 @@ QJsonObject close(QSqlDatabase db,QJsonObject& s,const QJsonObject& p,qint64 now
         const auto pay=p["payment"].toObject();const auto amount=pay["amount_cents"].toInteger(-1);const auto date=QDate::fromString(pay["paid_on"].toString(),Qt::ISODate);
         require(pay["amount_cents"].isDouble() && pay["amount_cents"].toDouble()==double(amount) && amount>0 && amount<=v["balance_cents"].toInteger(),QString::fromUtf8("Оплата має бути додатною й не перевищувати залишок."),422);
         require(date.isValid() && date<=QDateTime::fromMSecsSinceEpoch(now,QTimeZone("Europe/Kyiv")).date() && QStringList{"cash","card","bank_transfer"}.contains(pay["method"].toString()),"Invalid payment date/method",422);
-        paymentUid=uuid();payments.append(QJsonObject{{"payment_uid",paymentUid},{"request_uid",id},{"order_uid",uid},{"amount_cents",amount},{"method",pay["method"]},{"paid_on",pay["paid_on"]},{"actor",actor},{"recorded_ms",now}});received+=amount;
+        paymentUid=uuid();
+        if(pay["method"]=="cash" && db.tables().contains("cash_shifts")){
+            require(permission(db,"cash.view"),QStringLiteral("Немає права приймати готівку."),403);
+            auto shift=query(db,"SELECT shift_uid FROM main.cash_shifts WHERE state='open' AND operator_uid=?",{actor});
+            require(shift.next(),QStringLiteral("Для приймання готівки потрібна відкрита зміна цього оператора."));
+            const auto shiftUid=shift.value(0).toString();
+            require(!shift.next(),QStringLiteral("Виявлено кілька відкритих змін."));
+            query(db,"CREATE TABLE IF NOT EXISTS main.cash_shift_receipts(payment_uid TEXT PRIMARY KEY NOT NULL,shift_uid TEXT NOT NULL REFERENCES cash_shifts(shift_uid))");
+            query(db,"INSERT INTO main.cash_shift_receipts(payment_uid,shift_uid) VALUES(?,?)",{paymentUid,shiftUid});
+        }
+        payments.append(QJsonObject{{"payment_uid",paymentUid},{"request_uid",id},{"order_uid",uid},{"amount_cents",amount},{"method",pay["method"]},{"paid_on",pay["paid_on"]},{"actor",actor},{"recorded_ms",now}});received+=amount;
     }
     const auto occupied=occupancy(s,uid);
     if(p["release_bay"].toBool() && occupied["state"]=="on_bay")move(s,uid,{},occupied["version"].toInt(),now,actor);
