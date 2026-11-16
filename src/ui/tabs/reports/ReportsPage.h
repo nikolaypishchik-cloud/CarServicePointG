@@ -148,6 +148,7 @@ private:
     QTabWidget* m_tabs = nullptr;
     QPushButton* m_pdfButton = nullptr;
 
+    QLabel* m_weekComparison = nullptr;
     QTableView* m_periodTable = nullptr;
     QTableView* m_ordersTable = nullptr;
     QTableView* m_partsTable = nullptr;

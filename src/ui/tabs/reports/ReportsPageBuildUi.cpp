@@ -232,7 +232,12 @@ void ReportsPage::buildUi()
     m_expensesSaveButton = expensesWidgets.expensesSaveButton;
     m_electricityPdfButton = expensesWidgets.electricityPdfButton;
 
-    m_tabs->addTab(makeTab(m_periodTable, m_periodModel), QString::fromUtf8("Звіт за період"));
+    auto* periodPage = makeTab(m_periodTable, m_periodModel);
+    m_weekComparison = new QLabel(periodPage);
+    m_weekComparison->setWordWrap(true);
+    m_weekComparison->hide();
+    periodPage->layout()->addWidget(m_weekComparison);
+    m_tabs->addTab(periodPage, QString::fromUtf8("Звіт за період"));
     m_tabs->addTab(makeTab(m_ordersTable, m_ordersModel), QString::fromUtf8("Наряди"));
     m_invoicesPage = new InvoicesPage(this);
     m_invoicesPage->periodExpanded=[this](QDate from,QDate to){m_from->setDate(from);m_to->setDate(to);};

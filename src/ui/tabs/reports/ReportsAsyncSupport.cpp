@@ -104,6 +104,7 @@ bool isAsyncTab(int idx)
 QString buildTabKey(int idx, const QDate& from, const QDate& to)
 {
     const auto key = QStringLiteral("%1|%2|%3").arg(idx).arg(from.toString(Qt::ISODate), to.toString(Qt::ISODate));
+    if (idx == 0) return key + "|" + QDate::currentDate().toString(Qt::ISODate);
     return idx == 3 ? key + "|" + AccessControlService::currentScopeKey() : key;
 }
 
@@ -119,7 +120,7 @@ void startPeriodLoad(QObject* owner,
                      const QString& dt,
                      std::function<void(const PeriodSnapshot&)> onReady)
 {
-    const QString cacheKey = ReportsSnapshotCache::makeReportsKey(QStringLiteral("period"), dbPath, df, dt);
+    const QString cacheKey = ReportsSnapshotCache::makeReportsKey(QStringLiteral("period"), dbPath, df, dt) + "|" + QDate::currentDate().toString(Qt::ISODate);
     startSnapshotWorkerImpl<PeriodSnapshot>(owner,
         asyncHandle,
         QStringLiteral("reports.period"),

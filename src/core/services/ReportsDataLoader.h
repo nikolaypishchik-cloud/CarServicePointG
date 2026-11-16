@@ -18,7 +18,15 @@ struct PeriodSnapshotRow {
     QString total;
 };
 
+struct PeriodComparison {
+    QDate from, to;
+    int orders = 0;
+    double works = 0, parts = 0;
+};
+
 struct PeriodSnapshot {
+    QList<PeriodComparison> previousWeeks;
+    double currentTotal = 0;
     QList<PeriodSnapshotRow> rows;
     QStringList stats;
     QString error;

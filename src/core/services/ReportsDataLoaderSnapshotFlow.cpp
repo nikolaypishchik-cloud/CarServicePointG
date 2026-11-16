@@ -42,17 +42,25 @@ PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, con
             snapshot.stats = {snapshot.error};
         } else {
             QSqlQuery q(db);
+            const QDate first = QDate::fromString(df, Qt::ISODate);
+            const QDate selectedEnd = QDate::fromString(dt, Qt::ISODate);
+            const QDate today = QDate::currentDate();
+            QDate last = selectedEnd;
+            if (first.isValid() && first <= today && first <= last
+                && first.daysTo(last) <= 7 - first.dayOfWeek()) {
+                last = qMin(today, last);
+                for (int week = 1; week <= 4; ++week)
+                    snapshot.previousWeeks.append(PeriodComparison{first.addDays(-7 * week), last.addDays(-7 * week)});
+            }
             q.prepare(
-                "SELECT substr(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at),1,10), COALESCE(wo.order_number,wo.number), wo.number, wo.car, "
+                "SELECT date(CASE WHEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),3,1)='.' AND substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,2) END||'-'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),4,2)||'-'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),1,2) ELSE COALESCE(NULLIF(wo.closed_at,''), wo.opened_at) END) AS report_day, "
+                "COALESCE(wo.order_number,wo.number), wo.number, wo.car, "
                 "COALESCE(NULLIF(wo.master_name_closed,''),m.name,''), "
                 "COALESCE(wo.works_sum,0), COALESCE(wo.parts_sum,0) "
-                "FROM router_work_orders wo "
-                "LEFT JOIN masters m ON m.id = wo.master_id "
-                "WHERE date(CASE WHEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),3,1)='.' AND substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,2) END||'-'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),4,2)||'-'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),1,2) ELSE COALESCE(NULLIF(wo.closed_at,''), wo.opened_at) END) >= date(?) "
-                "AND date(CASE WHEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),3,1)='.' AND substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,2) END||'-'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),4,2)||'-'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),1,2) ELSE COALESCE(NULLIF(wo.closed_at,''), wo.opened_at) END) <= date(?) "
-                "ORDER BY date(CASE WHEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),3,1)='.' AND substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,2) END||'-'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),4,2)||'-'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),1,2) ELSE COALESCE(NULLIF(wo.closed_at,''), wo.opened_at) END) DESC, wo.number DESC");
-            q.addBindValue(df);
-            q.addBindValue(dt);
+                "FROM router_work_orders wo LEFT JOIN masters m ON m.id = wo.master_id "
+                "WHERE report_day BETWEEN date(?) AND date(?) ORDER BY report_day DESC, wo.number DESC");
+            q.addBindValue(snapshot.previousWeeks.isEmpty() ? df : snapshot.previousWeeks.last().from.toString(Qt::ISODate));
+            q.addBindValue(last.toString(Qt::ISODate));
 
             int count = 0;
             double works = 0.0;
@@ -63,6 +71,18 @@ PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, con
                 while (q.next()) {
                     const double ws = q.value(5).toDouble();
                     const double ps = q.value(6).toDouble();
+                    const auto day = q.value(0).toDate();
+                    if (day < first) {
+                        for (auto& week : snapshot.previousWeeks) {
+                            if (day >= week.from && day <= week.to) {
+                                ++week.orders;
+                                week.works += ws;
+                                week.parts += ps;
+                                break;
+                            }
+                        }
+                        continue;
+                    }
                     PeriodSnapshotRow row;
                     row.date = ReportsDateUtils::dmy(q.value(0).toString());
                     row.orderNumber = q.value(1).toString();
@@ -81,9 +101,11 @@ PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, con
 
             if (!executed || q.lastError().isValid()) {
                 snapshot.rows.clear();
+                snapshot.previousWeeks.clear();
                 snapshot.error = QString::fromUtf8("Помилка читання звіту: ") + q.lastError().text();
                 snapshot.stats = {snapshot.error};
-            } else snapshot.stats = {
+            } else snapshot.currentTotal = works + parts;
+            if (snapshot.error.isEmpty()) snapshot.stats = {
                 QString::fromUtf8("Нарядів:  %1").arg(count),
                 QString::fromUtf8("Роботи:  %1  грн.").arg(money0(works)),
                 QString::fromUtf8("Запчастини:  %1  грн.").arg(money0(parts)),

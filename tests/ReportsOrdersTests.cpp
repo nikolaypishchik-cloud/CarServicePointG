@@ -3806,6 +3806,38 @@ void ReportsOrdersTests::periodSnapshotReadFailures()
         result = ReportsDataLoader::buildPeriodSnapshot(path, "2026-01-01", "2026-12-31");
         QCOMPARE(result.rows.size(), 1);
         QCOMPARE(result.rows.first().internalOrderNumber, 31);
+        // Monday to Wednesday, with a Thursday outside every comparison interval.
+        for (int week = 1; week <= 4; ++week) {
+            const auto monday = QDate(2026, 6, 1).addDays(-7 * week);
+            for (int day : {0, 2, 3}) {
+                query.prepare("INSERT INTO router_work_orders(number,opened_at,works_sum,parts_sum) VALUES(?,?,?,?)");
+                query.addBindValue(100 + 10 * week + day);
+                query.addBindValue(monday.addDays(day).toString(Qt::ISODate));
+                query.addBindValue(day == 3 ? 999 : week);
+                query.addBindValue(4);
+                QVERIFY(query.exec());
+            }
+        }
+        const auto partial = ReportsDataLoader::buildPeriodSnapshot(path, "2026-06-01", "2026-06-03");
+        QVERIFY2(partial.error.isEmpty(), qPrintable(partial.error));
+        QCOMPARE(partial.rows.size(), 1);
+        QCOMPARE(partial.currentTotal, 20.75);
+        QCOMPARE(partial.previousWeeks.size(), 4);
+        for (int i = 0; i < 4; ++i) {
+            const auto& previous = partial.previousWeeks[i];
+            QCOMPARE(previous.from, QDate(2026, 6, 1).addDays(-7 * (i + 1)));
+            QCOMPARE(previous.to, previous.from.addDays(2));
+            QCOMPARE(previous.orders, 2);
+            QCOMPARE(previous.works, 2.0 * (i + 1));
+            QCOMPARE(previous.parts, 8.0);
+        }
+        const auto today = QDate::currentDate();
+        const auto monday = today.addDays(1 - today.dayOfWeek());
+        const auto ongoing = ReportsDataLoader::buildPeriodSnapshot(path, monday.toString(Qt::ISODate),
+            monday.addDays(6).toString(Qt::ISODate));
+        QCOMPARE(ongoing.previousWeeks.size(), 4);
+        QCOMPARE(ongoing.previousWeeks.last().to, today.addDays(-28));
+
         QCOMPARE(result.rows.first().orderNumber, QString("7"));
         QCOMPARE(result.stats.size(), 4);
     }

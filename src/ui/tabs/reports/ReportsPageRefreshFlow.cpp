@@ -427,6 +427,22 @@ void ReportsPage::updateDashboard()
 void ReportsPage::applyPeriodSnapshot(const PeriodSnapshot& snapshot)
 {
     ReportsTableSupport::applyPeriodSnapshot(m_periodTable, m_periodModel, snapshot);
+    QStringList lines;
+    for (const auto& week : snapshot.previousWeeks) {
+        const auto interval = week.from.toString("dd.MM.yyyy") + QStringLiteral(" – ") + week.to.toString("dd.MM.yyyy");
+        if (!week.orders) {
+            lines << interval + QStringLiteral(" · немає нарядів для порівняння");
+            continue;
+        }
+        const double total = week.works + week.parts;
+        const auto change = qFuzzyIsNull(total) ? QStringLiteral("—")
+            : locale().toString(100 * (snapshot.currentTotal - total) / total, 'f', 1) + "%";
+        lines << QStringLiteral("%1 · Нарядів: %2 · Роботи: %3 грн · Запчастини: %4 грн · Разом: %5 грн · Зміна: %6")
+            .arg(interval).arg(week.orders).arg(locale().toString(week.works, 'f', 2),
+                locale().toString(week.parts, 'f', 2), locale().toString(total, 'f', 2), change);
+    }
+    m_weekComparison->setText(lines.join('\n'));
+    m_weekComparison->setVisible(!lines.isEmpty());
     setTabStats(ReportTab::Period, snapshot.stats);
 }
 
@@ -440,6 +456,7 @@ void ReportsPage::refreshPeriod()
     const auto cancelToken = AsyncTaskHandle::renewCancellationToken(m_asyncCancelToken);
     const AsyncTaskHandle asyncHandle(this, generation, cancelToken);
 
+    m_weekComparison->hide();
     setTabDescription(ReportTab::Period, QString::fromUtf8("Звіт за період — табличний перегляд по поточному діапазону дат."));
     setTabAuxStats(ReportTab::Period, QString());
     updateStats({QString::fromUtf8("Завантаження звіту за період…")});
