@@ -92,6 +92,32 @@ private slots:
         QCOMPARE(result.payments[1].uid,QStringLiteral("p2"));
         QCOMPARE(result.payments[0].cents+result.payments[1].cents,400);
     }
+    void cashJournalUsesRecordedReceiptsAcrossOrders() {
+        const QDate day(2026,11,15);
+        const auto missing = ClientReceiptReader::readJournal(db,day,day);
+        QVERIFY(missing.error.isEmpty());
+        QVERIFY(!missing.available);
+        QString error;
+        QVERIFY2(OrderClosureJournal::ensureSchema(db,&error),qPrintable(error));
+        QSqlQuery q(db);
+        QVERIFY(q.exec("INSERT INTO client_payments VALUES "
+                       "('a','r1','o1',325,'card','2026-11-15','staff-a',11),"
+                       "('b','r2','o2',210,'cash','2026-11-15','staff-b',20),"
+                       "('c','r3','o1',100,'cash','2026-11-14','staff-a',10)"));
+        QVERIFY(q.exec("PRAGMA query_only=1"));
+        const auto result = ClientReceiptReader::readJournal(db,day,day);
+        QVERIFY2(result.error.isEmpty(),qPrintable(result.error));
+        QVERIFY(result.available);
+        QCOMPARE(result.directPaymentsCents,535);
+        QCOMPARE(result.entries.size(),2);
+        QCOMPARE(result.entries.front().payment.uid,QStringLiteral("b"));
+        QCOMPARE(result.entries.front().orderUid,QStringLiteral("o2"));
+        QCOMPARE(result.entries.front().actor,QStringLiteral("staff-b"));
+        const auto empty = ClientReceiptReader::readJournal(db,day.addDays(1),day.addDays(1));
+        QVERIFY(empty.available && empty.error.isEmpty() && empty.entries.isEmpty());
+        QCOMPARE(empty.directPaymentsCents,0);
+    }
+
     void closureChargeUsesKyivClosureDate() {
         QString error;
         QVERIFY2(OrderClosureJournal::ensureSchema(db,&error),qPrintable(error));

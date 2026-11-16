@@ -22,6 +22,18 @@ struct Payment {
     qint64 cents;
     QString method;
 };
+struct JournalEntry {
+    Payment payment;
+    QString orderUid;
+    QString actor;
+};
+struct Journal {
+    QList<JournalEntry> entries;
+    qint64 directPaymentsCents = 0;
+    bool available = false;
+    QString error;
+};
+Journal readJournal(QSqlDatabase db, QDate firstDay, QDate lastDay);
 struct PaymentHistory {
     QList<Payment> payments;
     qint64 receivedBefore = 0;

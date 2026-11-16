@@ -50,6 +50,47 @@ Result read(QSqlDatabase db, const QSet<QString>& orderUids) {
     if (query.lastError().isValid()) return fail(query.lastError().text());
     return result;
 }
+Journal readJournal(QSqlDatabase db, QDate firstDay, QDate lastDay)
+{
+    auto fail = [](QString error) { Journal result; result.error = error; return result; };
+    if (!db.isValid() || !db.isOpen() || !firstDay.isValid() || !lastDay.isValid() || firstDay > lastDay)
+        return fail(QStringLiteral("Некоректні параметри журналу надходжень."));
+    QSqlQuery query(db);
+    if (!query.exec("SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='client_payments')")
+        || !query.next())
+        return fail(query.lastError().text());
+    Journal result;
+    result.available = query.value(0).toBool();
+    if (!result.available)
+        return result;
+    if (!query.prepare("SELECT payment_uid,order_uid,paid_on,amount_cents,typeof(amount_cents),method,actor "
+                       "FROM main.client_payments WHERE paid_on BETWEEN ? AND ? "
+                       "ORDER BY paid_on DESC,recorded_ms DESC,payment_uid"))
+        return fail(query.lastError().text());
+    query.addBindValue(firstDay.toString(Qt::ISODate));
+    query.addBindValue(lastDay.toString(Qt::ISODate));
+    if (!query.exec())
+        return fail(query.lastError().text());
+    while (query.next()) {
+        const QString uid = query.value(0).toString();
+        const QString order = query.value(1).toString();
+        const QDate day = QDate::fromString(query.value(2).toString(), Qt::ISODate);
+        const qint64 cents = query.value(3).toLongLong();
+        if (uid.trimmed().isEmpty() || order.trimmed().isEmpty() || !day.isValid()
+            || query.value(4).toString() != "integer" || cents <= 0)
+            return fail(QStringLiteral("Некоректний запис у журналі клієнтських оплат."));
+        const auto sum = ExactMoney::sum({result.directPaymentsCents, cents});
+        const auto* total = std::get_if<ExactMoney::Cents>(&sum);
+        if (!total)
+            return fail(QStringLiteral("Переповнення суми надходжень."));
+        result.directPaymentsCents = *total;
+        result.entries.append(JournalEntry{{uid, day, cents, query.value(5).toString()}, order, query.value(6).toString()});
+    }
+    if (query.lastError().isValid())
+        return fail(query.lastError().text());
+    return result;
+}
+
 PaymentHistory readPeriod(QSqlDatabase db, const QString& orderUid, QDate firstDay, QDate lastDay) {
     const auto fail = [](QString error) { PaymentHistory failed; failed.error = error; return failed; };
     if (!db.isValid() || !db.isOpen() || orderUid.trimmed().isEmpty() ||
