@@ -302,8 +302,8 @@ void ReportsPage::buildUi()
     mode->addTab(tr("Звіт"));
     mode->addTab(tr("За нарядами"));
     mode->addTab(tr("Усі позиції"));
-    mode->setStyleSheet("#partsReportMode::tab { padding: 4px 10px; margin: 1px; border: 1px solid #718591; border-radius: 4px; }"
-                        "#partsReportMode::tab:selected { background: #146873; color: white; border-color: #55dae0; }");
+    mode->setStyleSheet("#partsReportMode::tab { font-weight: 600; padding: 4px 10px; margin: 1px; border: 1px solid #718591; border-radius: 4px; }"
+                        "#partsReportMode::tab:selected { font-weight: 600; background: #146873; color: white; border-color: #55dae0; }");
     mode->ensurePolished();
     int tabsWidth = 0;
     for (int index = 0; index < mode->count(); ++index)
