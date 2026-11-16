@@ -223,7 +223,8 @@ void OrderDialog::exportPdf(const QString& outFile, bool partsReport)
 
     const QString plate = m_plate ? m_plate->text().trimmed() : QString();
     const QString car = m_car ? m_car->text().trimmed() : QString();
-    const QString year = (m_year && m_year->value() > 0) ? QString::number(m_year->value()) : QString();
+    const int carYear = selectedCarYear();
+    const QString year = carYear > 0 ? QString::number(carYear) : QString();
     const QString carDisplay = year.isEmpty() ? car : QString::fromUtf8("%1 (%2)").arg(car, year);
     const QString engine = m_engineCode ? m_engineCode->text().trimmed() : QString();
     QString engineVol = m_engineVolume ? m_engineVolume->text().trimmed() : QString();

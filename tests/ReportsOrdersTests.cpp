@@ -6463,6 +6463,7 @@ void ReportsOrdersTests::annualOrderUiPdfVisibleIdentity()
             "INSERT INTO work_orders(number,order_number,order_uid,order_year,opened_at,closed_at,status,plate,plate_norm,car,client,master_id) VALUES(900101,7,'year-2025',2025,'2025-02-03T12:00:00','2025-02-04T12:00:00','closed','AA1111AA','AA1111AA','Synthetic A','Synthetic','year-master'),(900202,7,'year-2026',2026,'2026-02-03T12:00:00','2026-02-04T12:00:00','closed','AA2222AA','AA2222AA','Synthetic B','Synthetic','year-master')",
             "INSERT INTO work_order_parts(order_number,order_uid,ordered_at,name,qty,price,amount,purchase_price,purchase_amount) VALUES(900101,'year-2025','2025-02-03','PART-ONLY-2025',1,123.45,123.45,100,100),(900202,'year-2026','2026-02-03','PART-ONLY-2026',1,234.56,234.56,200,200)"};
         for(const auto& statement:sql)QVERIFY2(q.exec(statement),qPrintable(q.lastError().text()));
+        QVERIFY(q.exec("UPDATE work_orders SET car_year=1950 WHERE order_uid='year-2026'"));
     }
     ActivityAuditService::setCurrentActor({"year-owner","Synthetic Owner","owner","test"});
     for(const int year:{2025,2026}) {
@@ -6496,6 +6497,8 @@ void ReportsOrdersTests::annualOrderUiPdfVisibleIdentity()
             QFile evidence(QDir(output).filePath(QString("text-%1-%2.txt").arg(year).arg(parts)));
             QVERIFY(evidence.open(QIODevice::WriteOnly));evidence.write(content.toUtf8());evidence.close();
             if(!QRegularExpression(QString::fromUtf8("№\\s*наряду\\s+(?:Дата\\s+)?7\\b")).match(content).hasMatch())failures<<QString("PDF number %1/%2").arg(year).arg(parts);
+            QCOMPARE(content.contains(QStringLiteral("(1950)")),year==2026);
+            QVERIFY(!content.contains(QStringLiteral("(1949)")));
             QVERIFY(content.contains(QString("PART-ONLY-%1").arg(year)));
             QVERIFY(!content.contains(QString("PART-ONLY-%1").arg(year==2025?2026:2025)));
         }

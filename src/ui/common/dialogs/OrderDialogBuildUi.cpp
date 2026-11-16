@@ -180,8 +180,8 @@ void OrderDialog::buildUi()
     m_color->setPlaceholderText(QString::fromUtf8("Напр: Чорний"));
 
     m_year = new QSpinBox(this);
-    m_year->setRange(1950, 2100);
-    m_year->setSpecialValueText(QString());
+    m_year->setRange(1949, 2100); // Minimum represents an unspecified year.
+    m_year->setSpecialValueText(QStringLiteral("—"));
     m_year->setButtonSymbols(QAbstractSpinBox::NoButtons);
     m_year->setStyleSheet(editorPlaceholderStyle() + flatOrderFieldStyle());
     m_year->setValue(m_year->minimum());

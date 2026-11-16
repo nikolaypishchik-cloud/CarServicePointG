@@ -93,6 +93,7 @@ private:
     QString currentStateSignature() const;
     bool hasUnsavedChanges() const;
     void captureSavedState();
+    int selectedCarYear() const;
     QString selectedFuelType() const;
     void setSelectedFuelType(const QString& fuelType);
     QDateTime currentOpenedAt() const;

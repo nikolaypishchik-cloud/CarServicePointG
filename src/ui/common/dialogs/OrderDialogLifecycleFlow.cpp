@@ -249,6 +249,11 @@ void OrderDialog::setOpenedAt(const QDateTime& dt)
     if (m_openedTime) m_openedTime->setTime(safe.time());
 }
 
+int OrderDialog::selectedCarYear() const
+{
+    return m_year && m_year->value() > m_year->minimum() ? m_year->value() : 0;
+}
+
 QString OrderDialog::selectedFuelType() const
 {
     if (m_fuelDiesel && m_fuelDiesel->isChecked()) return QString::fromUtf8("Дизель");
@@ -466,7 +471,7 @@ void OrderDialog::prefillFromPlanningSource(int sourceOrderNumber, const QString
         bool yearOk = false;
         const int yearValue = yearText.toInt(&yearOk);
         if (yearOk && yearValue >= m_year->minimum()) m_year->setValue(yearValue);
-        else m_year->clear();
+        else m_year->setValue(m_year->minimum());
     }
     if (m_odometer) {
         const int planningOdometer = planningPositiveIntFromText(planningData.odometer);
@@ -545,7 +550,7 @@ void OrderDialog::prefillFromPlanningEntry(const QString& planningText, const QD
     if (m_year) {
         const int planningYear = planningPositiveIntFromText(planningData.carYear);
         if (planningYear >= m_year->minimum()) m_year->setValue(planningYear);
-        else m_year->clear();
+        else m_year->setValue(m_year->minimum());
     }
     if (m_odometer) {
         const int planningOdometer = planningPositiveIntFromText(planningData.odometer);
@@ -740,7 +745,7 @@ OrderDialogStateSnapshot OrderDialog::buildStateSnapshot() const
     snapshot.vin = m_vin ? m_vin->text() : QString();
     snapshot.car = m_car ? m_car->text() : QString();
     snapshot.color = m_color ? m_color->text() : QString();
-    snapshot.carYear = m_year ? m_year->value() : 0;
+    snapshot.carYear = selectedCarYear();
     snapshot.odometer = m_odometer ? m_odometer->value() : 0;
     snapshot.engineCode = m_engineCode ? m_engineCode->text() : QString();
     snapshot.engineVolume = m_engineVolume ? m_engineVolume->text() : QString();
@@ -770,7 +775,7 @@ OrderWorkspaceInput OrderDialog::buildWorkspaceInput(const QString& status, doub
     input.vin = nonNullDialogText(m_vin ? m_vin->text().trimmed().toUpper() : QString());
     input.car = nonNullDialogText(titleCaseWords(m_car ? m_car->text().trimmed() : QString()));
     input.color = nonNullDialogText(capitalizeSentence(m_color ? m_color->text().trimmed() : QString()));
-    input.carYear = m_year ? m_year->value() : 0;
+    input.carYear = selectedCarYear();
     input.odometer = m_odometer ? m_odometer->value() : 0;
     input.engineType = nonNullDialogText(m_engineCode ? m_engineCode->text().trimmed() : QString());
     input.engineVolume = nonNullDialogText(m_engineVolume ? m_engineVolume->text().trimmed() : QString());
@@ -867,7 +872,7 @@ QJsonObject OrderDialog::serializeDraftState() const
         {QStringLiteral("vin"), m_vin ? m_vin->text() : QString()},
         {QStringLiteral("car"), m_car ? m_car->text() : QString()},
         {QStringLiteral("color"), m_color ? m_color->text() : QString()},
-        {QStringLiteral("year"), m_year ? m_year->value() : 0},
+        {QStringLiteral("year"), selectedCarYear()},
         {QStringLiteral("odometer"), m_odometer ? m_odometer->value() : 0},
         {QStringLiteral("engineCode"), m_engineCode ? m_engineCode->text() : QString()},
         {QStringLiteral("engineVolume"), m_engineVolume ? m_engineVolume->text() : QString()},
