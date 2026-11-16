@@ -124,8 +124,8 @@ void MainWindow::openHeaderStatements()
     tabs->setTabEnabled(0,false);
     auto* issues = new QTableWidget(0,10,tabs);
     tabs->addTab(issues,tr("Запчастини"));
-    issues->setHorizontalHeaderLabels({tr("Дата видачі"),tr("Запчастина"),tr("Видано, шт."),tr("Виконавець"),
-        tr("UID наряду"),tr("UID позиції"),tr("ID складської видачі"),tr("Автомобіль"),tr("№ наряду"),tr("Подія")});
+    issues->setHorizontalHeaderLabels({tr("Дата події"),tr("Запчастина"),tr("Кількість, шт."),tr("Виконавець"),
+        tr("UID наряду"),tr("UID позиції"),tr("Первинний запис"),tr("Автомобіль"),tr("№ наряду"),tr("Подія")});
     issues->setEditTriggers(QAbstractItemView::NoEditTriggers);
     issues->setSelectionBehavior(QAbstractItemView::SelectRows);
     issues->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -149,7 +149,7 @@ void MainWindow::openHeaderStatements()
         const auto context = tr("Клієнт: %1 • Автомобіль: %2 • Період: %3 — %4")
             .arg(client->currentText(),car->currentText(),from->date().toString("dd.MM.yyyy"),through->date().toString("dd.MM.yyyy"));
         const bool parts = tabs->currentWidget()==issues;
-        previewStatement(dialog,parts?tr("Виписка — складські видачі"):tr("Виписка — погодження"),context,parts?*issues:*table);
+        previewStatement(dialog,parts?tr("Виписка — рух запчастин"):tr("Виписка — погодження"),context,parts?*issues:*table);
     });
     connect(generate,&QPushButton::clicked,dialog,[=] {
         pdf->setEnabled(false);
@@ -158,20 +158,21 @@ void MainWindow::openHeaderStatements()
         QString error;
         if (tabs->currentWidget()==issues) {
             issues->setRowCount(0);
-            const auto events = CrmPageReadService::statementIssues(client->currentData().toString(),
+            const auto events = CrmPageReadService::statementPartHistory(client->currentData().toString(),
                     car->currentData().toString(),from->date(),through->date(),&error);
             if (!error.isEmpty()) { message->setText(error); return; }
             for (const auto& event : events) {
                 const int row = issues->rowCount();
                 issues->insertRow(row);
-                for (int c=0;c<event.size();++c) {
-                    const auto text=event[c].toString();
+                const bool issued = event[9].toString()=="issue";
+                for (int c=0;c<9;++c) {
+                    const auto text=c==6 ? (issued?tr("Складська видача №%1"):tr("Позиція наряду №%1")).arg(event[c].toString()) : event[c].toString();
                     issues->setItem(row,c,new QTableWidgetItem(text.isEmpty()?tr("Немає даних"):text));
                 }
                 issues->item(row,4)->setData(Qt::UserRole,event[4]);
-                issues->setItem(row,9,new QTableWidgetItem(tr("Видано зі складу")));
+                issues->setItem(row,9,new QTableWidgetItem(issued?tr("Видано зі складу"):tr("Встановлено")));
             }
-            message->setText(events.isEmpty()?tr("Підтверджених складських видач за цей період немає."):QString());
+            message->setText(events.isEmpty()?tr("Збережених подій за цей період немає."):QString());
             pdf->setEnabled(true);
             return;
         }

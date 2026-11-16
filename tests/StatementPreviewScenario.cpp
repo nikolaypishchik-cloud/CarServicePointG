@@ -106,9 +106,18 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     QVERIFY(q.exec("CREATE VIEW IF NOT EXISTS router_work_order_parts AS SELECT * FROM work_order_parts"));
     QVERIFY(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,name) VALUES"
                    "(81,1,'order-a','part-81','Filter'),(82,1,'order-a','part-82','Filter')"));
+    const auto day=QDate::currentDate();
+    q.prepare("UPDATE work_order_parts SET installed_at=?,qty=5 WHERE id=82");
+    q.addBindValue(day.toString(Qt::ISODate));
+    QVERIFY(q.exec());
+    error.clear();
+    const auto beforeLedger=CrmPageReadService::statementPartHistory("client-a","vehicle-a",day,day,&error);
+    QVERIFY2(error.isEmpty(),qPrintable(error));
+    QCOMPARE(beforeLedger.size(),1);
+    QCOMPARE(beforeLedger[0][9].toString(),QStringLiteral("installed"));
+    QVERIFY(beforeLedger[0][2].isNull());
     QVERIFY(q.exec("CREATE TABLE workshop_spare_movements(id INTEGER PRIMARY KEY,part_id INTEGER,order_number INTEGER,"
                    "moved_on TEXT,operation TEXT,quantity REAL,actor TEXT)"));
-    const auto day=QDate::currentDate();
     q.prepare("INSERT INTO workshop_spare_movements VALUES(11,81,1,?,'issue',1,'QA'),(12,81,1,?,'issue',2,'QA'),"
               "(13,82,1,?,'issue',1,''),(14,999,1,?,'issue',1,'QA'),(15,81,1,?,'receipt',9,'QA')");
     for (int i=0;i<5;++i) q.addBindValue(day.toString(Qt::ISODate));
@@ -116,22 +125,27 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     QVERIFY(q.exec("PRAGMA query_only=ON"));
     for (const auto& vehicle : {QStringLiteral("vehicle-a"),QStringLiteral("other")}) {
         error.clear();
-        const auto events=CrmPageReadService::statementIssues("client-a",vehicle,day,day,&error);
+        const auto events=CrmPageReadService::statementPartHistory("client-a",vehicle,day,day,&error);
         QVERIFY2(error.isEmpty(),qPrintable(error));
-        QCOMPARE(events.size(),vehicle=="vehicle-a"?3:0);
+        QCOMPARE(events.size(),vehicle=="vehicle-a"?4:0);
     }
     auto* issues=dialog->findChild<QTableWidget*>("statementIssues");
     auto* tabs=dialog->findChild<QTabWidget*>();
     QVERIFY(issues && tabs);
     tabs->setCurrentWidget(issues);
     generate->click();
-    QCOMPARE(issues->rowCount(),3);
+    QCOMPARE(issues->rowCount(),4);
     QCOMPARE(issues->item(0,0)->text(),day.toString(Qt::ISODate));
     QCOMPARE(issues->item(0,5)->text(),QStringLiteral("part-81"));
     QCOMPARE(issues->item(1,2)->text(),QStringLiteral("2"));
-    QCOMPARE(issues->item(1,6)->text(),QStringLiteral("12"));
+    QCOMPARE(issues->item(1,6)->text(),QStringLiteral("Складська видача №12"));
     QCOMPARE(issues->item(2,5)->text(),QStringLiteral("part-82"));
     QCOMPARE(issues->item(2,3)->text(),QStringLiteral("Немає даних"));
+    QCOMPARE(issues->item(3,5)->text(),QStringLiteral("part-82"));
+    QCOMPARE(issues->item(3,0)->text(),day.toString(Qt::ISODate));
+    QCOMPARE(issues->item(3,2)->text(),QStringLiteral("Немає даних"));
+    QCOMPARE(issues->item(3,3)->text(),QStringLiteral("Немає даних"));
+    QCOMPARE(issues->item(3,9)->text(),QStringLiteral("Встановлено"));
     QVERIFY(pdf->isEnabled());
     QVERIFY(q.exec("PRAGMA query_only=OFF"));
 }

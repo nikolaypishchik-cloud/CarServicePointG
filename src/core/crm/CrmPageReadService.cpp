@@ -133,9 +133,9 @@ QVariantMap statementOrder(const QString& clientUid, const QString& orderUid, QS
     if (query.lastError().isValid()) { *error = query.lastError().text(); return {}; }
     return row;
 }
-Rows statementIssues(const QString& clientUid, const QString& vehicleUid, QDate from, QDate through, QString* error) {
+Rows statementPartHistory(const QString& clientUid, const QString& vehicleUid, QDate from, QDate through, QString* error) {
     if (clientUid.trimmed().isEmpty() || !from.isValid() || !through.isValid() || from>through) {
-        *error = QStringLiteral("Некоректний клієнт або період видач.");
+        *error = QStringLiteral("Некоректний клієнт або період руху запчастин.");
         return {};
     }
     auto db = Database::db();
@@ -143,20 +143,29 @@ Rows statementIssues(const QString& clientUid, const QString& vehicleUid, QDate 
     const QString parts = orders=="router_work_orders" ? QStringLiteral("router_work_order_parts") : QStringLiteral("work_order_parts");
     QSqlQuery query(db);
     QString sql = QStringLiteral(
-        "SELECT m.moved_on,p.name,m.quantity,m.actor,o.order_uid,p.part_uid,m.id,o.car,COALESCE(NULLIF(o.order_number,0),o.number) "
-        "FROM workshop_spare_movements m JOIN %1 o ON o.number=m.order_number "
-        "JOIN %2 p ON p.id=m.part_id AND p.order_number=o.number AND p.order_uid=o.order_uid "
-        "WHERE m.operation='issue' AND o.client_uid=? AND trim(o.order_uid)<>'' AND trim(p.part_uid)<>'' "
-        "AND m.moved_on BETWEEN ? AND ? "
+        "WITH positions AS (SELECT o.order_uid,p.part_uid,p.id,p.order_number,p.name,p.installed_at,o.car,"
+        "COALESCE(NULLIF(o.order_number,0),o.number) AS visible FROM %1 o JOIN %2 p "
+        "ON p.order_number=o.number AND p.order_uid=o.order_uid WHERE o.client_uid=? "
+        "AND trim(o.order_uid)<>'' AND trim(p.part_uid)<>'' "
         "AND (SELECT count(*) FROM %1 x WHERE x.order_uid=o.order_uid)=1 "
-        "AND (SELECT count(*) FROM %2 x WHERE x.order_number=m.order_number AND x.id=m.part_id)=1 "
+        "AND (SELECT count(*) FROM %2 x WHERE x.order_number=p.order_number AND x.id=p.id)=1 "
         "AND (SELECT count(*) FROM %2 x WHERE x.part_uid=p.part_uid)=1 ").arg(orders,parts);
     if (!vehicleUid.isEmpty()) sql += QStringLiteral("AND o.vehicle_uid=? ");
-    query.prepare(sql + QStringLiteral("ORDER BY m.moved_on,m.id"));
+    sql += QStringLiteral("), events(event_date,name,quantity,actor,order_uid,part_uid,source_id,car,visible,kind) AS ("
+        "SELECT installed_at,name,NULL,NULL,order_uid,part_uid,id,car,visible,'installed' FROM positions "
+        "WHERE trim(installed_at)<>'' ");
+    if (tableOrViewExists(db,QStringLiteral("workshop_spare_movements"))) {
+        sql += QStringLiteral("UNION ALL SELECT m.moved_on,p.name,m.quantity,m.actor,p.order_uid,p.part_uid,"
+            "m.id,p.car,p.visible,'issue' FROM workshop_spare_movements m JOIN positions p "
+            "ON p.id=m.part_id AND p.order_number=m.order_number WHERE m.operation='issue' ");
+    }
+    sql += QStringLiteral(") SELECT * FROM events WHERE substr(event_date,1,10) BETWEEN ? AND ? "
+                          "ORDER BY event_date,kind DESC,source_id,part_uid");
+    query.prepare(sql);
     query.addBindValue(clientUid);
+    if (!vehicleUid.isEmpty()) query.addBindValue(vehicleUid);
     query.addBindValue(from.toString(Qt::ISODate));
     query.addBindValue(through.toString(Qt::ISODate));
-    if (!vehicleUid.isEmpty()) query.addBindValue(vehicleUid);
     Rows events;
     if (!collect(query,&events,error)) events.clear();
     return events;
