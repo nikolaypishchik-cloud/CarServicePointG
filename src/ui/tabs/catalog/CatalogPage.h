@@ -54,6 +54,10 @@ private slots:
     void processDeferredRefresh();
 
 private:
+    QComboBox* m_searchMode = nullptr;
+    QComboBox* m_manufacturer = nullptr;
+    QLabel* m_selectionCard = nullptr;
+    QPushButton* m_copyOem = nullptr;
     QComboBox* m_brandFilter = nullptr;
     QComboBox* m_modelFilter = nullptr;
     QComboBox* m_fuelFilter = nullptr;

@@ -48,6 +48,9 @@
 #include "core/services/ReportsSyncSupport.h"
 #include "core/util/FormatUtils.h"
 #include "ui/tabs/reports/PartsRegisterView.h"
+#include "ui/tabs/catalog/CatalogPage.h"
+#include "core/services/catalog/CatalogQueryService.h"
+#include <QTableWidget>
 #include "core/services/PurchasePaymentService.h"
 #include "core/services/ReportsPdfPartsSupport.h"
 #include "ui/tabs/reports/ReportsPage.h"
@@ -632,6 +635,46 @@ private slots:
         QVERIFY(q.exec("DROP TABLE settings"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());
         QVERIFY(q.exec("CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)"));
         configureFinancialReportDirectory();QVERIFY2(render(),qPrintable(result.errorText));
+    }
+    void catalogCardKeepsPartIdentityAndOemPunctuation() {
+        preparePartsPayrollPdfFixture();
+        QString error;
+        QVERIFY2(CatalogQueryService::ensureSchema(&error), qPrintable(error));
+        QSqlQuery query(db);
+        QVERIFY2(query.exec("INSERT INTO parts_catalog(name,vehicle_brand,part_number,brand) VALUES"
+                            "('Same','Audi','A-B/17','Alpha'),('Same','Audi','AB17','Beta'),('Other','Audi','Same','')"),
+                 qPrintable(query.lastError().text()));
+        CatalogPage page;
+        page.resize(1350, 790);
+        page.show();
+        page.refresh();
+        auto* search = page.findChild<QLineEdit*>("catalogSearch");
+        auto* mode = page.findChild<QComboBox*>("catalogSearchMode");
+        auto* brand = page.findChild<QComboBox*>("catalogManufacturer");
+        auto* card = page.findChild<QLabel*>("catalogSelectionCard");
+        auto* table = page.findChild<QTableWidget*>("catalogTable");
+        QVERIFY(search && mode && brand && card && table);
+        QTRY_COMPARE_WITH_TIMEOUT(table->rowCount(), 3, 10000);
+        mode->setCurrentIndex(1);
+        search->setText("A-B/");
+        QTRY_COMPARE(table->rowCount(), 1);
+        QVERIFY(card->text().contains("Alpha"));
+        QVERIFY(card->text().contains("A-B/17"));
+        mode->setCurrentIndex(2);
+        search->setText("Same");
+        QTRY_COMPARE(table->rowCount(), 2);
+        brand->setCurrentText("Beta");
+        QTRY_COMPARE(table->rowCount(), 1);
+        QVERIFY(card->text().contains("AB17"));
+        QVERIFY(!card->text().contains("Alpha"));
+        const auto capture = qEnvironmentVariable("CS_CATALOG_CAPTURE");
+        if (!capture.isEmpty()) QVERIFY(page.grab().save(capture));
+        table->clearSelection();
+        QCOMPARE(card->text(), QStringLiteral("Оберіть запчастину"));
+        brand->setCurrentIndex(1);
+        search->clear();
+        QTRY_COMPARE(table->rowCount(), 1);
+        QTRY_VERIFY(card->text().contains("Other"));
     }
     void outsourceFiltersAndMonthTotals() {
         preparePartsPayrollPdfFixture();

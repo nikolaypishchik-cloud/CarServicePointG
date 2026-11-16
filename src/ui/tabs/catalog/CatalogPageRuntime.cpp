@@ -6,8 +6,9 @@
 void CatalogPage::onToggleFiltersClicked()
 {
     if (!m_filtersPanel) return;
-    const bool showFilters = !m_filtersPanel->isVisible();
-    m_filtersPanel->setVisible(showFilters);
+    auto* pane = m_filtersPanel->parentWidget()->parentWidget();
+    const bool showFilters = !pane->isVisible();
+    pane->setVisible(showFilters);
     if (showFilters) {
         m_filtersPanel->updateGeometry();
         updateGeometry();
@@ -26,7 +27,7 @@ void CatalogPage::loadAllRows(QString* errorText)
 void CatalogPage::restoreHeaderState()
 {
     if (!m_table || !m_table->horizontalHeader()) return;
-    const QString raw = UiStateSettingsService::loadString(QStringLiteral("ui.catalog.header_state"));
+    const QString raw = UiStateSettingsService::loadString(QStringLiteral("ui.catalog.cards.header_state"));
     if (raw.trimmed().isEmpty()) return;
     m_restoringHeaderState = true;
     m_table->horizontalHeader()->restoreState(QByteArray::fromBase64(raw.toUtf8()));
@@ -36,7 +37,7 @@ void CatalogPage::restoreHeaderState()
 void CatalogPage::saveHeaderState() const
 {
     if (!m_table || !m_table->horizontalHeader()) return;
-    UiStateSettingsService::saveString(QStringLiteral("ui.catalog.header_state"), QString::fromLatin1(m_table->horizontalHeader()->saveState().toBase64()));
+    UiStateSettingsService::saveString(QStringLiteral("ui.catalog.cards.header_state"), QString::fromLatin1(m_table->horizontalHeader()->saveState().toBase64()));
 }
 
 void CatalogPage::loadFilterValues()
@@ -50,10 +51,26 @@ void CatalogPage::loadFilterValues()
     state.model = m_modelFilter ? m_modelFilter->currentText().trimmed() : QString();
     state.fuel = m_fuelFilter ? m_fuelFilter->currentText().trimmed() : QString();
     state.group = m_groupFilter ? m_groupFilter->currentText().trimmed() : QString();
+    state.searchMode = static_cast<CatalogFilterState::SearchMode>(m_searchMode->currentIndex());
+    state.manufacturer = m_manufacturer->currentData().toString();
+    state.missingManufacturer = m_manufacturer->currentIndex() == 1;
     state.search = m_searchEdit ? m_searchEdit->text().trimmed() : QString();
     state.yearFrom = comboYearValue(m_yearFromFilter);
     state.yearTo = comboYearValue(m_yearToFilter);
 
+    QSignalBlocker manufacturerBlocker(m_manufacturer);
+    QStringList brands;
+    for (const auto& row : m_allRows) {
+        const auto brand = row.brandName.trimmed();
+        if (!brand.isEmpty()) brands.append(brand);
+    }
+    brands.removeDuplicates();
+    brands.sort(Qt::CaseInsensitive);
+    m_manufacturer->clear();
+    m_manufacturer->addItem(tr("Усі"));
+    m_manufacturer->addItem(tr("Не вказано"));
+    for (const auto& brand : brands) m_manufacturer->addItem(brand, brand);
+    m_manufacturer->setCurrentIndex(state.missingManufacturer ? 1 : qMax(0, m_manufacturer->findData(state.manufacturer)));
     const auto options = CatalogQueryService::buildFilterOptions(m_allRows, state);
     const QString allText = QString::fromUtf8("Усі");
 
@@ -124,6 +141,9 @@ void CatalogPage::loadRows()
     state.model = m_modelFilter ? m_modelFilter->currentText().trimmed() : QString();
     state.fuel = m_fuelFilter ? m_fuelFilter->currentText().trimmed() : QString();
     state.group = m_groupFilter ? m_groupFilter->currentText().trimmed() : QString();
+    state.searchMode = static_cast<CatalogFilterState::SearchMode>(m_searchMode->currentIndex());
+    state.manufacturer = m_manufacturer->currentData().toString();
+    state.missingManufacturer = m_manufacturer->currentIndex() == 1;
     state.search = m_searchEdit ? m_searchEdit->text().trimmed() : QString();
     state.yearFrom = comboYearValue(m_yearFromFilter);
     state.yearTo = comboYearValue(m_yearToFilter);
@@ -140,12 +160,19 @@ void CatalogPage::loadRows()
     int restoreRow = -1;
     for (int row = 0; row < m_rows.size(); ++row) {
         const auto& r = m_rows[row];
-        const QString price = r.price > 0.0 ? QString::number(r.price, 'f', 2) : QString();
-        const QStringList cols = { r.brand, r.model, CatalogQueryService::displayYearsRange(r.yearFrom, r.yearTo), r.fuel, r.group, r.oem, r.name, r.brandName, price };
+        QStringList partDetails, vehicle, application;
+        if (!r.oem.isEmpty()) partDetails << tr("OEM: %1").arg(r.oem);
+        if (!r.brandName.isEmpty()) partDetails << r.brandName;
+        if (!r.brand.isEmpty()) vehicle << r.brand;
+        if (!r.model.isEmpty()) vehicle << r.model;
+        const auto years = CatalogQueryService::displayYearsRange(r.yearFrom, r.yearTo);
+        if (!years.isEmpty()) application << years;
+        if (!r.fuel.isEmpty()) application << r.fuel;
+        const QStringList cols = {r.name + "\n" + partDetails.join(" · "),
+                                  vehicle.join(" ") + "\n" + application.join(" · "), r.group};
         for (int c = 0; c < cols.size(); ++c) {
             auto* item = new QTableWidgetItem(cols[c]);
-            if (c == 8) item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
-            if (c == 6 || c == 5) item->setToolTip(r.note);
+            item->setToolTip(cols[c]);
             m_table->setItem(row, c, item);
         }
         m_table->item(row, 0)->setData(Qt::UserRole, r.id);
@@ -163,6 +190,7 @@ void CatalogPage::loadRows()
     if (m_table && m_table->horizontalScrollBar()) m_table->horizontalScrollBar()->setValue(hScroll);
     if (m_table) {
         m_table->blockSignals(false);
+        onTableSelectionChanged();
         m_table->setUpdatesEnabled(true);
         m_table->viewport()->update();
     }
@@ -199,7 +227,7 @@ CatalogPage::RowData CatalogPage::formData() const
 int CatalogPage::currentRowId() const
 {
     const int row = m_table->currentRow();
-    if (row < 0) return 0;
+    if (row < 0 || !m_table->selectionModel()->isRowSelected(row, QModelIndex())) return 0;
     auto* item = m_table->item(row, 0);
     return item ? item->data(Qt::UserRole).toInt() : 0;
 }
@@ -332,6 +360,23 @@ void CatalogPage::onTableSelectionChanged()
     const bool hasSelection = currentRowId() > 0;
     m_saveBtn->setEnabled(hasSelection);
     m_deleteBtn->setEnabled(hasSelection);
+    const int selected = m_table->currentRow();
+    if (!hasSelection || selected >= m_rows.size()) {
+        m_selectionCard->setText(tr("Оберіть запчастину"));
+        m_copyOem->setEnabled(false);
+        return;
+    }
+    const auto& row = m_rows.at(selected);
+    const auto shown = [this](const QString& value) { return value.isEmpty() ? tr("Не вказано") : value; };
+    m_selectionCard->setText(tr("%1\nOEM: %2\nБренд: %3\n\nЗастосування\n%4 · %5\nРоки: %6\nПаливо: %7\n\nВузол: %8")
+        .arg(shown(row.name), shown(row.oem), shown(row.brandName), shown(row.brand), shown(row.model),
+             shown(CatalogQueryService::displayYearsRange(row.yearFrom, row.yearTo)), shown(row.fuel), shown(row.group)));
+    QStringList details;
+    if (!row.supplier.isEmpty()) details << tr("Постачальник: %1").arg(row.supplier);
+    if (row.price > 0) details << tr("Ціна: %1").arg(QString::number(row.price, 'f', 2));
+    if (!row.note.isEmpty()) details << row.note;
+    if (!details.isEmpty()) m_selectionCard->setText(m_selectionCard->text() + "\n\n" + details.join("\n"));
+    m_copyOem->setEnabled(!row.oem.isEmpty());
 }
 
 void CatalogPage::onAddClicked()

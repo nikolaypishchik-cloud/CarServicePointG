@@ -33,6 +33,7 @@ struct CatalogRowData {
 };
 
 struct CatalogFilterState {
+    enum class SearchMode { All, Oem, Name };
     QString brand;
     QString model;
     QString fuel;
@@ -40,6 +41,9 @@ struct CatalogFilterState {
     QString search;
     int yearFrom = 0;
     int yearTo = 0;
+    SearchMode searchMode = SearchMode::All;
+    QString manufacturer;
+    bool missingManufacturer = false;
 };
 
 struct CatalogFilterOptions {

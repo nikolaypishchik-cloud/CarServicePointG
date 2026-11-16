@@ -3,6 +3,10 @@
 
 #include "ui/tabs/catalog/CatalogPageModulePrelude.h"
 #include "ui/common/dialogs/HistoricalVersionsDialog.h"
+#include <QSplitter>
+#include <QScrollArea>
+#include <QClipboard>
+#include <QApplication>
 
 void CatalogPage::buildUi()
 {
@@ -72,55 +76,37 @@ void CatalogPage::buildUi()
     m_yearToFilter = makeYearCombo(m_filtersPanel, QString::fromUtf8("Будь-який"));
     m_searchEdit = makeEdit(m_filtersPanel, QString::fromUtf8("Пошук по OEM, назві, бренду, постачальнику"));
 
-    const int filterLabelWidth = AdaptiveUi::px(this, 76);
-    const int filterFieldWidth = AdaptiveUi::px(this, 250);
-    const int labelToFieldGap = 14;
-    const int rowSectionGap = 24;
-
-    auto makeFilterLabel = [&](const QString& text) {
-        auto* lbl = new QLabel(text, m_filtersPanel);
-        lbl->setMinimumWidth(filterLabelWidth);
-        lbl->setMaximumWidth(filterLabelWidth);
-        lbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-        return lbl;
-    };
-    auto tuneFixedField = [&](QWidget* w) {
-        w->setMinimumWidth(filterFieldWidth);
-        w->setMaximumWidth(AdaptiveUi::px(w, 420));
-        w->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
-    };
-    for (auto* w : {static_cast<QWidget*>(m_brandFilter), static_cast<QWidget*>(m_modelFilter), static_cast<QWidget*>(m_fuelFilter),
-                    static_cast<QWidget*>(m_groupFilter), static_cast<QWidget*>(m_yearFromFilter), static_cast<QWidget*>(m_yearToFilter)}) {
-        tuneFixedField(w);
-    }
-    m_searchEdit->setMinimumWidth(qMax(filterFieldWidth + 120, AdaptiveUi::px(m_searchEdit, 280)));
-    m_searchEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-
-    auto addDoubleFilterRow = [&](QLabel* leftLabel, QWidget* leftField, QLabel* rightLabel, QWidget* rightField) {
-        auto* row = new QHBoxLayout();
-        row->setSpacing(0);
-        row->addWidget(leftLabel);
-        row->addSpacing(labelToFieldGap);
-        row->addWidget(leftField, 0, Qt::AlignLeft | Qt::AlignVCenter);
-        row->addSpacing(rowSectionGap);
-        row->addWidget(rightLabel);
-        row->addSpacing(labelToFieldGap);
-        row->addWidget(rightField, 0, Qt::AlignLeft | Qt::AlignVCenter);
-        row->addStretch(1);
-        filtersRoot->addLayout(row);
-    };
-
-    addDoubleFilterRow(makeFilterLabel(QString::fromUtf8("Марка авто")), m_brandFilter,
-                       makeFilterLabel(QString::fromUtf8("Модель")), m_modelFilter);
-    addDoubleFilterRow(makeFilterLabel(QString::fromUtf8("Паливо")), m_fuelFilter,
-                       makeFilterLabel(QString::fromUtf8("Вузол / агрегат")), m_groupFilter);
-    addDoubleFilterRow(makeFilterLabel(QString::fromUtf8("Рік від")), m_yearFromFilter,
-                       makeFilterLabel(QString::fromUtf8("Рік до")), m_yearToFilter);
-
-    auto* searchRow = new QHBoxLayout();
-    searchRow->setSpacing(0);
-    searchRow->addWidget(makeFilterLabel(QString::fromUtf8("Пошук")));
-    searchRow->addSpacing(labelToFieldGap);
+    m_manufacturer = makeCombo(m_filtersPanel, false);
+    m_manufacturer->setObjectName("catalogManufacturer");
+    filtersRoot->addWidget(new QLabel(tr("Уточнити пошук"), m_filtersPanel));
+    auto* filterForm = new QFormLayout;
+    filterForm->setRowWrapPolicy(QFormLayout::WrapAllRows);
+    filterForm->addRow(tr("Марка"), m_brandFilter);
+    filterForm->addRow(tr("Модель"), m_modelFilter);
+    filterForm->addRow(tr("Рік від"), m_yearFromFilter);
+    filterForm->addRow(tr("Рік до"), m_yearToFilter);
+    filterForm->addRow(tr("Паливо"), m_fuelFilter);
+    filterForm->addRow(tr("Вузол"), m_groupFilter);
+    filterForm->addRow(tr("Бренд"), m_manufacturer);
+    filtersRoot->addLayout(filterForm);
+    filtersRoot->addStretch();
+    auto* reset = new QPushButton(tr("Скинути фільтри"), m_filtersPanel);
+    filtersRoot->addWidget(reset);
+    connect(reset, &QPushButton::clicked, this, [this] {
+        for (auto* combo : {m_brandFilter, m_modelFilter, m_yearFromFilter, m_yearToFilter,
+                            m_fuelFilter, m_groupFilter, m_manufacturer, m_searchMode}) {
+            QSignalBlocker blocker(combo);
+            combo->setCurrentIndex(0);
+        }
+        m_searchEdit->clear();
+        onFilterChanged();
+    });
+    m_searchMode = new QComboBox(this);
+    m_searchMode->setObjectName("catalogSearchMode");
+    m_searchMode->addItems({tr("Усе"), tr("OEM"), tr("Назва")});
+    m_searchEdit->setObjectName("catalogSearch");
+    auto* searchRow = new QHBoxLayout;
+    searchRow->addWidget(m_searchMode);
     m_searchEdit->setClearButtonEnabled(true);
     m_searchDebounce = new QTimer(this);
     m_searchDebounce->setSingleShot(true);
@@ -129,23 +115,16 @@ void CatalogPage::buildUi()
     m_refreshDebounce->setSingleShot(true);
     m_refreshDebounce->setInterval(140);
     searchRow->addWidget(m_searchEdit, 1);
-    searchRow->addStretch(1);
-    filtersRoot->addLayout(searchRow);
-    root->addWidget(m_filtersPanel);
-    m_filtersPanel->setVisible(false);
+    root->addLayout(searchRow);
 
     m_table = new QTableWidget(this);
     m_table->setObjectName(QStringLiteral("catalogTable"));
-    m_table->setColumnCount(9);
-    m_table->setHorizontalHeaderLabels({
-        QString::fromUtf8("Марка"), QString::fromUtf8("Модель"), QString::fromUtf8("Роки"),
-        QString::fromUtf8("Паливо"), QString::fromUtf8("Вузол"), QString::fromUtf8("OEM"),
-        QString::fromUtf8("Назва"), QString::fromUtf8("Бренд"), QString::fromUtf8("Ціна")
-    });
+    m_table->setColumnCount(3);
+    m_table->setHorizontalHeaderLabels({tr("Запчастина"), tr("Автомобіль"), tr("Вузол")});
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setAlternatingRowColors(true);
     m_table->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    m_table->setMinimumHeight(520);
+    m_table->setMinimumHeight(180);
     m_table->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->verticalHeader()->setVisible(false);
@@ -155,26 +134,12 @@ void CatalogPage::buildUi()
     m_table->horizontalHeader()->setMinimumSectionSize(48);
     m_table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     m_table->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_table->setColumnWidth(0, 140);
-    m_table->setColumnWidth(1, 170);
-    m_table->setColumnWidth(2, 96);
-    m_table->setColumnWidth(3, 110);
-    m_table->setColumnWidth(4, 190);
-    m_table->setColumnWidth(5, 170);
-    m_table->setColumnWidth(6, 320);
-    m_table->setColumnWidth(7, 160);
-    m_table->setColumnWidth(8, 110);
+    m_table->verticalHeader()->setDefaultSectionSize(m_table->fontMetrics().height() * 2 + 16);
     AdaptiveUi::installAdaptiveTable(m_table, {
-        {0, 110, 140, 2, 200, false},
-        {1, 120, 170, 3, 240, false},
-        {2, 82, 96, 1, 130, false},
-        {3, 88, 110, 1, 140, false},
-        {4, 130, 190, 3, 280, false},
-        {5, 118, 170, 2, 240, false},
-        {6, 220, 320, 6, 560, false},
-        {7, 110, 160, 2, 220, false},
-        {8, 88, 110, 1, 130, false}
-    }, QStringLiteral("ui.catalog.adaptive"));
+        {0, 155, 275, 5, 580, false},
+        {1, 145, 235, 4, 480, false},
+        {2, 95, 130, 2, 350, false}
+    }, QStringLiteral("ui.catalog.cards.adaptive"));
     restoreHeaderState();
     connect(m_table->horizontalHeader(), &QHeaderView::sectionResized, this, [this](int, int, int) {
         if (!m_restoringHeaderState) saveHeaderState();
@@ -182,8 +147,45 @@ void CatalogPage::buildUi()
     connect(m_table->horizontalHeader(), &QHeaderView::sectionMoved, this, [this](int, int, int) {
         if (!m_restoringHeaderState) saveHeaderState();
     });
-    root->addWidget(m_table, 1);
-    root->setStretchFactor(m_table, 1);
+    auto* panes = new QSplitter(Qt::Horizontal, this);
+    auto* filterScroll = new QScrollArea(panes);
+    filterScroll->setFrameShape(QFrame::NoFrame);
+    filterScroll->setWidgetResizable(true);
+    filterScroll->setWidget(m_filtersPanel);
+    panes->addWidget(filterScroll);
+    panes->addWidget(m_table);
+    auto* detailScroll = new QScrollArea(panes);
+    detailScroll->setWidgetResizable(true);
+    detailScroll->setFrameShape(QFrame::NoFrame);
+    auto* detail = new QWidget;
+    detail->setObjectName("catalogDetailPanel");
+    detail->setAttribute(Qt::WA_StyledBackground);
+    detail->setStyleSheet("#catalogDetailPanel { background:#f4f7fb; border:1px solid #8d9bab; border-radius:8px; } "
+                          "#catalogDetailPanel QLabel { background:transparent; color:#172536; border:0; }");
+    detailScroll->setWidget(detail);
+    auto* cardLayout = new QVBoxLayout(detail);
+    cardLayout->addWidget(new QLabel(tr("Вибрана запчастина"), detail));
+    m_selectionCard = new QLabel(detail);
+    m_selectionCard->setObjectName("catalogSelectionCard");
+    m_selectionCard->setTextFormat(Qt::PlainText);
+    m_selectionCard->setWordWrap(true);
+    m_selectionCard->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    cardLayout->addWidget(m_selectionCard);
+    m_copyOem = new QPushButton(tr("Копіювати OEM"), detail);
+    m_copyOem->setEnabled(false);
+    cardLayout->addWidget(m_copyOem);
+    connect(m_copyOem, &QPushButton::clicked, this, [this] {
+        const int row = m_table->currentRow();
+        if (currentRowId() > 0 && row < m_rows.size())
+            QApplication::clipboard()->setText(m_rows.at(row).oem);
+    });
+    cardLayout->addStretch();
+    panes->addWidget(detailScroll);
+    panes->setStretchFactor(1, 1);
+    panes->setSizes({200, 740, 240});
+    root->addWidget(panes, 1);
+    connect(m_searchMode, &QComboBox::currentIndexChanged, this, &CatalogPage::onFilterChanged);
+    connect(m_manufacturer, &QComboBox::currentIndexChanged, this, &CatalogPage::onFilterChanged);
 
     setStyleSheet(QString::fromUtf8(
         "#catalogPage {"

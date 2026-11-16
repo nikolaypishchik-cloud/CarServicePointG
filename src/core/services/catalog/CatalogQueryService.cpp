@@ -425,6 +425,19 @@ QVector<CatalogRowData> CatalogQueryService::loadAllRows(QString* errorText)
     return rows;
 }
 
+static bool matchesCatalogSearch(const CatalogRowData& row, const CatalogFilterState& state,
+                                 const QString& searchKey, const QString& partSearchKey)
+{
+    if (state.missingManufacturer && !row.brandName.trimmed().isEmpty()) return false;
+    if (!state.manufacturer.isEmpty() && row.brandName.trimmed().compare(state.manufacturer, Qt::CaseInsensitive) != 0) return false;
+    if (searchKey.isEmpty()) return true;
+    if (state.searchMode == CatalogFilterState::SearchMode::Oem)
+        return row.oem.contains(state.search.trimmed(), Qt::CaseInsensitive);
+    if (state.searchMode == CatalogFilterState::SearchMode::Name)
+        return normalizeSpaces(row.name).contains(searchKey);
+    return row.searchHaystack.contains(searchKey) || (!partSearchKey.isEmpty() && row.oemSearchKey.contains(partSearchKey));
+}
+
 CatalogFilterOptions CatalogQueryService::buildFilterOptions(const QVector<CatalogRowData>& allRows,
                                                              const CatalogFilterState& state)
 {
@@ -456,9 +469,7 @@ CatalogFilterOptions CatalogQueryService::buildFilterOptions(const QVector<Catal
     };
 
     auto searchMatch = [&](const CatalogRowData& row) {
-        if (searchKey.isEmpty()) return true;
-        if (row.searchHaystack.contains(searchKey)) return true;
-        return !partSearchKey.isEmpty() && row.oemSearchKey.contains(partSearchKey);
+        return matchesCatalogSearch(row, state, searchKey, partSearchKey);
     };
 
     auto matches = [&](const CatalogRowData& row, bool applyBrand, bool applyModel, bool applyFuel, bool applyGroup, bool applyYearFrom, bool applyYearTo, bool applySearch) {
@@ -545,7 +556,7 @@ QVector<CatalogRowData> CatalogQueryService::filterRows(const QVector<CatalogRow
             if (currentYearFrom > 0 && row.effectiveYearTo < currentYearFrom) return false;
             if (currentYearTo > 0 && row.effectiveYearFrom > currentYearTo) return false;
         }
-        if (!searchKey.isEmpty() && !row.searchHaystack.contains(searchKey) && (partSearchKey.isEmpty() || !row.oemSearchKey.contains(partSearchKey))) {
+        if (!matchesCatalogSearch(row, state, searchKey, partSearchKey)) {
             return false;
         }
         return true;
