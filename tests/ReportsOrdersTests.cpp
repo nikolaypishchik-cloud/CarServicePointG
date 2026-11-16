@@ -6082,6 +6082,19 @@ void ReportsOrdersTests::newOrderFromSpareStock()
             QTest::qWait(200);QMetaObject::invokeMethod(&dialog,"accept",Qt::DirectConnection);
             QTRY_COMPARE_WITH_TIMEOUT(dialog.result(),int(QDialog::Accepted),10000);
             QCOMPARE(WorkshopSpareStockService::orders(db,&error).first().issued,1.0);
+            const auto uid = dialog.recoveryOrderUid();
+            QVERIFY(!uid.isEmpty());
+            q.prepare("SELECT number,car_year FROM work_orders WHERE order_uid=?");
+            q.addBindValue(uid);
+            QVERIFY2(q.exec(),qPrintable(q.lastError().text()));
+            QVERIFY(q.next());
+            const int savedNumber = q.value(0).toInt();
+            QCOMPARE(q.value(1).toInt(),0);
+            QVERIFY(!q.next());
+            q.finish();
+            OrderDialog reopened(nullptr,savedNumber);
+            QCOMPARE(reopened.recoveryOrderUid(),uid);
+            QCOMPARE(reopened.serializeDraftState().value("year").toInt(-1),0);
         }
     }
     MainWindow window;
