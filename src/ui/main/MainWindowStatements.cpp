@@ -180,13 +180,17 @@ void MainWindow::openHeaderStatements()
                 car->currentData().toString(),from->date(),through->date());
             if (!journal.error.isEmpty()) { message->setText(journal.error); return; }
             const auto money=CrmFinancialService::money;
+            const auto balance = [this, money](qint64 cents) {
+                const QString kind = cents > 0 ? tr("борг") : cents < 0 ? tr("аванс за журналом") : tr("розраховано");
+                return money(cents) + " (" + kind + ")";
+            };
             for (const auto& entry:journal.entries) {
                 const int row=finances->rowCount();
                 finances->insertRow(row);
                 const auto& event=entry.event;
                 const QStringList cells={event.day.toString("dd.MM.yyyy"),QString::number(entry.orderNumber),entry.car,
                     event.payment?tr("Оплата"):tr("Закриття наряду"),event.payment?QString():money(event.cents),
-                    event.payment?money(event.cents):QString(),money(event.balance),QString()};
+                    event.payment?money(event.cents):QString(),balance(event.balance),QString()};
                 for (int c=0;c<cells.size();++c) finances->setItem(row,c,new QTableWidgetItem(cells[c]));
                 finances->item(row,1)->setData(Qt::UserRole,entry.orderUid);
                 finances->item(row,3)->setData(Qt::UserRole,event.sourceUid);
@@ -203,7 +207,7 @@ void MainWindow::openHeaderStatements()
                 finances->item(row,7)->setToolTip(order.error);
             }
             QString totals=tr("За журналом • На початок %1 • Нараховано %2 • Сплачено %3 • На кінець %4")
-                .arg(money(journal.opening),money(journal.charged),money(journal.paid),money(journal.closing));
+                .arg(balance(journal.opening),money(journal.charged),money(journal.paid),balance(journal.closing));
             if (!journal.unverifiedClosures.isEmpty())
                 totals+=tr(" • Потребують звірки: закритих нарядів без підтвердженого нарахування — %1.").arg(journal.unverifiedClosures.size());
             summary->setText(totals);

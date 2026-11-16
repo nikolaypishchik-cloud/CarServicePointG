@@ -213,10 +213,10 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     QCOMPARE(financial->item(2,7)->text(),QStringLiteral("785,00 грн"));
     for (int c:{4,5,6}) QVERIFY(financial->item(2,c)->text().isEmpty());
     QCOMPARE(financial->item(0,4)->text(),QStringLiteral("450,00 грн"));
-    QCOMPARE(financial->item(0,6)->text(),QStringLiteral("425,00 грн"));
+    QCOMPARE(financial->item(0,6)->text(),QStringLiteral("425,00 грн (борг)"));
     QCOMPARE(financial->item(1,3)->data(Qt::UserRole).toString(),QStringLiteral("receiptx"));
     QCOMPARE(financial->item(1,5)->text(),QStringLiteral("125,00 грн"));
-    QCOMPARE(financial->item(1,6)->text(),QStringLiteral("300,00 грн"));
+    QCOMPARE(financial->item(1,6)->text(),QStringLiteral("300,00 грн (борг)"));
     QVERIFY(q.exec("ALTER TABLE client_payments ADD COLUMN actor TEXT"));
     QVERIFY(q.exec("UPDATE client_payments SET actor='QA receipt operator' WHERE payment_uid='receiptx'"));
     financial->setCurrentCell(1,0);
@@ -234,8 +234,8 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     auto* totals=dialog->findChild<QLabel*>("statementFinancialTotals");
     QVERIFY(totals && totals->isVisibleTo(dialog));
     const auto generated=totals->text();
-    QVERIFY(generated.contains("На початок -25,00 грн"));
-    QVERIFY(generated.contains("На кінець 300,00 грн"));
+    QVERIFY(generated.contains("На початок -25,00 грн (аванс за журналом)"));
+    QVERIFY(generated.contains("На кінець 300,00 грн (борг)"));
     QVERIFY(q.exec("UPDATE client_payments SET amount_cents=99999 WHERE payment_uid='receiptx'"));
     QVERIFY(q.exec("UPDATE work_orders SET client_uid='another-client' WHERE order_uid='order-a'"));
     financial->setCurrentCell(0,0);
