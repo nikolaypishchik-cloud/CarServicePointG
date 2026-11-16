@@ -9315,6 +9315,9 @@ private slots:
         }
         WorkshopInventoryPage page;page.resize(1400,800);page.show();
         auto* stock=page.findChild<QTableView*>("workshopSpareTable");QVERIFY(stock);
+        auto* stockSearch = page.findChild<QLineEdit*>("spareFilterSearch");
+        auto* overdue = page.findChild<QComboBox*>("spareFilterOverdue");
+        QVERIFY(stockSearch && overdue);
         page.findChild<QTabWidget*>("workshopStockKinds")->setCurrentIndex(0);
         for(int days:{0,2,3,4,5,7,8}) {
             q.prepare("UPDATE workshop_spare_movements SET moved_on=? WHERE spare_id=? AND operation='receipt'");
@@ -9324,6 +9327,13 @@ private slots:
             QCOMPARE(stock->model()->headerData(9,Qt::Horizontal).toString(),QString::fromUtf8("Протерміновано"));
             int row=0;while(row<stock->model()->rowCount() && stock->model()->index(row,0).data().toLongLong()!=id) ++row;
             QVERIFY(row<stock->model()->rowCount());QCOMPARE(stock->model()->index(row,9).data().toInt(),days);
+            stockSearch->setText("missing-OEM-729");
+            QVERIFY(stock->isRowHidden(row));
+            stockSearch->clear();
+            overdue->setCurrentIndex(1);
+            QCOMPARE(stock->isRowHidden(row), days == 0);
+            overdue->setCurrentIndex(0);
+            QVERIFY(!stock->isRowHidden(row));
             if(days>=3) {
                 QImage image(160,40,QImage::Format_RGB32);image.fill(Qt::white);QPainter painter(&image);
                 QStyleOptionViewItem option;option.rect=QRect(0,0,160,40);option.state=QStyle::State_Enabled|QStyle::State_Selected;

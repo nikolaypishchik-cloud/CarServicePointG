@@ -49,6 +49,9 @@
 #include "core/util/FormatUtils.h"
 #include "ui/tabs/reports/PartsRegisterView.h"
 #include "ui/tabs/catalog/CatalogPage.h"
+#include "ui/tabs/inventory/WorkshopInventoryPage.h"
+#include <QTreeWidget>
+#include <QCheckBox>
 #include "core/services/catalog/CatalogQueryService.h"
 #include <QTableWidget>
 #include "core/services/PurchasePaymentService.h"
@@ -635,6 +638,56 @@ private slots:
         QVERIFY(q.exec("DROP TABLE settings"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());
         QVERIFY(q.exec("CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)"));
         configureFinancialReportDirectory();QVERIFY2(render(),qPrintable(result.errorText));
+    }
+    void materialJournalSharesQuantitiesAndOrderIdentity() {
+        preparePartsPayrollPdfFixture();
+        const QDate day = QDate::currentDate();
+        WorkshopInventoryPurchaseInput purchase;
+        purchase.purchasedOn = day.addDays(-2);
+        purchase.materialName = QStringLiteral("Олива моторна");
+        purchase.unit = QStringLiteral("л");
+        purchase.quantity = 1.5;
+        purchase.unitCost = 100.0;
+        qint64 id = 0;
+        QString error;
+        QVERIFY2(WorkshopInventoryService::addPurchase(db, purchase, &id, &error), qPrintable(error));
+        QSqlQuery query(db);
+        query.prepare("UPDATE work_order_parts SET name=?, store='Склад СТО', qty=2, installed_at=? WHERE id=21");
+        query.addBindValue(purchase.materialName);
+        query.addBindValue(day.toString(Qt::ISODate));
+        QVERIFY(query.exec());
+        const auto snapshot = WorkshopInventoryService::buildSnapshot(db, day.addDays(-3), day);
+        QVERIFY2(snapshot.errorText.isEmpty(), qPrintable(snapshot.errorText));
+        QCOMPARE(snapshot.consumptions.size(), 1);
+        QCOMPARE(snapshot.consumptions.first().internalOrderNumber, 11);
+        QCOMPARE(snapshot.consumptions.first().orderNumber, 7);
+        QCOMPARE(snapshot.consumptions.first().orderUid, QStringLiteral("pdf-order"));
+        WorkshopInventoryPage page;
+        page.resize(1350, 790);
+        page.show();
+        auto* stockTabs = page.findChild<QTabWidget*>("workshopStockTabs");
+        if (!stockTabs) {
+            for (auto* tabs : page.findChildren<QTabWidget*>())
+                if (tabs->indexOf(page.findChild<QWidget*>("workshopMaterialsRegistry")) >= 0) stockTabs = tabs;
+        }
+        QVERIFY(stockTabs);
+        stockTabs->setCurrentWidget(page.findChild<QWidget*>("workshopMaterialsRegistry"));
+        auto* mode = page.findChild<QComboBox*>("materialJournalMode");
+        auto* negative = page.findChild<QCheckBox*>("materialJournalNegative");
+        auto* tree = page.findChild<QTreeWidget*>("materialJournalGrouped");
+        QVERIFY(mode && negative && tree);
+        mode->setCurrentIndex(1);
+        QTRY_COMPARE_WITH_TIMEOUT(tree->topLevelItemCount(), 1, 10000);
+        auto* group = tree->topLevelItem(0);
+        QCOMPARE(group->childCount(), 2);
+        negative->setChecked(true);
+        QTRY_COMPARE(tree->topLevelItem(0)->childCount(), 1);
+        auto* issue = tree->topLevelItem(0)->child(0);
+        QCOMPARE(issue->text(2), QStringLiteral("7"));
+        QVERIFY(issue->text(7).startsWith('-'));
+        QCOMPARE(tree->columnCount(), 10);
+        const auto capture = qEnvironmentVariable("CS_MATERIAL_JOURNAL_CAPTURE");
+        if (!capture.isEmpty()) QVERIFY(page.grab().save(capture));
     }
     void catalogCardKeepsPartIdentityAndOemPunctuation() {
         preparePartsPayrollPdfFixture();

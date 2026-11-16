@@ -522,14 +522,20 @@ WorkshopInventorySnapshot buildSnapshot(QSqlDatabase database, const QDate& from
 
     QVector<WorkshopInventoryConsumptionRow> allConsumptions;
     const bool hasStore = database.record(partsSource).indexOf("store") >= 0;
+    const bool hasOrderUid = database.record(ordersSource).indexOf("order_uid") >= 0;
+    const bool hasPartOwner = database.record(partsSource).indexOf("order_uid") >= 0;
+    const QString uid = hasOrderUid ? QStringLiteral("COALESCE(o.order_uid,'')") : QStringLiteral("''");
+    const QString ownerCheck = hasOrderUid && hasPartOwner
+        ? QStringLiteral("CASE WHEN COALESCE(p.order_uid,'')<>'' AND p.order_uid<>COALESCE(o.order_uid,'') THEN 0 ELSE COALESCE(o.number,0) END")
+        : QStringLiteral("COALESCE(o.number,0)");
     QSqlQuery consumptionQuery(database);
     QString consumptionSql = QStringLiteral(
         "SELECT p.id, COALESCE(p.order_number,0), COALESCE(o.order_number,o.number,p.order_number), "
         "COALESCE(p.name,''), COALESCE(p.qty,1), COALESCE(p.installed_at,''), COALESCE(o.closed_at,''), "
-        "COALESCE(o.car,''), COALESCE(o.client,''), %3 "
+        "COALESCE(o.car,''), COALESCE(o.client,''), %3, %4, %5 "
         "FROM %1 p LEFT JOIN %2 o ON o.number=p.order_number "
         "WHERE TRIM(COALESCE(p.name,''))<>''")
-        .arg(partsSource, ordersSource, hasStore ? QStringLiteral("COALESCE(p.store,'')") : QStringLiteral("''"));
+        .arg(partsSource, ordersSource, hasStore ? QStringLiteral("COALESCE(p.store,'')") : QStringLiteral("''"), ownerCheck, uid);
     if (tableOrViewExists(database, QStringLiteral("workshop_spare_movements"))) {
         QString ownerMatch;
         for (const auto& column : {QStringLiteral("order_uid"), QStringLiteral("part_uid")}) {
@@ -562,6 +568,8 @@ WorkshopInventorySnapshot buildSnapshot(QSqlDatabase database, const QDate& from
 
         WorkshopInventoryConsumptionRow row;
         row.partId = consumptionQuery.value(0).toLongLong();
+        row.internalOrderNumber = consumptionQuery.value(10).toInt();
+        row.orderUid = consumptionQuery.value(11).toString();
         row.consumedOn = consumedOn;
         row.orderNumber = consumptionQuery.value(2).toInt();
         if (row.orderNumber <= 0) row.orderNumber = consumptionQuery.value(1).toInt();
@@ -637,7 +645,7 @@ WorkshopInventorySnapshot buildSnapshot(QSqlDatabase database, const QDate& from
                                                 : QString::fromUtf8("Витрата"),
                                             consumption.orderNumber, state.materialName, state.unit,
                                             0.0, consumption.quantity, state.balanceQuantity,
-                                            consumption.unitCost, consumption.totalCost, 0, state.stockValue});
+                                            consumption.unitCost, consumption.totalCost, 0, state.stockValue, consumption.internalOrderNumber, consumption.orderUid});
             }
         }
     }

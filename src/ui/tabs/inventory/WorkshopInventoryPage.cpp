@@ -36,6 +36,8 @@
 #include "core/services/orders/PartImportTextSupport.h"
 #include "ui/common/AdaptiveUi.h"
 #include "ui/common/TabularSnapshotTableModel.h"
+#include "ui/tabs/inventory/MaterialJournalView.h"
+#include "ui/tabs/inventory/SpareStockFilters.h"
 #include "ui/tabs/orders/CurrentOrdersCoordinator.h"
 #include "core/services/PartsQueryService.h"
 
@@ -319,13 +321,17 @@ void WorkshopInventoryPage::buildUi()
     auto* sparePage = makeTableTab(m_stockTabs, m_spareTable, m_spareModel);
     m_spareTable->setItemDelegate(new SpareUnpaidDaysDelegate(m_spareTable));
     m_spareTable->setObjectName("workshopSpareTable");
+    m_spareFilters = new SpareStockFilters(m_spareTable, m_spareModel, sparePage);
+    static_cast<QVBoxLayout*>(sparePage->layout())->insertWidget(0, m_spareFilters);
     m_stockTabs->addTab(sparePage, QString::fromUtf8("Запчастини під авто"));
     auto* materialsPage = new QWidget(m_stockTabs);
     materialsPage->setObjectName("workshopMaterialsRegistry");
     auto* materialsLayout = new QVBoxLayout(materialsPage);
     materialsLayout->setContentsMargins(0, 8, 0, 0);
     materialsLayout->addWidget(new QLabel(QString::fromUtf8("Журнал руху матеріалів"), materialsPage));
-    materialsLayout->addWidget(makeTableTab(materialsPage, m_periodTable, m_periodModel), 1);
+    auto* journalTable = makeTableTab(materialsPage, m_periodTable, m_periodModel);
+    m_journal = new MaterialJournalView(materialsPage, journalTable, m_periodTable, m_periodModel);
+    materialsLayout->addWidget(m_journal, 1);
     auto* purchasesPage = new QDialog(this);
     purchasesPage->setWindowTitle(QString::fromUtf8("Баланс складу"));
     auto* balanceButton = new QPushButton(QString::fromUtf8("Баланс складу"), m_stockTabs);
@@ -520,7 +526,8 @@ void WorkshopInventoryPage::buildUi()
     m_purchasesTable->setToolTip(QString::fromUtf8("Подвійний клік по ціні клієнту змінює її; по інших колонках відкриває оплату придбання."));
     m_expensesTable->setToolTip(QString::fromUtf8("Подвійний клік відкриває наряд, у якому витрачено матеріал."));
     m_balanceTable->setToolTip(QString::fromUtf8("Подвійний клік відкриває деталі балансу матеріалу."));
-    connect(m_periodTable, &QTableView::doubleClicked, this, [this](const QModelIndex& index) { showPeriodDetails(index.row()); });
+    m_journal->showDetails = [this](int row) { showPeriodDetails(row); };
+    m_journal->orderViewed = [this] { markDirty(); emit requestRefreshAll(); };
     connect(m_purchasesTable, &QTableView::doubleClicked, this, [this](const QModelIndex& index) {
         if (index.column()!=6) { showPurchaseDetails(index.row()); return; }
         if (!AccessControlService::currentUserHasPermission(QStringLiteral("inventory.purchase"))) return;
@@ -635,22 +642,7 @@ void WorkshopInventoryPage::refreshModels()
         return;
     }
 
-    TabularReadModel period;
-    period.headers = {QString::fromUtf8("Дата"), QString::fromUtf8("Операція"), QString::fromUtf8("Наряд"),
-                      QString::fromUtf8("Матеріал"), QString::fromUtf8("Од."), QString::fromUtf8("Надійшло"),
-                      QString::fromUtf8("Витрачено"), QString::fromUtf8("Залишок"), QString::fromUtf8("Ціна"),
-                      QString::fromUtf8("Сума"), QStringLiteral("PurchaseID")};
-    for (const WorkshopInventoryPeriodRow& row : snapshot.periodRows) {
-        period.rows.append({row.date.toString(QStringLiteral("dd.MM.yy")), row.operation,
-                            row.orderNumber > 0 ? QString::number(row.orderNumber) : QString(), row.materialName, row.unit,
-                            row.receivedQuantity > 0.0 ? quantityText(row.receivedQuantity) : QString(),
-                            row.consumedQuantity > 0.0 ? quantityText(row.consumedQuantity) : QString(),
-                            quantityText(row.balanceQuantity), row.unitCost > 0.0 ? moneyText(row.unitCost) : QString(),
-                            moneyText(row.totalCost), row.purchaseId});
-    }
-    m_periodModel->setSnapshot(period);
-    m_periodTable->setObjectName("inventoryMovementJournal");
-    m_periodTable->setColumnHidden(10, true);
+    m_journal->setRows(snapshot.periodRows);
 
     TabularReadModel purchases;
     purchases.headers = {QStringLiteral("ID"), QString::fromUtf8("Дата"), QString::fromUtf8("Матеріал"),
@@ -672,16 +664,17 @@ void WorkshopInventoryPage::refreshModels()
     TabularReadModel expenses;
     expenses.headers = {QString::fromUtf8("Дата"), QString::fromUtf8("Наряд"), QString::fromUtf8("Авто / клієнт"),
                         QString::fromUtf8("Матеріал"), QString::fromUtf8("Од."), QString::fromUtf8("Кількість"),
-                        QString::fromUtf8("Собівартість"), QString::fromUtf8("Сума")};
+                        QString::fromUtf8("Собівартість"), QString::fromUtf8("Сума"), QStringLiteral("InternalOrder"), QStringLiteral("OrderUid")};
     for (const WorkshopInventoryConsumptionRow& row : snapshot.consumptions) {
         QStringList carAndClientParts;
         if (!row.car.isEmpty()) carAndClientParts.append(row.car);
         if (!row.client.isEmpty()) carAndClientParts.append(row.client);
         expenses.rows.append({row.consumedOn.toString(QStringLiteral("dd.MM.yy")),
                               row.orderNumber > 0 ? QString::number(row.orderNumber) : QString(), carAndClientParts.join(QStringLiteral(" | ")),
-                              row.materialName, row.unit, quantityText(row.quantity), moneyText(row.unitCost), moneyText(row.totalCost)});
+                              row.materialName, row.unit, quantityText(row.quantity), moneyText(row.unitCost), moneyText(row.totalCost), row.internalOrderNumber, row.orderUid});
     }
     m_expensesModel->setSnapshot(expenses);
+    for (int column : {8, 9}) m_expensesTable->setColumnHidden(column, true);
 
     TabularReadModel balance;
     balance.headers = {QString::fromUtf8("Дата"), QString::fromUtf8("Наряд"), QString::fromUtf8("Од"),
@@ -1370,6 +1363,7 @@ void WorkshopInventoryPage::focusPurchase(qint64 purchaseId)
             m_stockTabs->setCurrentIndex(0);
             m_refreshDebounce->stop();
             m_dirty=false;
+            m_spareFilters->reset();
             const auto& rows=m_spareModel->snapshot().rows;
             for(int row=0;row<rows.size();++row) if(rows[row][0].toLongLong()==spare.id) {
                 m_spareTable->selectRow(row);
@@ -1381,6 +1375,7 @@ void WorkshopInventoryPage::focusPurchase(qint64 purchaseId)
     m_stockTabs->setCurrentIndex(1);
     m_refreshDebounce->stop();
     m_dirty=false;
+    m_journal->revealPurchase();
     const auto& rows=m_periodModel->snapshot().rows;
     for(int row=0;row<rows.size();++row) if(rows[row][10].toLongLong()==purchaseId) {
         m_periodTable->selectRow(row);
@@ -1444,14 +1439,14 @@ void WorkshopInventoryPage::openExpenseOrder(int row)
     if (!m_expensesModel) return;
     const TabularReadModel& snapshot = m_expensesModel->snapshot();
     bool validNumber = false;
-    const int orderNumber = cellText(snapshot, row, 1, QString()).toInt(&validNumber);
+    const int orderNumber = cellText(snapshot, row, 8, QString()).toInt(&validNumber);
     if (!validNumber || orderNumber <= 0) {
         showExpenseDetails(row);
         return;
     }
 
     const CurrentOrdersCoordinator::DialogRunResult result =
-        CurrentOrdersCoordinator::openExistingOrderEditor(this, orderNumber, QString());
+        CurrentOrdersCoordinator::openExistingOrderEditor(this, orderNumber, cellText(snapshot, row, 9, QString()));
     if (!result.launched) {
         QMessageBox::warning(this, QString::fromUtf8("Не вдалося відкрити наряд"),
                              result.errorText.trimmed().isEmpty()

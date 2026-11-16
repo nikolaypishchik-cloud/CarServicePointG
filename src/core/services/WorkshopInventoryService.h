@@ -62,6 +62,8 @@ struct WorkshopInventoryConsumptionRow
     double quantity = 0.0;
     double unitCost = 0.0;
     double totalCost = 0.0;
+    int internalOrderNumber = 0;
+    QString orderUid;
 };
 
 struct WorkshopInventoryPeriodRow
@@ -78,6 +80,8 @@ struct WorkshopInventoryPeriodRow
     double totalCost = 0.0;
     qint64 purchaseId = 0;
     double stockValue = 0.0;
+    int internalOrderNumber = 0;
+    QString orderUid;
 };
 
 struct WorkshopInventoryBalanceRow

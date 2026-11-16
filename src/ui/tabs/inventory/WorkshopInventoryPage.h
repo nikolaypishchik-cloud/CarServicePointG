@@ -2,6 +2,8 @@
 
 #include <QWidget>
 
+class MaterialJournalView;
+class SpareStockFilters;
 class QComboBox;
 class QDateEdit;
 class QDoubleSpinBox;
@@ -75,6 +77,8 @@ private:
     QLineEdit* m_supplier = nullptr;
     QPushButton* m_addPurchaseButton = nullptr;
     QPushButton* m_deletePurchaseButton = nullptr;
+    SpareStockFilters* m_spareFilters = nullptr;
+    MaterialJournalView* m_journal = nullptr;
     QTableView* m_periodTable = nullptr;
     QTableView* m_purchasesTable = nullptr;
     QTableView* m_expensesTable = nullptr;
