@@ -1,5 +1,6 @@
 #pragma once
 #include <QSqlDatabase>
+#include <QDate>
 #include <QHash>
 #include <QSet>
 #include <QString>
@@ -15,6 +16,19 @@ struct Result {
 };
 // Reads only recorded customer receipts. Missing history is never inferred.
 Result read(QSqlDatabase db, const QSet<QString>& orderUids);
+struct Payment {
+    QString uid;
+    QDate paidOn;
+    qint64 cents;
+    QString method;
+};
+struct PaymentHistory {
+    QList<Payment> payments;
+    qint64 receivedBefore = 0;
+    bool available = false;
+    QString error;
+};
+PaymentHistory readPeriod(QSqlDatabase db, const QString& orderUid, QDate firstDay, QDate lastDay);
 struct Total {
     qint64 cents = 0;
     QString error;

@@ -50,6 +50,41 @@ Result read(QSqlDatabase db, const QSet<QString>& orderUids) {
     if (query.lastError().isValid()) return fail(query.lastError().text());
     return result;
 }
+PaymentHistory readPeriod(QSqlDatabase db, const QString& orderUid, QDate firstDay, QDate lastDay) {
+    const auto fail = [](QString error) { PaymentHistory failed; failed.error = error; return failed; };
+    if (!db.isValid() || !db.isOpen() || orderUid.trimmed().isEmpty() ||
+        !firstDay.isValid() || !lastDay.isValid() || firstDay > lastDay)
+        return fail(QStringLiteral("Некоректні параметри історії оплат."));
+    QSqlQuery query(db);
+    if (!query.exec("SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='client_payments')")
+        || !query.next()) return fail(query.lastError().text());
+    PaymentHistory history;
+    history.available = query.value(0).toBool();
+    if (!history.available) return history;
+    if (!query.prepare("SELECT payment_uid,paid_on,amount_cents,typeof(amount_cents),method FROM main.client_payments "
+                       "WHERE order_uid=? ORDER BY paid_on,recorded_ms,payment_uid")) return fail(query.lastError().text());
+    query.addBindValue(orderUid);
+    if (!query.exec()) return fail(query.lastError().text());
+    while (query.next()) {
+        const auto day = QDate::fromString(query.value(1).toString(), Qt::ISODate);
+        if (!day.isValid()) return fail(QStringLiteral("В оплаті відсутня коректна дата."));
+        if (day > lastDay) continue;
+        const auto cents = query.value(2).toLongLong();
+        const auto uid = query.value(0).toString();
+        if (uid.trimmed().isEmpty() || query.value(3).toString() != "integer" || cents <= 0)
+            return fail(QStringLiteral("Некоректна ідентичність або сума оплати."));
+        if (day >= firstDay) {
+            history.payments.append({uid, day, cents, query.value(4).toString()});
+        } else {
+            const auto sum = ExactMoney::sum({history.receivedBefore, cents});
+            const auto* value = std::get_if<ExactMoney::Cents>(&sum);
+            if (!value) return fail(QStringLiteral("Переповнення підсумку попередніх оплат."));
+            history.receivedBefore = *value;
+        }
+    }
+    if (query.lastError().isValid()) return fail(query.lastError().text());
+    return history;
+}
 Total total(const QList<qint64>& values) {
     Total result;
     for (const auto value:values) {

@@ -17,6 +17,7 @@
 #include "infrastructure/db/sqlite/Db.h"
 #include "ui/tabs/cloudsync/CloudSyncPage.h"
 #include "core/services/orders/LocalWorkshopBackend.h"
+#include "core/services/orders/ClientReceiptReader.h"
 #include "core/services/orders/OrderClosureJournal.h"
 #include "core/services/orders/BaySnapshot.h"
 #include "core/services/AccessControlService.h"
@@ -68,6 +69,28 @@ private slots:
         QVERIFY(login(db));
     }
     void cleanup(){ActivityAuditService::clearCurrentActor();db.close();db={};QSqlDatabase::removeDatabase(name);}
+    void periodSeparatesPriorReceiptsAndPartialPayments() {
+        const QDate day(2026,11,15);
+        QVERIFY(!ClientReceiptReader::readPeriod(db,"o1",day,day).available);
+        QString error;
+        QVERIFY2(OrderClosureJournal::ensureSchema(db,&error),qPrintable(error));
+        QSqlQuery q(db);
+        QVERIFY(q.exec("INSERT INTO client_payments VALUES "
+                       "('p0','r0','o1',100,'cash','2026-11-14','a',5),"
+                       "('p1','r1','o1',200,'card','2026-11-15','a',2),"
+                       "('p2','r2','o1',200,'cash','2026-11-15','a',3),"
+                       "('p3','r3','o1',300,'cash','2026-11-16','a',1),"
+                       "('p4','r4','o2',400,'cash','2026-11-15','a',4)"));
+        QVERIFY(q.exec("PRAGMA query_only=1"));
+        const auto result=ClientReceiptReader::readPeriod(db,"o1",day,day);
+        QVERIFY2(result.error.isEmpty(),qPrintable(result.error));
+        QVERIFY(result.available);
+        QCOMPARE(result.receivedBefore,100);
+        QCOMPARE(result.payments.size(),2);
+        QCOMPARE(result.payments[0].uid,QStringLiteral("p1"));
+        QCOMPARE(result.payments[1].uid,QStringLiteral("p2"));
+        QCOMPARE(result.payments[0].cents+result.payments[1].cents,400);
+    }
     void payments_data(){QTest::addColumn<qint64>("amount");QTest::newRow("none")<<qint64(-1);QTest::newRow("partial")<<qint64(200000);QTest::newRow("full")<<qint64(500000);}
     void payments() {
         QFETCH(qint64,amount);const auto before=suppliers(db);const auto c=command(db,"o1",amount);
