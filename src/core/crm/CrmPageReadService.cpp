@@ -179,12 +179,15 @@ Rows statementPartHistory(const QString& clientUid, const QString& vehicleUid, Q
             "m.id,p.car,p.visible,'issue',m.id FROM workshop_spare_movements m JOIN positions p "
             "ON p.id=m.part_id AND p.order_number=m.order_number WHERE m.operation='issue' ");
         if (tableOrViewExists(db,QStringLiteral("workshop_spare_orders"))) {
+            const QString links=QStringLiteral(
+                " FROM positions p JOIN (SELECT part_id,order_number,spare_id,min(id) AS issue_id "
+                "FROM workshop_spare_movements WHERE operation='issue' GROUP BY part_id,order_number,spare_id) link "
+                "ON link.part_id=p.id AND link.order_number=p.order_number JOIN workshop_spare_orders s ON s.id=link.spare_id ");
+            sql += QStringLiteral("UNION ALL SELECT s.ordered_on,p.name,NULL,NULL,p.order_uid,p.part_uid,"
+                "s.id,p.car,p.visible,'batch_order',link.issue_id") + links + QStringLiteral("WHERE trim(s.ordered_on)<>'' ");
             sql += QStringLiteral("UNION ALL SELECT r.moved_on,p.name,NULL,r.actor,p.order_uid,p.part_uid,"
-                "r.id,p.car,p.visible,'batch_receipt',link.issue_id FROM positions p JOIN "
-                "(SELECT i.part_id,i.order_number,i.spare_id,min(i.id) AS issue_id FROM workshop_spare_movements i "
-                "JOIN workshop_spare_orders s ON s.id=i.spare_id WHERE i.operation='issue' "
-                "GROUP BY i.part_id,i.order_number,i.spare_id) link ON link.part_id=p.id AND link.order_number=p.order_number "
-                "JOIN workshop_spare_movements r ON r.spare_id=link.spare_id AND r.operation='receipt' ");
+                "r.id,p.car,p.visible,'batch_receipt',link.issue_id") + links +
+                QStringLiteral("JOIN workshop_spare_movements r ON r.spare_id=link.spare_id AND r.operation='receipt' ");
         }
     }
     sql += QStringLiteral(") SELECT * FROM events WHERE substr(event_date,1,10) BETWEEN ? AND ? "

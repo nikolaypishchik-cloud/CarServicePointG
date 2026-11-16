@@ -225,18 +225,21 @@ void MainWindow::openHeaderStatements()
                 issues->insertRow(row);
                 const bool issued = event[9].toString()=="issue";
                 const bool batchReceipt = event[9].toString()=="batch_receipt";
+                const bool batchOrder = event[9].toString()=="batch_order";
                 QString sourceName = tr("Позиція наряду №%1");
+                if (batchOrder) sourceName=tr("Складське замовлення №%1");
                 if (issued) sourceName = tr("Складська видача №%1");
                 if (batchReceipt) sourceName = tr("Надходження партії №%1");
                 for (int c=0;c<9;++c) {
                     auto text = c==6 ? sourceName.arg(event[c].toString()) : event[c].toString();
-                    if (c==2 && batchReceipt) text = tr("не встановлено");
+                    if (c==2 && (batchReceipt || batchOrder)) text = tr("не встановлено");
                     issues->setItem(row,c,new QTableWidgetItem(text.isEmpty()?tr("Немає даних"):text));
                 }
-                if (issued || batchReceipt) issues->item(row,6)->setData(Qt::UserRole,event[10]);
+                if (issued || batchReceipt || batchOrder) issues->item(row,6)->setData(Qt::UserRole,event[10]);
+                if (batchOrder) issues->item(row,6)->setData(Qt::UserRole+2,event[6]);
                 if (batchReceipt) issues->item(row,6)->setData(Qt::UserRole+1,event[6]);
                 issues->item(row,4)->setData(Qt::UserRole,event[4]);
-                const auto operation = batchReceipt ? tr("Надходження партії") : issued ? tr("Видано зі складу") : tr("Встановлено");
+                const auto operation = batchOrder ? tr("Замовлено партію") : batchReceipt ? tr("Надходження партії") : issued ? tr("Видано зі складу") : tr("Встановлено");
                 issues->setItem(row,9,new QTableWidgetItem(operation));
             }
             message->setText(events.isEmpty()?tr("Збережених подій за цей період немає."):QString());
@@ -332,6 +335,7 @@ void MainWindow::openHeaderStatements()
         const auto* source=issues->item(issues->currentRow(),6);
         sourceButton->setText(source && source->data(Qt::UserRole+1).isValid()
             ? tr("Первинне надходження") : tr("Первинна видача"));
+        if (source && source->data(Qt::UserRole+2).isValid()) sourceButton->setText(tr("Первинне замовлення"));
         sourceButton->setVisible(tabs->currentWidget()==issues && !issues->selectedItems().isEmpty()
                                  && source && source->data(Qt::UserRole).isValid());
     });
@@ -341,6 +345,11 @@ void MainWindow::openHeaderStatements()
         const auto source=CrmPageReadService::statementIssueSource(client->currentData().toString(),issues->item(row,4)->text(),
             issues->item(row,5)->text(),issues->item(row,6)->data(Qt::UserRole).toLongLong());
         if (!source.error.isEmpty()) { message->setText(source.error); return; }
+        const auto batchOrderId=issues->item(row,6)->data(Qt::UserRole+2);
+        if (batchOrderId.isValid() && batchOrderId.toLongLong()!=source.issue.value("reserve_id").toLongLong()) {
+            message->setText(tr("Зв’язок із первинним замовленням більше не підтверджено."));
+            return;
+        }
         const auto receiptId = issues->item(row,6)->data(Qt::UserRole+1);
         if (receiptId.isValid()) {
             for (const auto& receipt : source.receipts) {
@@ -367,7 +376,8 @@ void MainWindow::openHeaderStatements()
         auto* card=new QDialog(dialog);
         card->setAttribute(Qt::WA_DeleteOnClose);
         card->setObjectName("statementIssueSource");
-        card->setWindowTitle(tr("Складська видача №%1").arg(source.issue.value("issue_id").toString()));
+        card->setWindowTitle(batchOrderId.isValid()?tr("Складське замовлення №%1").arg(batchOrderId.toString())
+            :tr("Складська видача №%1").arg(source.issue.value("issue_id").toString()));
         auto* body=new QVBoxLayout(card);
         auto* fields=new QFormLayout;
         body->addLayout(fields);
@@ -382,9 +392,11 @@ void MainWindow::openHeaderStatements()
         field(tr("Резерв №"),"reserve_id");
         field(tr("Замовлено"),"ordered_on");
         field(tr("Очікуване надходження (план)"),"expected_on");
-        field(tr("Видано за нарядом"),"moved_on");
-        field(tr("Кількість видачі"),"issued");
-        field(tr("Видав"),"actor");
+        if (!batchOrderId.isValid()) {
+            field(tr("Видано за нарядом"),"moved_on");
+            field(tr("Кількість видачі"),"issued");
+            field(tr("Видав"),"actor");
+        }
         body->addWidget(new QLabel(tr("Фактичні надходження всього резерву"),card));
         auto* receipts=new QTableWidget(source.receipts.size(),4,card);
         receipts->setEditTriggers(QAbstractItemView::NoEditTriggers);

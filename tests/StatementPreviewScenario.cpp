@@ -199,6 +199,25 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     const auto savedFrom=date->date();
     date->setDate(QDate(2026,10,1));
     generate->click();
+    int orderRows=0;
+    for (int i=0;i<issues->rowCount();++i) {
+        if (issues->item(i,6)->text()!=QStringLiteral("Складське замовлення №101")) continue;
+        ++orderRows;
+        QCOMPARE(issues->item(i,0)->text(),QStringLiteral("2026-10-01"));
+        QCOMPARE(issues->item(i,2)->text(),QStringLiteral("не встановлено"));
+        QCOMPARE(issues->item(i,9)->text(),QStringLiteral("Замовлено партію"));
+        issues->setCurrentCell(i,0);
+        QCOMPARE(showSource->text(),QStringLiteral("Первинне замовлення"));
+        showSource->click();
+        auto* card=qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        if (!card) {
+            for (auto* candidate:dialog->findChildren<QDialog*>())
+                if (candidate->isVisible() && candidate->windowTitle()==QStringLiteral("Складське замовлення №101")) card=candidate;
+        }
+        QVERIFY(card && card->windowTitle()==QStringLiteral("Складське замовлення №101"));
+        card->close();
+    }
+    QCOMPARE(orderRows,1);
     int receiptRow=-1;
     for (int i=0;i<issues->rowCount();++i)
         if (issues->item(i,6)->text()==QStringLiteral("Надходження партії №16")) receiptRow=i;
