@@ -3,6 +3,7 @@
 #include "core/services/orders/PartImportTextSupport.h"
 
 #include <QtGlobal>
+#include "core/util/FormatUtils.h"
 
 namespace ReportsPdfPeriodSupport {
 
@@ -13,14 +14,14 @@ PeriodVisibleTotals collectVisibleTotals(const QList<ReportsPdfSupport::PeriodPd
 {
     PeriodVisibleTotals totals;
     for (const auto& row : rows) {
-        totals.partsTotal += qRound64(row.partsPrice);
-        totals.worksTotal += qRound64(row.worksPrice);
-        totals.partsMargin += qRound64(row.added);
-        totals.grandTotal += qRound64(row.total);
+        totals.partsTotal += qRound64(row.partsPrice*100);
+        totals.worksTotal += qRound64(row.worksPrice*100);
+        totals.partsMargin += qRound64(row.added*100);
+        totals.grandTotal += qRound64(row.total*100);
     }
-    totals.outsourceMargin = qRound64(outsourceMargin);
-    totals.salaryTotal = qRound64(salaryTotal);
-    totals.expensesTotal = qRound64(expensesTotal);
+    totals.outsourceMargin = qRound64(outsourceMargin*100);
+    totals.salaryTotal = qRound64(salaryTotal*100);
+    totals.expensesTotal = qRound64(expensesTotal*100);
     totals.totalMargin = (totals.worksTotal + totals.partsMargin + totals.outsourceMargin)
         - (totals.salaryTotal + totals.expensesTotal);
     return totals;
@@ -56,10 +57,10 @@ QVector<QStringList> buildPeriodRowCells(const QList<ReportsPdfSupport::PeriodPd
             PartImportTextSupport::translateTechnicalRuToUa(row.workTitle),
             PartImportTextSupport::normalizePartName(row.partName),
             row.qty,
-            QString::number(qRound64(row.partsPrice)),
-            QString::number(qRound64(row.added)),
-            QString::number(qRound64(row.worksPrice)),
-            QString::number(qRound64(row.total))
+            FormatUtils::money(row.partsPrice,2),
+            FormatUtils::money(row.added,2),
+            FormatUtils::money(row.worksPrice,2),
+            FormatUtils::money(row.total,2)
         });
     }
     return out;

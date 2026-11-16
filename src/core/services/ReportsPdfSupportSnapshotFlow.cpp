@@ -158,8 +158,9 @@ bool isMotorOilName(QString name)
 
 QList<PeriodPdfRow> collectPeriodPdfRows(const QString& df, const QString& dt,
                                          double& partsTotal, double& worksTotal, double& partsMargin,
-                                         double& outsourceMargin, double& salaryTotal, double& expensesTotal, QString* error)
+                                         double& outsourceMargin, double& salaryTotal, double& expensesTotal, QString* error, PeriodSummary* summary)
 {
+    if (summary) *summary={};
     QList<PeriodPdfRow> out;
     partsTotal = worksTotal = partsMargin = outsourceMargin = salaryTotal = expensesTotal = 0.0;
     if(error)error->clear();
@@ -172,9 +173,38 @@ QList<PeriodPdfRow> collectPeriodPdfRows(const QString& df, const QString& dt,
     ReportMarkupSnapshot markupSnapshot;markupSnapshot.policy=PartMarkupPolicyService::loadPolicySnapshot(db,&failure);
     if(!failure.isEmpty())return reject(failure);
     PeriodReportGraph::Graph graph;
-    if(!PeriodReportGraph::read(db,df,dt,&graph,&failure))return reject(failure);
+    const auto first=QDate::fromString(df,Qt::ISODate);
+    const auto start=summary ? first.addDays(-28).toString(Qt::ISODate) : df;
+    if(!PeriodReportGraph::read(db,start,dt,&graph,&failure,summary!=nullptr))return reject(failure);
     const auto assembled=PeriodReportRows::build(graph,markupSnapshot);
     out=assembled.rows;partsTotal=assembled.parts;worksTotal=assembled.works;partsMargin=assembled.margin;
+    if (summary) {
+        QHash<QString,PeriodAmount> amounts;
+        QSet<QString> selected;
+        for (const auto& row : out) {
+            auto& value=amounts[row.orderUid];
+            value.works+=qRound64(row.worksPrice*100);
+            value.parts+=qRound64(row.partsPrice*100);
+        }
+        for (const auto& order : graph.orders) {
+            const auto day=DateFormats::parseDate(order[7].toString());
+            if (!day.isValid()) return reject(QStringLiteral("Некоректна дата наряду"));
+            const auto uid=order[6].toString();
+            auto amount=amounts.value(uid);
+            amount.count=1;
+            summary->days[day].add(amount);
+            if (day<first) continue;
+            selected.insert(uid);
+            summary->masters[{order[9].toString().trimmed(),order[8].toString()}].add(amount);
+        }
+        out.removeIf([&](const PeriodPdfRow& row){return !selected.contains(row.orderUid);});
+        partsTotal=worksTotal=partsMargin=0;
+        for (const auto& row : out) {
+            partsTotal+=row.partsPrice;
+            worksTotal+=row.worksPrice;
+            partsMargin+=row.added;
+        }
+    }
     QSqlQuery oq(Database::db());
     oq.prepare(QStringLiteral("SELECT COALESCE(SUM(client_price - company_price),0), COALESCE(SUM(company_price),0) FROM outsource_jobs WHERE date((CASE WHEN substr(trim(sent_date),3,1)='.' AND substr(trim(sent_date),6,1)='.' THEN CASE WHEN substr(trim(sent_date),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(sent_date),7,4) ELSE '20'||substr(trim(sent_date),7,2) END||'-'||substr(trim(sent_date),4,2)||'-'||substr(trim(sent_date),1,2) ELSE sent_date END)) >= date(?) AND date((CASE WHEN substr(trim(sent_date),3,1)='.' AND substr(trim(sent_date),6,1)='.' THEN CASE WHEN substr(trim(sent_date),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(sent_date),7,4) ELSE '20'||substr(trim(sent_date),7,2) END||'-'||substr(trim(sent_date),4,2)||'-'||substr(trim(sent_date),1,2) ELSE sent_date END)) <= date(?)"));
     oq.addBindValue(df); oq.addBindValue(dt);

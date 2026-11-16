@@ -143,7 +143,8 @@ bool renderPeriodPdf(const QDate& fromDate, const QDate& toDate, ExportResult* r
     timer.start();
     double partsTotal = 0.0, worksTotal = 0.0, partsMargin = 0.0, outsourceMargin = 0.0, salaryTotal = 0.0, expensesTotal = 0.0;
     QString readError;
-    const auto rows = ReportsPdfSupport::collectPeriodPdfRows(df, dt, partsTotal, worksTotal, partsMargin, outsourceMargin, salaryTotal, expensesTotal,&readError);
+    ReportsPdfSupport::PeriodSummary summary;
+    const auto rows = ReportsPdfSupport::collectPeriodPdfRows(df, dt, partsTotal, worksTotal, partsMargin, outsourceMargin, salaryTotal, expensesTotal,&readError,&summary);
     if(!readError.isEmpty()){if(result){result->success=false;result->path=path;result->errorText=readError;result->reportKind="period";result->recordCount=0;}return false;}
     if (result) {
         result->reportKind = QStringLiteral("period");
@@ -165,15 +166,10 @@ bool renderPeriodPdf(const QDate& fromDate, const QDate& toDate, ExportResult* r
         .arg(fromDate.toString(QStringLiteral("dd.MM.yy")), toDate.toString(QStringLiteral("dd.MM.yy")));
 
     const auto visibleTotals = ReportsPdfPeriodSupport::collectVisibleTotals(rows, outsourceMargin, salaryTotal, expensesTotal);
-    const auto rawRowCells = ReportsPdfPeriodSupport::buildPeriodRowCells(rows);
-    QList<QStringList> formattedRowCells;
-    formattedRowCells.reserve(rawRowCells.size());
-    for (const auto& rawCells : rawRowCells) {
-        QStringList cells = rawCells;
-        for (int i : {7, 8, 9, 10}) cells[i] = money0(cells[i].toLongLong());
-        formattedRowCells.push_back(cells);
-    }
+    const auto formattedRowCells = ReportsPdfPeriodSupport::buildPeriodRowCells(rows);
 
+    ReportsPdfPeriodPageSupport::renderSummary(pdf,p,th,fromDate,toDate,summary);
+    pdf.newPage();
     ReportsPdfPeriodPageSupport::renderPeriodPage(
         pdf,
         p,

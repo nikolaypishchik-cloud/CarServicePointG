@@ -752,6 +752,34 @@ private slots:
         QCOMPARE(exported.recordCount,2);
         const auto evidence=qEnvironmentVariable("CS_PERIOD_SCOPE_PDF");
         if (!evidence.isEmpty()) QVERIFY(QFile::copy(exported.path,evidence));
+        QVERIFY(q.exec("UPDATE work_orders SET opened_at='2026-01-01',master_name_closed='Master B' WHERE number=12"));
+        QVERIFY(q.exec("UPDATE work_orders SET master_name_closed='Master A' WHERE number=11"));
+        QVERIFY(q.exec("INSERT INTO work_orders(number,order_uid,order_number,order_year,opened_at,status,plate,plate_norm,car,client,master_id) VALUES"
+                       "(21,'baseline',21,2025,'2025-12-25','open','','','Past','','m1'),"
+                       "(22,'wrong-day',22,2025,'2025-12-27','open','','','Saturday','','m1'),"
+                       "(23,'zero',23,2025,'2025-12-19','open','','','Zero','','m1'),"
+                       "(24,'fourth',24,2025,'2025-12-05','open','','','Fourth','','m1')"));
+        QVERIFY(q.exec("INSERT INTO work_order_services(id,order_number,order_uid,service_uid,title,qty,price,amount) VALUES"
+                       "(32,12,'pdf-second','second-service','Second',1,54.75,54.75),"
+                       "(33,21,'baseline','first-prior','Prior',1,100,100),"
+                       "(34,22,'wrong-day','weekend','Weekend',1,999,999),"
+                       "(35,24,'fourth','fourth-prior','Fourth',1,80,80)"));
+        QVERIFY2(ReportsPdfRenderer::renderPeriodPdf(QDate(2026,1,1),QDate(2026,1,2),&exported),qPrintable(exported.errorText));
+        QCOMPARE(exported.recordCount,2);
+        ReportsPdfSupport::PeriodSummary summary;
+        const auto detail=ReportsPdfSupport::collectPeriodPdfRows("2026-01-01","2026-01-02",parts,works,margin,outsource,salary,expenses,&error,&summary);
+        QVERIFY2(error.isEmpty(),qPrintable(error));
+        QCOMPARE(detail.size(),2);
+        QCOMPARE(summary.days.value(QDate(2026,1,1)).total(),5475);
+        QCOMPARE(summary.days.value(QDate(2026,1,2)).total(),14525);
+        QCOMPARE(summary.masters.size(),2);
+        QCOMPARE(summary.masters.value(qMakePair(QStringLiteral("Master A"),QStringLiteral("m1"))).total(),14525);
+        QCOMPARE(summary.days.value(QDate(2025,12,25)).total(),10000);
+        QCOMPARE(summary.days.value(QDate(2025,12,19)).count,1);
+        QCOMPARE(summary.days.value(QDate(2025,12,12)).count,0);
+        QCOMPARE(summary.days.value(QDate(2025,12,5)).total(),8000);
+        const auto sample=qEnvironmentVariable("CS_PERIOD_SUMMARY_PDF");
+        if (!sample.isEmpty()) QVERIFY(QFile::copy(exported.path,sample));
     }
     void reportDetailAndElectricityReadFailures() {
         QString error;QVERIFY2(PayrollReadFixture::schema(db,&error),qPrintable(error));QVERIFY2(PayrollReadFixture::populate(db,&error),qPrintable(error));QSqlQuery q(db);

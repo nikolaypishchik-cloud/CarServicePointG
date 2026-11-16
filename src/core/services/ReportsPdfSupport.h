@@ -3,6 +3,7 @@
 #include "core/services/orders/PartMarkupPolicyService.h"
 
 #include <QList>
+#include <QDate>
 #include <QMap>
 #include <QString>
 
@@ -10,7 +11,22 @@
 
 namespace ReportsPdfSupport {
 
+struct PeriodAmount {
+    int count = 0;
+    qint64 works = 0, parts = 0; // kopecks
+    void add(const PeriodAmount& other) {
+        count += other.count;
+        works += other.works;
+        parts += other.parts;
+    }
+    qint64 total() const { return works + parts; }
+};
+struct PeriodSummary {
+    QMap<QDate,PeriodAmount> days;
+    QMap<QPair<QString,QString>,PeriodAmount> masters;
+};
 struct PeriodPdfRow {
+    QString orderUid;
     QString date;
     QString orderNumber;
     QString car;
@@ -112,7 +128,7 @@ PartPeriodTotals collectClosedPartFinancialTotalsForReports(const QString& df, c
 
 QList<PeriodPdfRow> collectPeriodPdfRows(const QString& df, const QString& dt,
                                          double& partsTotal, double& worksTotal, double& partsMargin,
-                                         double& outsourceMargin, double& salaryTotal, double& expensesTotal, QString* error = nullptr);
+                                         double& outsourceMargin, double& salaryTotal, double& expensesTotal, QString* error = nullptr, PeriodSummary* summary = nullptr);
 QMap<QString, QList<PartPdfRow>> collectPartsPdfGroups(const QString& df, const QString& dt, QString* error = nullptr);
 QMap<QString, QList<OutsourcePdfRow>> collectOutsourceGroups(const QString& df, const QString& dt,
                                                              int& count, double& repairTotal, double& clientTotal, QString* error = nullptr);

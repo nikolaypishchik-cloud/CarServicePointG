@@ -22,7 +22,7 @@ inline Result build(const PeriodReportGraph::Graph& graph,const ReportsPdfSuppor
     };
     for(const auto& ord:graph.orders) {
         const QString orderUid=ord.value(6).toString();
-        const QString orderNumber=ord.value(1).toString(),car=ord.value(2).toString(),plate=formatPlateForUi(ord.value(3).toString()),orderDate=ord.value(4).toString();
+        const QString orderNumber=ord.value(1).toString(),car=ord.value(2).toString(),plate=formatPlateForUi(ord.value(3).toString()),orderDate=ord.value(7).toString();
         QList<ServiceRow> services;for(const auto& row:graph.services.value(orderUid))services.append({row.value(0).toInt(),row.value(1).toString(),row.value(2).toDouble()});
         QList<PartRow> parts;
         for(const auto& qp:graph.parts.value(orderUid)) {
@@ -45,7 +45,7 @@ inline Result build(const PeriodReportGraph::Graph& graph,const ReportsPdfSuppor
             pr.serviceId = qp.value(9).toInt();
             parts.append(pr);
         }
-        if (services.isEmpty() && parts.isEmpty()) { PeriodPdfRow r; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; out.append(r); continue; }
+        if (services.isEmpty() && parts.isEmpty()) { PeriodPdfRow r; r.orderUid=orderUid; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; out.append(r); continue; }
         for (const ServiceRow& service : services) {
             QList<int> matched;
             for (int i=0;i<parts.size();++i) if (!parts[i].assigned && parts[i].serviceId>0 && parts[i].serviceId==service.id) matched.append(i);
@@ -55,12 +55,12 @@ inline Result build(const PeriodReportGraph::Graph& graph,const ReportsPdfSuppor
                 std::sort(scored.begin(), scored.end(), [](const auto& a,const auto& b){ return a.first>b.first; });
                 for (const auto& pair : scored) matched.append(pair.second);
             }
-            if (matched.isEmpty()) { PeriodPdfRow r; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; r.workTitle=service.title; r.worksPrice=service.amount; r.total=service.amount; out.append(r); worksTotal += service.amount; continue; }
+            if (matched.isEmpty()) { PeriodPdfRow r; r.orderUid=orderUid; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; r.workTitle=service.title; r.worksPrice=service.amount; r.total=service.amount; out.append(r); worksTotal += service.amount; continue; }
             bool first=true; double partsSum=0.0; double addedSum=0.0;
-            for (int idx : matched) { auto &pr=parts[idx]; pr.assigned=true; PeriodPdfRow r; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; if(first){ r.workTitle=service.title; r.worksPrice=service.amount; first=false; } r.partName=pr.name; r.qty=pr.qty; r.partsPrice=pr.clientAmount; r.added=pr.added; partsSum+=pr.clientAmount; addedSum+=pr.added; r.total=r.worksPrice + r.partsPrice; out.append(r); }
+            for (int idx : matched) { auto &pr=parts[idx]; pr.assigned=true; PeriodPdfRow r; r.orderUid=orderUid; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; if(first){ r.workTitle=service.title; r.worksPrice=service.amount; first=false; } r.partName=pr.name; r.qty=pr.qty; r.partsPrice=pr.clientAmount; r.added=pr.added; partsSum+=pr.clientAmount; addedSum+=pr.added; r.total=r.worksPrice + r.partsPrice; out.append(r); }
             worksTotal += service.amount; partsTotal += partsSum; partsMargin += addedSum;
         }
-        for (auto &pr : parts) if (!pr.assigned) { PeriodPdfRow r; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; r.partName=pr.name; r.qty=pr.qty; r.partsPrice=pr.clientAmount; r.added=pr.added; r.total=pr.clientAmount; out.append(r); partsTotal += pr.clientAmount; partsMargin += pr.added; }
+        for (auto &pr : parts) if (!pr.assigned) { PeriodPdfRow r; r.orderUid=orderUid; r.date=ReportsDateUtils::displayDate(orderDate); r.orderNumber=orderNumber; r.car=car; r.plate=plate; r.partName=pr.name; r.qty=pr.qty; r.partsPrice=pr.clientAmount; r.added=pr.added; r.total=pr.clientAmount; out.append(r); partsTotal += pr.clientAmount; partsMargin += pr.added; }
     }
     return result;
 }
