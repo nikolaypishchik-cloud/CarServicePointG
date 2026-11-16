@@ -19,6 +19,22 @@
 #include "core/services/ActivityAuditService.h"
 #include "ui/main/MainWindow.h"
 
+static void saveStatementPreview(QDialog* preview,QPushButton* save,const QString& path,const char* evidenceVariable) {
+    const bool nativeDisabled=QApplication::testAttribute(Qt::AA_DontUseNativeDialogs);
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs,true);
+    save->click();
+    auto* files=preview->findChild<QFileDialog*>();
+    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs,nativeDisabled);
+    QVERIFY(files);
+    files->selectFile(path);
+    QVERIFY(QMetaObject::invokeMethod(files,"accept",Qt::DirectConnection));
+    QFile saved(path);
+    QVERIFY(saved.open(QIODevice::ReadOnly));
+    QVERIFY(saved.read(5)=="%PDF-");
+    const auto evidence=qEnvironmentVariable(evidenceVariable);
+    if (!evidence.isEmpty()) QVERIFY(QFile::copy(path,evidence));
+}
+
 void checkStatementApprovalAndPreview(QSqlDatabase db) {
     QSqlQuery q(db);
     QVERIFY(q.exec("ALTER TABLE work_orders ADD COLUMN client_uid TEXT"));
@@ -81,19 +97,7 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     QVERIFY(!QFileInfo::exists(path));
     auto* save=button(QStringLiteral("Зберегти PDF"));
     QVERIFY(save);
-    const bool nativeDisabled=QApplication::testAttribute(Qt::AA_DontUseNativeDialogs);
-    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs,true);
-    save->click();
-    auto* files=preview->findChild<QFileDialog*>();
-    QApplication::setAttribute(Qt::AA_DontUseNativeDialogs,nativeDisabled);
-    QVERIFY(files);
-    files->selectFile(path);
-    QVERIFY(QMetaObject::invokeMethod(files,"accept",Qt::DirectConnection));
-    QFile saved(path);
-    QVERIFY(saved.open(QIODevice::ReadOnly));
-    QVERIFY(saved.read(5)=="%PDF-");
-    const auto evidence=qEnvironmentVariable("CS_STATEMENT_PDF_EVIDENCE");
-    if (!evidence.isEmpty()) QVERIFY(QFile::copy(path,evidence));
+    saveStatementPreview(preview,save,path,"CS_STATEMENT_PDF_EVIDENCE");
     preview->close();
     auto* date=dialog->findChild<QDateEdit*>();
     QVERIFY(date);
@@ -182,14 +186,45 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     q.prepare("INSERT INTO client_payments VALUES('receiptx','order-a',?,1,'cash',12500)");
     q.addBindValue(day.toString(Qt::ISODate));
     QVERIFY(q.exec());
+    QVERIFY(q.exec("CREATE TABLE order_closure_commands(request_uid TEXT,order_uid TEXT,state TEXT,response_json TEXT)"));
+    QJsonObject order{{"order_uid","order-a"},{"closed_at",day.toString(Qt::ISODate)+"T12:00:00+02:00"}};
+    QJsonObject closure{{"order_uid","order-a"},{"order",order},{"total_cents",45000}};
+    q.prepare("INSERT INTO order_closure_commands VALUES('close-a','order-a','applied',?)");
+    q.addBindValue(QString::fromUtf8(QJsonDocument(closure).toJson()));
+    QVERIFY(q.exec());
+    q.prepare("INSERT INTO client_payments VALUES('prior','order-a',?,1,'cash',2500)");
+    q.addBindValue(date->date().addDays(-1).toString(Qt::ISODate));
+    QVERIFY(q.exec());
     auto* financial=dialog->findChild<QTableWidget*>("statementFinances");
     QVERIFY(financial);
     tabs->setCurrentWidget(financial);
     generate->click();
-    QCOMPARE(financial->rowCount(),1);
-    QCOMPARE(financial->item(0,1)->data(Qt::UserRole).toString(),QStringLiteral("order-a"));
-    QCOMPARE(financial->item(0,3)->data(Qt::UserRole).toString(),QStringLiteral("receiptx"));
-    QCOMPARE(financial->item(0,5)->text(),QStringLiteral("125,00 грн"));
-    QCOMPARE(financial->item(0,6)->text(),QStringLiteral("-125,00 грн"));
-    QVERIFY(pdf->isEnabled());
+    QCOMPARE(financial->rowCount(),2);
+    QCOMPARE(financial->item(0,4)->text(),QStringLiteral("450,00 грн"));
+    QCOMPARE(financial->item(0,6)->text(),QStringLiteral("425,00 грн"));
+    QCOMPARE(financial->item(1,3)->data(Qt::UserRole).toString(),QStringLiteral("receiptx"));
+    QCOMPARE(financial->item(1,5)->text(),QStringLiteral("125,00 грн"));
+    QCOMPARE(financial->item(1,6)->text(),QStringLiteral("300,00 грн"));
+    auto* totals=dialog->findChild<QLabel*>("statementFinancialTotals");
+    QVERIFY(totals && totals->isVisibleTo(dialog));
+    const auto generated=totals->text();
+    QVERIFY(generated.contains("На початок -25,00 грн"));
+    QVERIFY(generated.contains("На кінець 300,00 грн"));
+    QVERIFY(q.exec("UPDATE client_payments SET amount_cents=99999 WHERE payment_uid='receiptx'"));
+    QVERIFY(q.exec("UPDATE work_orders SET client_uid='another-client' WHERE order_uid='order-a'"));
+    financial->setCurrentCell(0,0);
+    open->click();
+    QCOMPARE(totals->text(),generated);
+    pdf->click();
+    auto* financialPreview=qobject_cast<QDialog*>(QApplication::activeModalWidget());
+    QVERIFY(financialPreview && financialPreview!=preview);
+    auto* snapshot=financialPreview->findChild<QTextDocument*>(QString(),Qt::FindDirectChildrenOnly);
+    QVERIFY(snapshot && snapshot->toPlainText().contains(generated));
+    QVERIFY(!snapshot->toPlainText().contains("999,99"));
+    QPushButton* exportButton=nullptr;
+    for (auto* item:financialPreview->findChildren<QPushButton*>())
+        if (item->text()==QStringLiteral("Зберегти PDF")) exportButton=item;
+    QVERIFY(exportButton);
+    saveStatementPreview(financialPreview,exportButton,output.filePath("financial.pdf"),"CS_FINANCIAL_PDF_EVIDENCE");
+    financialPreview->close();
 }

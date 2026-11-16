@@ -28,7 +28,7 @@ void previewStatement(QWidget* parent, const QString& title, const QString& cont
     preview->setWindowTitle(QObject::tr("Попередній перегляд виписки"));
     auto* layout = new QVBoxLayout(preview);
     auto* document = new QTextDocument(preview);
-    QString html = QStringLiteral("<h1>%1</h1><p>%2</p><table border='1' cellspacing='0' cellpadding='4'><thead><tr>")
+    QString html = QStringLiteral("<h1>%1</h1><p>%2</p><table width='100%' border='1' cellspacing='0' cellpadding='4'><thead><tr>")
         .arg(title.toHtmlEscaped(),context.toHtmlEscaped());
     for (int c=0; c<table.columnCount(); ++c)
         html += "<th>" + table.horizontalHeaderItem(c)->text().toHtmlEscaped() + "</th>";
@@ -43,7 +43,8 @@ void previewStatement(QWidget* parent, const QString& title, const QString& cont
     if (!table.rowCount()) html += QObject::tr("<p>За обраними параметрами записів немає.</p>");
     document->setHtml(html);
     auto printer = std::make_shared<QPrinter>(QPrinter::HighResolution);
-    printer->setPageSize(QPageSize(QPageSize::A4));
+    const QPageLayout page(QPageSize(QPageSize::A4),table.columnCount()>=7?QPageLayout::Landscape:QPageLayout::Portrait,QMarginsF(12,12,12,12));
+    printer->setPageLayout(page);
     auto* pages = new QPrintPreviewWidget(printer.get(),preview);
     layout->addWidget(pages);
     QObject::connect(pages,&QPrintPreviewWidget::paintRequested,pages,[document,printer](QPrinter* device) {
@@ -55,25 +56,25 @@ void previewStatement(QWidget* parent, const QString& title, const QString& cont
     auto* save = new QPushButton(QObject::tr("Зберегти PDF"),preview);
     actions->addWidget(print);
     actions->addWidget(save);
-    QObject::connect(print,&QPushButton::clicked,preview,[preview,document] {
+    QObject::connect(print,&QPushButton::clicked,preview,[preview,document,page] {
         QPrinter device(QPrinter::HighResolution);
-        device.setPageSize(QPageSize(QPageSize::A4));
+        device.setPageLayout(page);
         QPrintDialog settings(&device,preview);
         if (settings.exec()==QDialog::Accepted) document->print(&device);
     });
-    QObject::connect(save,&QPushButton::clicked,preview,[preview,document] {
+    QObject::connect(save,&QPushButton::clicked,preview,[preview,document,page] {
         auto* files = new QFileDialog(preview,QObject::tr("Зберегти виписку"));
         files->setAttribute(Qt::WA_DeleteOnClose);
         files->setAcceptMode(QFileDialog::AcceptSave);
         files->setNameFilter("PDF (*.pdf)");
         files->setDefaultSuffix("pdf");
         files->selectFile("Виписка.pdf");
-        QObject::connect(files,&QFileDialog::fileSelected,preview,[preview,document](const QString& path) {
+        QObject::connect(files,&QFileDialog::fileSelected,preview,[preview,document,page](const QString& path) {
             QSaveFile file(path);
             if (file.open(QIODevice::WriteOnly)) {
                 {
                     QPdfWriter pdf(&file);
-                    pdf.setPageSize(QPageSize(QPageSize::A4));
+                    pdf.setPageLayout(page);
                     document->print(&pdf);
                 }
                 if (file.size()>0 && file.commit()) return;
@@ -144,6 +145,11 @@ void MainWindow::openHeaderStatements()
     table->setSelectionBehavior(QAbstractItemView::SelectRows);
     table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->horizontalHeader()->setStretchLastSection(true);
+    auto* summary = new QLabel(dialog);
+    summary->setObjectName("statementFinancialTotals");
+    summary->setWordWrap(true);
+    summary->hide();
+    layout->addWidget(summary);
     auto* message = new QLabel(dialog);
     message->setWordWrap(true);
     layout->addWidget(message);
@@ -156,13 +162,15 @@ void MainWindow::openHeaderStatements()
             .arg(client->currentText(),car->currentText(),from->date().toString("dd.MM.yyyy"),through->date().toString("dd.MM.yyyy"));
         const bool parts = tabs->currentWidget()==issues;
         if (tabs->currentWidget()==finances) {
-            previewStatement(dialog,tr("Виписка — розрахунки"),context+" • "+message->text(),*finances);
+            previewStatement(dialog,tr("Виписка — розрахунки"),context+" • "+summary->text(),*finances);
             return;
         }
         previewStatement(dialog,parts?tr("Виписка — рух запчастин"):tr("Виписка — погодження"),context,parts?*issues:*table);
     });
     connect(generate,&QPushButton::clicked,dialog,[=] {
         pdf->setEnabled(false);
+        summary->hide();
+        message->clear();
         table->setRowCount(0);
         if (!canAccessPage(9) || client->currentIndex()<0) return;
         QString error;
@@ -187,7 +195,8 @@ void MainWindow::openHeaderStatements()
                 .arg(money(journal.opening),money(journal.charged),money(journal.paid),money(journal.closing));
             if (!journal.unverifiedClosures.isEmpty())
                 totals+=tr(" • Потребують звірки: закритих нарядів без підтвердженого нарахування — %1.").arg(journal.unverifiedClosures.size());
-            message->setText(totals);
+            summary->setText(totals);
+            summary->show();
             pdf->setEnabled(true);
             return;
         }
@@ -330,7 +339,7 @@ void MainWindow::openHeaderStatements()
         card->open();
     });
     connect(issues,&QTableWidget::cellActivated,dialog,showOrder);
-    auto invalidate = [=] { pdf->setEnabled(false); finances->setRowCount(0); table->setRowCount(0); issues->setRowCount(0); openOrder->setEnabled(false); message->clear(); };
+    auto invalidate = [=] { summary->hide(); summary->clear(); pdf->setEnabled(false); finances->setRowCount(0); table->setRowCount(0); issues->setRowCount(0); openOrder->setEnabled(false); message->clear(); };
     connect(tabs,&QTabWidget::currentChanged,dialog,invalidate);
     connect(car,&QComboBox::currentIndexChanged,dialog,invalidate);
     connect(from,&QDateEdit::dateChanged,dialog,invalidate);
