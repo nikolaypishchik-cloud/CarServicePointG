@@ -96,6 +96,7 @@ void checkFinanceHeaderActions(QSqlDatabase db) {
         auto* operations = journalPage->findChild<QTableWidget*>("cashOperations");
         QVERIFY(operations);
         QTRY_COMPARE(operations->findItems("ui-order", Qt::MatchExactly).size(), 1);
+        QTRY_VERIFY(operations->viewport()->height()>=operations->rowHeight(0));
         auto* balance = journalPage->findChild<QLabel*>("cashTotal");
         QVERIFY(balance);
         QTRY_VERIFY(balance->height() >= balance->heightForWidth(balance->width()));

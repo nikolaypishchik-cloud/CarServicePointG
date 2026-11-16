@@ -64,7 +64,12 @@ QString balance(QSqlDatabase db,const QString& shift,qint64& amount,bool allowUn
     if(db.tables().contains("client_payments")){
         const QString unmatched=db.tables().contains("cash_shift_receipts")
             ?" AND NOT EXISTS(SELECT 1 FROM main.cash_shift_receipts r WHERE r.payment_uid=p.payment_uid)":"";
-        if(!run(q,"SELECT 1 FROM main.client_payments p WHERE p.method='cash' AND p.recorded_ms >= (SELECT opened_ms FROM main.cash_shifts WHERE shift_uid=?)"+unmatched+" LIMIT 1",{shift}))return q.lastError().text();
+        const QString checkUnlinked =
+            "SELECT 1 FROM main.client_payments p JOIN main.cash_shifts s ON s.shift_uid=? "
+            "WHERE p.method='cash' AND p.recorded_ms>=s.opened_ms "
+            "AND NOT EXISTS(SELECT 1 FROM main.cash_shifts successor "
+            "WHERE successor.rowid>s.rowid AND successor.opened_ms<=p.recorded_ms)";
+        if(!run(q,checkUnlinked+unmatched+" LIMIT 1",{shift}))return q.lastError().text();
         if(q.next() && !allowUnlinked)return QStringLiteral("Є готівкова оплата без підтвердженого зв’язку зі зміною. Потрібна звірка.");
     }
     if(db.tables().contains("cash_shift_receipts") && !addSum("SELECT COALESCE(SUM(p.amount_cents),0) FROM main.cash_shift_receipts l JOIN main.client_payments p ON p.payment_uid=l.payment_uid WHERE l.shift_uid=?"))

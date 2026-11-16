@@ -7,6 +7,7 @@
 #include "app/AppContext.h"
 #include "core/cloudsync/CloudSyncClient.h"
 #include "core/cloudsync/CloudSyncWorker.h"
+#include "core/cloudsync/CloudSyncSettings.h"
 #include "core/services/ActivityAuditService.h"
 #include "core/backup/BackupPerformanceGuard.h"
 #include "app/update/UpdateService.h"
@@ -846,6 +847,7 @@ void MainWindow::checkPartRequestNotifications()
 {
     if (!ActivityAuditService::currentActor().isValid()
         || !hasPermission(QStringLiteral("nav.settings")) || m_partRequestCheckInProgress) return;
+    if (!CloudSyncSettings::load().enabled) return;
     m_partRequestCheckInProgress = true;
 
     struct Result { QJsonObject body; QString error; };

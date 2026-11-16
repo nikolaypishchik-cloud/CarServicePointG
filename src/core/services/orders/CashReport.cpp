@@ -1,5 +1,6 @@
 #include "CashReport.h"
 #include "CashOperations.h"
+#include "CashBankService.h"
 #include "CashShiftService.h"
 #include "ClientReceiptReader.h"
 #include "core/services/AccessControlService.h"
@@ -61,6 +62,8 @@ Table read(Type type,QDate first,QDate last,const QString& selector)
     const QVariantList dates{first.toString(Qt::ISODate),last.toString(Qt::ISODate)};
     QSet<int> money, additive;
     QMap<int,qint64> sums;
+    QString reportAccount;
+    QMap<QPair<QString,QString>,qint64> dailyAccounts;
     auto append=[&](const QString& sql,const QVariantList& args) {
         if (!result.error.isEmpty()) return;
         QSqlQuery q(db);
@@ -80,7 +83,12 @@ Table read(Type type,QDate first,QDate last,const QString& selector)
                     else {result.error=QStringLiteral("Переповнення підсумку.");return;}
                 }
             }
-            result.rows.append(row);
+            if(type==Type::Period){
+                const auto key=qMakePair(row.front(),reportAccount);
+                const auto value=ExactMoney::sum({dailyAccounts.value(key),q.value(4).toLongLong()});
+                if(auto cents=std::get_if<ExactMoney::Cents>(&value))dailyAccounts[key]=*cents;
+                else {result.error=QStringLiteral("Переповнення руху за день.");return;}
+            } else result.rows.append(row);
         }
         result.error=q.lastError().text();
     };
@@ -93,20 +101,36 @@ Table read(Type type,QDate first,QDate last,const QString& selector)
         qint64 closing=0;
         result.error= result.error.isEmpty() ? CashShiftService::balance(db,selector,closing) : result.error;
         if(result.error.isEmpty())result.totals<<QStringLiteral("Обліковий залишок зміни ")+ClientReceiptReader::money(closing);
-    } else if(type==Type::Account){
+    } else if(type==Type::Account || type==Type::Period){
         result.columns={"Дата","Документ","Операція","Працівник","Рух за рахунком"};money={4};additive={4};
-        if(tables.contains("cash_account_moves"))
-            append("SELECT day,uid,CASE WHEN src IS NULL THEN 'Початковий залишок' ELSE 'Переміщення' END,actor,CASE WHEN dest=? THEN cents ELSE -cents END FROM main.cash_account_moves WHERE (src=? OR dest=?) AND day BETWEEN ? AND ?",QVariantList{selector,selector,selector}+dates);
-        if(tables.contains("cash_treasury_entries"))
-            append("SELECT day,uid,reason,actor,delta FROM main.cash_treasury_entries WHERE account=? AND day BETWEEN ? AND ?",QVariantList{selector}+dates);
-        if(tables.contains("cash_bank_events"))
-            append("SELECT day,uid,'Зарахування банком',actor,net FROM main.cash_bank_events WHERE action='credit' AND account=? AND day BETWEEN ? AND ?",QVariantList{selector}+dates);
-        if(selector=="primary-cash"){
-            if(tables.contains("cash_advance_events")) append("SELECT day,uid,'Аванс',actor,cents FROM main.cash_advance_events WHERE method='cash' AND source_uid IS NULL AND shift_uid IS NOT NULL AND day BETWEEN ? AND ?",dates);
-            if(tables.contains("cash_shift_receipts")) append("SELECT p.paid_on,p.payment_uid,'Оплата',p.actor,p.amount_cents FROM main.cash_shift_receipts r JOIN main.client_payments p ON p.payment_uid=r.payment_uid WHERE p.paid_on BETWEEN ? AND ?",dates);
-            if(tables.contains("cash_outflows")) append("SELECT day,uid,reason,actor,CASE WHEN reversed_uid IS NULL THEN -cents ELSE cents END FROM main.cash_outflows WHERE shift_uid IS NOT NULL AND day BETWEEN ? AND ?",dates);
-            if(tables.contains("cash_opening_events")) append("SELECT effective_on,uid,reason,actor,delta FROM main.cash_opening_events WHERE delta<>0 AND effective_on BETWEEN ? AND ?",dates);
-            if(tables.contains("cash_shift_transitions")) append("SELECT date(recorded_ms/1000,'unixepoch','localtime'),request_uid,reason,actor,delta FROM main.cash_shift_transitions WHERE delta<>0 AND date(recorded_ms/1000,'unixepoch','localtime') BETWEEN ? AND ?",dates);
+        auto readAccount=[&](const QString& accountUid){
+            if(tables.contains("cash_account_moves"))
+                append("SELECT day,uid,CASE WHEN src IS NULL THEN 'Початковий залишок' ELSE 'Переміщення' END,actor,CASE WHEN dest=? THEN cents ELSE -cents END FROM main.cash_account_moves WHERE (src=? OR dest=?) AND day BETWEEN ? AND ?",QVariantList{accountUid,accountUid,accountUid}+dates);
+            if(tables.contains("cash_treasury_entries"))
+                append("SELECT day,uid,reason,actor,delta FROM main.cash_treasury_entries WHERE account=? AND day BETWEEN ? AND ?",QVariantList{accountUid}+dates);
+            if(tables.contains("cash_bank_events"))
+                append("SELECT day,uid,'Зарахування банком',actor,net FROM main.cash_bank_events WHERE action='credit' AND account=? AND day BETWEEN ? AND ?",QVariantList{accountUid}+dates);
+            if(accountUid=="primary-cash"){
+                if(tables.contains("cash_advance_events")) append("SELECT day,uid,'Аванс',actor,cents FROM main.cash_advance_events WHERE method='cash' AND source_uid IS NULL AND shift_uid IS NOT NULL AND day BETWEEN ? AND ?",dates);
+                if(tables.contains("cash_shift_receipts")) append("SELECT p.paid_on,p.payment_uid,'Оплата',p.actor,p.amount_cents FROM main.cash_shift_receipts r JOIN main.client_payments p ON p.payment_uid=r.payment_uid WHERE p.paid_on BETWEEN ? AND ?",dates);
+                if(tables.contains("cash_outflows")) append("SELECT day,uid,reason,actor,CASE WHEN reversed_uid IS NULL THEN -cents ELSE cents END FROM main.cash_outflows WHERE shift_uid IS NOT NULL AND day BETWEEN ? AND ?",dates);
+                if(tables.contains("cash_opening_events")) append("SELECT effective_on,uid,reason,actor,delta FROM main.cash_opening_events WHERE delta<>0 AND effective_on BETWEEN ? AND ?",dates);
+                if(tables.contains("cash_shift_transitions")) append("SELECT date(recorded_ms/1000,'unixepoch','localtime'),request_uid,reason,actor,delta FROM main.cash_shift_transitions WHERE delta<>0 AND date(recorded_ms/1000,'unixepoch','localtime') BETWEEN ? AND ?",dates);
+            }
+        };
+        if(type==Type::Account) readAccount(selector);
+        else {
+            const auto accounts=CashBankService::accounts(result.error,true);
+            for(const auto& account:accounts){
+                reportAccount=account.name+" · "+account.uid;
+                readAccount(account.uid);
+                if(!result.error.isEmpty())return result;
+            }
+            result.columns={"Календарний день","Рахунок","Чистий рух за рахунком"};
+            for(auto it=dailyAccounts.cbegin();it!=dailyAccounts.cend();++it)
+                result.rows.append({it.key().first,it.key().second,ClientReceiptReader::money(it.value())});
+            result.totals<<QStringLiteral("Чистий рух усіх рахунків ")+ClientReceiptReader::money(sums.value(4));
+            sums.clear();
         }
     } else if(type==Type::Discrepancies){
         result.columns={"Дата","Документ","Стан","Автор","Обліково","Перераховано","Різниця","Причина"};money={4,5,6};
@@ -130,7 +154,6 @@ Table read(Type type,QDate first,QDate last,const QString& selector)
         if(tables.contains("activity_audit_events"))append("SELECT occurred_at,actor_name,action,entity_id,title FROM main.activity_audit_events WHERE category='cash' AND date(occurred_at,'localtime') BETWEEN ? AND ?",dates);
     } else {
         result.columns={"Дата","Документ","Дія","Клієнт / наряд","Спосіб","Сума документа","Рух коштів клієнта"};
-        QMap<QString,qint64> daily;
         qint64 total=0;
         int offset=0;
         for(;;){
@@ -139,15 +162,14 @@ Table read(Type type,QDate first,QDate last,const QString& selector)
             for(const auto& row:page.rows){
                 if(type==Type::Orders && (row.order.isEmpty() || row.kind=="supplier"))continue;
                 if(type==Type::Refunds && row.kind!="refund" && row.kind!="void")continue;
-                const auto sum=ExactMoney::sum({total,row.net}), daySum=ExactMoney::sum({daily.value(row.day),row.net});
-                if(!std::holds_alternative<ExactMoney::Cents>(sum) || !std::holds_alternative<ExactMoney::Cents>(daySum)){result.error=QStringLiteral("Переповнення підсумку.");return result;}
-                total=std::get<ExactMoney::Cents>(sum);daily[row.day]=std::get<ExactMoney::Cents>(daySum);
-                if(type!=Type::Period)result.rows.append({row.day,row.uid,CashOperations::title(row.kind),(row.name+" "+row.order).trimmed(),CashOperations::methodTitle(row.method),ClientReceiptReader::money(row.amount),ClientReceiptReader::money(row.net)});
+                const auto sum=ExactMoney::sum({total,row.net});
+                if(!std::holds_alternative<ExactMoney::Cents>(sum)){result.error=QStringLiteral("Переповнення підсумку.");return result;}
+                total=std::get<ExactMoney::Cents>(sum);
+                result.rows.append({row.day,row.uid,CashOperations::title(row.kind),(row.name+" "+row.order).trimmed(),CashOperations::methodTitle(row.method),ClientReceiptReader::money(row.amount),ClientReceiptReader::money(row.net)});
             }
             if(!page.more)break;
             offset+=page.rows.size();
         }
-        if(type==Type::Period){result.columns={"Календарний день","Чистий рух коштів клієнтів"};for(auto i=daily.cbegin();i!=daily.cend();++i)result.rows.append({i.key(),ClientReceiptReader::money(i.value())});}
         result.totals<<QStringLiteral("Рух коштів клієнтів ")+ClientReceiptReader::money(total);
     }
     std::stable_sort(result.rows.begin(),result.rows.end(),[](const QStringList& a,const QStringList& b){return a.front()<b.front();});

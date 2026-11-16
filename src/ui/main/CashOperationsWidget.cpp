@@ -4,6 +4,7 @@
 #include <QComboBox>
 #include <QTableWidget>
 #include <QHeaderView>
+#include <QScrollBar>
 #include <QPushButton>
 #include <QLabel>
 #include <QBoxLayout>
@@ -29,6 +30,10 @@ CashOperationsWidget::CashOperationsWidget(QWidget* parent):QWidget(parent)
     table->verticalHeader()->hide();
     table->setHorizontalHeaderLabels({tr("Дата"),tr("Клієнт / наряд"),tr("Операція"),tr("Спосіб"),tr("Сума"),tr("Рух коштів клієнта")});
     table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);table->horizontalHeader()->setStretchLastSection(true);
+    // Leave room for a complete operation below the header in the compact layout.
+    table->setMinimumHeight(table->horizontalHeader()->sizeHint().height()
+        + table->verticalHeader()->defaultSectionSize() + table->horizontalScrollBar()->sizeHint().height()
+        + 2*table->frameWidth());
     layout->addWidget(table);
     auto* navigation=new QHBoxLayout;
     previous=new QPushButton(tr("Назад"),this);next=new QPushButton(tr("Далі"),this);

@@ -236,6 +236,17 @@ private slots:
         QCOMPARE(q.value(0).toInt(),2);
         QCOMPARE(q.value(1).toLongLong(),10001);
         q.finish();
+        // An unlinked receipt at the next shift's opening belongs to its reconciliation window.
+        QVERIFY(q.exec("SAVEPOINT unlinked_receipt"));
+        QVERIFY(q.exec("INSERT INTO client_payments SELECT 'pending-cash','pending-request','order',100,'cash',"
+                       "date('now'),'worker',opened_ms FROM cash_shifts WHERE state='open'"));
+        qint64 archivedBalance=0;
+        QVERIFY(CashShiftService::balance(db,prior,archivedBalance).isEmpty());
+        QCOMPARE(archivedBalance,59001);
+        qint64 currentDrawer=0;
+        QVERIFY(CashShiftService::currentBalance(currentDrawer).contains(QStringLiteral("звірка")));
+        QVERIFY(q.exec("ROLLBACK TO unlinked_receipt"));
+        QVERIFY(q.exec("RELEASE unlinked_receipt"));
         // Direct card receipt and cash expense exercise different sources of funds.
         q.prepare("INSERT INTO client_payments VALUES('card-source','original','order',9000,'card',?,'worker',1)");
         q.addBindValue(day.toString(Qt::ISODate));
@@ -522,6 +533,11 @@ private slots:
         const auto movements=CashReport::read(CashReport::Type::Account,day,day,safe);
         QVERIFY2(movements.error.isEmpty(),qPrintable(movements.error));
         QVERIFY(movements.totals.join(" ").contains(ClientReceiptReader::money(12345)));
+        const auto periodReport=CashReport::read(CashReport::Type::Period,day,day);
+        QVERIFY2(periodReport.error.isEmpty(),qPrintable(periodReport.error));
+        QVERIFY(std::any_of(periodReport.rows.cbegin(),periodReport.rows.cend(),[&](const QStringList& row){
+            return row.at(1).endsWith(safe) && row.at(2)==ClientReceiptReader::money(safeBalance);
+        }));
         const auto exported=qEnvironmentVariable("CS_CASH_PDF_SAMPLE",work.filePath("cash-journal.pdf"));
         error=writeCashJournalPdf(exported,day,day,"test-export","payment","card");
         QVERIFY2(error.isEmpty(),qPrintable(error));

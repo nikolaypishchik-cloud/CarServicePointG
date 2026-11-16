@@ -242,7 +242,7 @@ void CashJournalPage::resizeEvent(QResizeEvent* event)
     body->removeWidget(tabs);body->removeWidget(balanceArea);
     if(narrow){
         balanceArea->setMinimumWidth(0);balanceArea->setMaximumWidth(QWIDGETSIZE_MAX);
-        balanceArea->setFixedHeight(120);
+        balanceArea->setFixedHeight(qBound(48,event->size().height()/8,120));
         body->addWidget(balanceArea,1,0);body->addWidget(tabs,2,0);
     }else{
         balanceArea->setMinimumHeight(0);balanceArea->setMaximumHeight(QWIDGETSIZE_MAX);
