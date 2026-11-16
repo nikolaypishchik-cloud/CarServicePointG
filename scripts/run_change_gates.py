@@ -15,7 +15,7 @@ STATIC = ('check_architecture.py', 'check_structure_contract.py', 'check_p2_acce
           'check_domain_integrity.py', 'check_test_inventory.py',
           'test_architecture_ratchet.py', 'test_structure_contract.py',
           'test_project_source_scope.py', 'test_qt_test_diagnostics.py', 'test_purchase_acceptance.py')
-REQUIRED_TESTS = {'PurchasePaymentTests', 'SettingsLayoutTests', 'HistoryPartsAutofillTests',
+REQUIRED_TESTS = {'ReportsOrdersTests', 'ReportsOrdersTests_migration', 'ReportsOrdersTests_canonical', 'PurchasePaymentTests', 'SettingsLayoutTests', 'HistoryPartsAutofillTests',
                   'PartsQueryServiceTests', 'BackupRecoveryAcceptanceTests', 'OrderClosureDialogTests'}
 
 def cache_errors(text):

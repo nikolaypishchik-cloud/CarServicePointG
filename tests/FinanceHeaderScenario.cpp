@@ -1,7 +1,15 @@
+#include "core/services/orders/CashAdvanceService.h"
+#include "core/services/orders/CashBankService.h"
+#include "core/services/orders/CashAccountMovement.h"
+#include "core/services/orders/CashTreasury.h"
+#include <QProcess>
+#include <QTemporaryDir>
+#include <QUuid>
 #include <QtTest>
 #include <QDir>
 #include <QDialog>
 #include <QFrame>
+#include <QLabel>
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QStackedWidget>
@@ -85,6 +93,12 @@ void checkFinanceHeaderActions(QSqlDatabase db) {
         QCOMPARE(receipts.size(),1);
         QCOMPARE(receipts.front()->data(Qt::UserRole).toString(),QStringLiteral("ui-cash-record"));
         QCOMPARE(entries->item(receipts.front()->row(),3)->text(),ClientReceiptReader::money(18725));
+        auto* operations = journalPage->findChild<QTableWidget*>("cashOperations");
+        QVERIFY(operations);
+        QTRY_COMPARE(operations->findItems("ui-order", Qt::MatchExactly).size(), 1);
+        auto* balance = journalPage->findChild<QLabel*>("cashTotal");
+        QVERIFY(balance);
+        QTRY_VERIFY(balance->height() >= balance->heightForWidth(balance->width()));
         cash->click();
         QCOMPARE(pages->currentWidget(),journalPage);
         if (!captures.isEmpty()) QVERIFY(window.grab().save(QDir(captures).filePath(QString("shell-%1.png").arg(size.width()))));
@@ -92,3 +106,57 @@ void checkFinanceHeaderActions(QSqlDatabase db) {
     const QString path = qEnvironmentVariable("CS_HEADER_PREVIEW");
     if (!path.isEmpty()) QVERIFY(header->grab().save(path));
 }
+
+void checkSupplierCashDocument(QSqlDatabase db) {
+        // The backend mode is captured for the lifetime of the process.
+        if (!qEnvironmentVariableIsSet("CS_TEST_CASH_SUPPLIER_CHILD")) {
+            QProcess child;
+            auto env = QProcessEnvironment::systemEnvironment();
+            env.insert("CS_TEST_CASH_SUPPLIER_CHILD","1");
+            child.setProcessEnvironment(env);
+            QTemporaryDir logs;
+            QVERIFY(logs.isValid());
+            const auto report = logs.filePath("supplier.txt");
+            child.start(QCoreApplication::applicationFilePath(),{"supplierCashDocumentIsAtomic","-o",report+",txt"});
+            QVERIFY(child.waitForFinished(60000));
+            QFile log(report);
+            QVERIFY(log.open(QIODevice::ReadOnly));
+            const auto output = log.readAll();
+            QVERIFY2(child.exitStatus()==QProcess::NormalExit && child.exitCode()==0 &&
+                     output.contains("3 passed, 0 failed, 0 skipped") && !output.contains("QCRITICAL"),output.constData());
+            return;
+        }
+        QString error;
+        QVERIFY2(PurchasePaymentService::ensureSchema(db,&error),qPrintable(error));
+        error = CashAdvanceService::designateSingleWorkstation();
+        QVERIFY2(error.isEmpty(),qPrintable(error));
+        auto id=[] { return QUuid::createUuid().toString(QUuid::WithoutBraces); };
+        const auto bank=id();
+        const auto day=QDate::currentDate();
+        QVERIFY(CashBankService::post({id(),"account",bank,"QA bank","bank",{},"QA",day}).error.isEmpty());
+        QVERIFY(CashAccountMovement::post({id(),{},bank,"Звірено",day,15000}).error.isEmpty());
+        const auto debts=CashTreasury::openDebts(error);
+        QVERIFY2(error.isEmpty(),qPrintable(error));
+        const auto found=std::find_if(debts.cbegin(),debts.cend(),[](const auto& debt){ return debt.source=="part" && debt.id==1; });
+        QVERIFY(found!=debts.cend());
+        CashTreasury::Command cmd{id(),"supplier",bank,"Оплата придбання",10000,day,*found};
+        auto posted=CashTreasury::post(cmd);
+        QVERIFY2(posted.error.isEmpty(),qPrintable(posted.error));
+        QVERIFY(CashTreasury::post(cmd).replay);
+        qint64 balance=0;
+        QVERIFY(CashAccountMovement::balance(db,bank,balance).isEmpty());
+        QCOMPARE(balance,5000);
+        auto updated=PurchasePaymentService::detail(db,"part",1,"order-a",&error);
+        QVERIFY2(error.isEmpty(),qPrintable(error));
+        QCOMPARE(updated.paidCents,10000);
+        cmd.uid=id();cmd.debt=updated;cmd.cents=4000;
+        QSqlQuery q(db);
+        QVERIFY(q.exec("CREATE TRIGGER abort_cash_supplier BEFORE INSERT ON cash_treasury_entries BEGIN SELECT RAISE(ABORT,'QA'); END"));
+        const auto rejected=CashTreasury::post(cmd);
+        QVERIFY2(rejected.error.contains("QA"),qPrintable(rejected.error));
+        QCOMPARE(PurchasePaymentService::detail(db,"part",1,"order-a",&error).paidCents,10000);
+        QVERIFY(CashAccountMovement::balance(db,bank,balance).isEmpty());
+        QCOMPARE(balance,5000);
+        QVERIFY(q.exec("SELECT COUNT(*) FROM purchase_payment_events WHERE amount_cents>0") && q.next());
+        QCOMPARE(q.value(0).toInt(),1);
+    }

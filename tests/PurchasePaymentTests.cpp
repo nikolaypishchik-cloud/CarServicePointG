@@ -201,6 +201,7 @@ static void expectRejectedTransaction(const QString& reason)
         + QRegularExpression::escape(reason) + "$"));
 }
 
+void checkSupplierCashDocument(QSqlDatabase db);
 void checkWeeklyReportScreen(QSqlDatabase db);
 void checkFinanceHeaderActions(QSqlDatabase db);
 void checkStatementApprovalAndPreview(QSqlDatabase db);
@@ -4617,6 +4618,7 @@ private slots:
         QVERIFY(!db.tables().contains("crm_vehicles"));
     }
     void statementApprovalOpensSourceCard() { checkStatementApprovalAndPreview(db); }
+    void supplierCashDocumentIsAtomic() { checkSupplierCashDocument(db); }
     void pendingFinanceHeaderActions() { checkFinanceHeaderActions(db); }
     void debtBannerPinnedLayout() {
         MainWindow window;
@@ -7374,6 +7376,8 @@ private slots:
             "INSERT INTO work_order_parts VALUES(2,1,'order-a','2026-09-01','','','Store','','','Paid part',1,200,200,100,100,1)"
         };
         for(const auto& statement:sql) QVERIFY2(q.exec(statement),qPrintable(q.lastError().text()));
+        if (qEnvironmentVariableIsSet("CS_TEST_CASH_SUPPLIER_CHILD"))
+            QVERIFY(Database::setSetting("settings.backend.offline",true));
         // These partial DAO fixtures still represent a prepared runtime order.
         QVERIFY(prepareFixtureOrderState(1));
         QString error;

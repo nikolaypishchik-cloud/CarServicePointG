@@ -9,6 +9,8 @@
 #include <QBoxLayout>
 #include <QMessageBox>
 #include <QTimer>
+#include <QFileDialog>
+#include "core/services/AccessControlService.h"
 
 CashOperationsWidget::CashOperationsWidget(QWidget* parent):QWidget(parent)
 {
@@ -18,7 +20,7 @@ CashOperationsWidget::CashOperationsWidget(QWidget* parent):QWidget(parent)
     layout->addWidget(search);
     auto* filters=new QHBoxLayout;
     kind=new QComboBox(this);kind->addItem(tr("Усі операції"),"");
-    for(const auto key:{"payment","advance","allocation","refund","void","expense","credit","match","move","opening"})kind->addItem(CashOperations::title(key),key);
+    for(const auto key:{"payment","advance","allocation","refund","void","expense","credit","match","move","opening","deposit","withdrawal","supplier"})kind->addItem(CashOperations::title(key),key);
     method=new QComboBox(this);method->addItem(tr("Усі способи"),"");
     for(const auto key:{"cash","card","transfer","allocation"})method->addItem(CashOperations::methodTitle(key),key);
     filters->addWidget(kind);filters->addWidget(method);layout->addLayout(filters);
@@ -32,6 +34,22 @@ CashOperationsWidget::CashOperationsWidget(QWidget* parent):QWidget(parent)
     previous=new QPushButton(tr("Назад"),this);next=new QPushButton(tr("Далі"),this);
     status=new QLabel(this);status->setTextFormat(Qt::PlainText);
     navigation->addWidget(previous);navigation->addWidget(status,1);navigation->addWidget(next);layout->addLayout(navigation);
+    auto* pdf = new QPushButton(tr("PDF"),this);
+    navigation->addWidget(pdf);
+    pdf->setEnabled(AccessControlService::currentUserHasPermission("cash.export"));
+    connect(pdf,&QPushButton::clicked,this,[this]{
+        auto* dialog = new QFileDialog(this,tr("Зберегти касовий журнал"));
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->setAcceptMode(QFileDialog::AcceptSave);
+        dialog->setNameFilter("PDF (*.pdf)");
+        dialog->setDefaultSuffix("pdf");
+        dialog->selectFile("Журнал каси.pdf");
+        connect(dialog,&QFileDialog::fileSelected,this,[this](const QString& path){
+            const auto error = writeCashJournalPdf(path,start,end,search->text(),kind->currentData().toString(),method->currentData().toString());
+            status->setText(error.isEmpty() ? tr("PDF збережено.") : error);
+        });
+        dialog->open();
+    });
     auto* delay=new QTimer(this);delay->setSingleShot(true);delay->setInterval(180);
     connect(search,&QLineEdit::textChanged,this,[=]{delay->start();});
     auto reset=[this]{offset=0;loadPage();};
@@ -59,7 +77,8 @@ void CashOperationsWidget::loadPage()
     rows=page.rows;table->setRowCount(rows.size());
     for(int r=0;r<rows.size();++r){
         const auto& row=rows[r];
-        const QStringList cells{row.day,row.name+(row.number.isEmpty()?QString():" №"+row.number),CashOperations::title(row.kind),
+        const QString reference = row.number.isEmpty() ? row.order : "№" + row.number;
+        const QStringList cells{row.day,(row.name + " " + reference).trimmed(),CashOperations::title(row.kind),
             CashOperations::methodTitle(row.method),ClientReceiptReader::money(row.amount),ClientReceiptReader::money(row.net)};
         for(int c=0;c<cells.size();++c){auto* item=new QTableWidgetItem(cells[c]);item->setData(Qt::UserRole,row.uid);table->setItem(r,c,item);}
     }

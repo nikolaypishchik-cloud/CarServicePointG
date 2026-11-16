@@ -38,6 +38,7 @@ const QVector<AccessPermissionDefinition>& definitions()
         {QStringLiteral("nav.history"), QString::fromUtf8("Розділи"), QString::fromUtf8("База виконаних нарядів")},
         {QStringLiteral("nav.reports"), QString::fromUtf8("Розділи"), QString::fromUtf8("Звіти")},
         {QStringLiteral("nav.clients"), QString::fromUtf8("Розділи"), QString::fromUtf8("Клієнти")},
+        {QStringLiteral("cash.export"), QStringLiteral("Каса"), QStringLiteral("Експортувати касові звіти")},
         {QStringLiteral("cash.transfer"), QStringLiteral("Каса"), QStringLiteral("Переміщувати кошти між рахунками")},
         {QStringLiteral("cash.bank"), QStringLiteral("Каса"), QStringLiteral("Підтверджувати банківську звірку")},
         {QStringLiteral("cash.receive"), QStringLiteral("Каса"), QStringLiteral("Приймати оплату й аванси")},
@@ -106,7 +107,7 @@ QSet<QString> defaultGrants(const QString& roleId)
         return permissions({"nav.planning", "nav.intake", "nav.new_order", "nav.current_orders", "nav.parts", "nav.history",
                             "nav.reports", "nav.clients", "nav.inventory", "nav.catalog", "nav.statistics", "nav.settings",
                             "orders.create", "orders.edit", "orders.close", "parts.order", "parts.install",
-                            "inventory.purchase", "inventory.delete", "security.manage", "cash.view", "cash.refund", "cash.expense", "cash.reverse", "cash.receive", "cash.allocate", "cash.shift", "cash.reconcile", "cash.configure", "cash.bank", "cash.transfer"});
+                            "inventory.purchase", "inventory.delete", "security.manage", "cash.view", "cash.refund", "cash.expense", "cash.reverse", "cash.receive", "cash.allocate", "cash.shift", "cash.reconcile", "cash.configure", "cash.bank", "cash.transfer", "cash.export"});
     }
     if (roleId == QStringLiteral("manager")) {
         return permissions({"nav.planning", "nav.intake", "nav.new_order", "nav.current_orders", "nav.parts", "nav.history",

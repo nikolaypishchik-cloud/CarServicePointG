@@ -15,6 +15,7 @@
 #include "core/services/orders/CashBankService.h"
 #include "core/services/orders/CashOperations.h"
 #include "core/services/orders/CashAccountMovement.h"
+#include "core/services/orders/CashTreasury.h"
 #include <QTemporaryDir>
 #include "app/App.h"
 #include "core/services/AccessControlService.h"
@@ -26,6 +27,7 @@
 #include "core/services/orders/OrderClosureJournal.h"
 #include "infrastructure/db/sqlite/Db.h"
 #include "ui/main/CashJournalPage.h"
+#include "ui/main/CashOperationsWidget.h"
 
 class CashAdvanceScreenTests : public QObject {
     Q_OBJECT
@@ -434,14 +436,41 @@ private slots:
         QVERIFY(CashAccountMovement::balance(db,safe,safeBalance).isEmpty());
         QVERIFY(CashShiftService::currentBalance(drawerBalance).isEmpty());
         QCOMPARE(safeBalance,12345);QCOMPARE(drawerBalance,55001-12345);
+        const auto priorClientNet = CashOutflow::totals(day,day).net;
+        CashTreasury::Command deposit{id(),"deposit","primary-cash","Розмінні кошти",2400,day,{}};
+        auto receipt = CashTreasury::post(deposit);
+        QVERIFY2(receipt.error.isEmpty(),qPrintable(receipt.error));
+        QVERIFY(CashTreasury::post(deposit).replay);
+        QVERIFY(CashShiftService::currentBalance(drawerBalance).isEmpty());
+        QCOMPARE(drawerBalance,55001-12345+2400);
+        CashTreasury::Command withdraw{id(),"withdrawal","primary-cash","Вилучення розміну",2400,day,{}};
+        QVERIFY(CashTreasury::post(withdraw).error.isEmpty());
+        QVERIFY(CashTreasury::post(withdraw).replay);
+        QVERIFY(CashShiftService::currentBalance(drawerBalance).isEmpty());
+        QCOMPARE(drawerBalance,55001-12345);
+        QCOMPARE(CashOutflow::totals(day,day).net,priorClientNet);
         QVERIFY(!CashAccountMovement::post({id(),safe,"primary-cash","Більше за наявне",day,12346}).error.isEmpty());
         ActivityAuditService::setCurrentActor({"worker","Operator","owner","test"});
+        QVERIFY(q.exec("WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<103) "
+                       "INSERT INTO client_payments SELECT 'export-'||i,'export-request-'||i,'test-export-'||i,100,'card',date('now','localtime'),'qa',i FROM n"));
+        const auto screenRows=CashOperations::read(day,day,"test-export","payment","card",0);
+        QVERIFY2(screenRows.error.isEmpty(),qPrintable(screenRows.error));
+        QCOMPARE(screenRows.rows.size(),100);
+        QVERIFY(screenRows.more);
+        const auto exportRows=CashOperations::exportSelection(day,day,"test-export","payment","card");
+        QVERIFY2(exportRows.error.isEmpty(),qPrintable(exportRows.error));
+        QCOMPARE(exportRows.rows.size(),103);
+        const auto exported=qEnvironmentVariable("CS_CASH_PDF_SAMPLE",work.filePath("cash-journal.pdf"));
+        error=writeCashJournalPdf(exported,day,day,"test-export","payment","card");
+        QVERIFY2(error.isEmpty(),qPrintable(error));
+        QVERIFY(QFileInfo(exported).size()>0);
         grants.remove("cash.receive");
         QVERIFY(AccessControlService::setRolePermissions(db,"manager",grants,&error));
         QVERIFY(AccessControlService::ensureSchema(db,&error));
         ActivityAuditService::setCurrentActor({"delegated","Responsible","manager","test"});
         cash.requestUid=id();
         QVERIFY(!CashAdvanceService::post(cash).error.isEmpty());
+        QVERIFY(!CashOperations::exportSelection(day,day,{}, {}, {}).error.isEmpty());
     }
 };
 QTEST_MAIN(CashAdvanceScreenTests)

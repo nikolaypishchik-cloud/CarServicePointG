@@ -4,6 +4,7 @@
 #include <QList>
 #include "core/services/orders/CashOperations.h"
 class QLineEdit;class QComboBox;class QTableWidget;class QPushButton;class QLabel;
+QString writeCashJournalPdf(const QString& path,QDate first,QDate last,const QString& search,const QString& kind,const QString& method);
 class CashOperationsWidget : public QWidget {
 public:
     explicit CashOperationsWidget(QWidget* parent);

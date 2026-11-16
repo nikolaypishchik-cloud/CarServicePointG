@@ -33,6 +33,12 @@ QString balance(QSqlDatabase db,const QString& account,qint64& cents)
     const auto start=q.value(0);
     if(!run(q,"SELECT COALESCE(SUM(CASE WHEN dest=? THEN cents ELSE -cents END),0) FROM main.cash_account_moves WHERE src=? OR dest=?",{account,account,account}) || !q.next())return q.lastError().text();
     cents=q.value(0).toLongLong();
+    if (tables.contains("cash_treasury_entries")) {
+        if (!run(q,"SELECT COALESCE(SUM(delta),0) FROM main.cash_treasury_entries WHERE account=? AND day>=?",{account,start}) || !q.next()) return q.lastError().text();
+        const auto value = ExactMoney::sum({cents,q.value(0).toLongLong()});
+        if (auto result = std::get_if<ExactMoney::Cents>(&value)) cents = *result;
+        else return QStringLiteral("Переповнення суми рахунку.");
+    }
     if(tables.contains("cash_bank_events")){
         if(!run(q,"SELECT COALESCE(SUM(net),0) FROM main.cash_bank_events WHERE action='credit' AND account=? AND day>=?",{account,start}) || !q.next())return q.lastError().text();
         const auto value=ExactMoney::sum({cents,q.value(0).toLongLong()});

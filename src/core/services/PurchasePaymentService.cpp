@@ -195,7 +195,7 @@ bool writeBalance(QSqlDatabase db, const PurchaseDebt& debt, qint64 paid, const 
         key(debt.source, debt.id, debt.orderUid), debt.name,
         QString::fromUtf8(QJsonDocument(payload).toJson(QJsonDocument::Compact)), error);
 }
-bool change(QSqlDatabase db, const PurchaseDebt& expected, qint64 amount, bool reset, QString* error, int deferredDays = -1) {
+bool change(QSqlDatabase db, const PurchaseDebt& expected, qint64 amount, bool reset, QString* error, int deferredDays = -1, bool notify = true) {
     if (error) error->clear();
     if (!canPay(db, expected.source)) return fail(error, QString::fromUtf8("Недостатньо прав для зміни оплати."));
     if (deferredDays < -1 || deferredDays > 3650) return fail(error, QString::fromUtf8("Відтермінування має бути від 1 до 3650 днів."));
@@ -218,13 +218,7 @@ bool change(QSqlDatabase db, const PurchaseDebt& expected, qint64 amount, bool r
     if (!writeBalance(db, current, paid, dueDate, error)) return abort();
     if (!tx.exec("RELEASE purchase_payment")) { fail(error, tx.lastError().text()); return abort(); }
     PartsQueryService::invalidateCache();
-    SnapshotCacheInvalidator::invalidateOrdersAndParts("purchase_payment");
-    if (RuntimeServices::backupManager()) {
-        BackupCommitPublisher::publish(BackupCommitPublisher::makeEvent(
-            "payments", "purchase_payment", current.source, QString::number(current.id),
-            current.orderUid, current.orderNumber, "purchase_payment", current.name,
-            {"purchase_payment_balances", "purchase_payment_events", "purchase_payment_terms", "work_order_parts", "activity_audit_events", "workshop_spare_payment_allocations"}));
-    }
+    if (notify) notifyPaymentCommitted(current);
     return true;
 }
 }
@@ -404,6 +398,21 @@ bool canPay(QSqlDatabase db,const QString& source) {
     if(!actor.isValid()) return true;
     return actor.role.trimmed().compare("master", Qt::CaseInsensitive) != 0 && AccessControlService::currentUserHasPermission(db,
         source=="inventory" ? QStringLiteral("inventory.purchase") : QStringLiteral("parts.order"));
+}
+void notifyPaymentCommitted(const PurchaseDebt& current)
+{
+    PartsQueryService::invalidateCache();
+    SnapshotCacheInvalidator::invalidateOrdersAndParts("purchase_payment");
+    if (RuntimeServices::backupManager()) {
+        BackupCommitPublisher::publish(BackupCommitPublisher::makeEvent(
+            "payments", "purchase_payment", current.source, QString::number(current.id),
+            current.orderUid, current.orderNumber, "purchase_payment", current.name,
+            {"purchase_payment_balances", "purchase_payment_events", "purchase_payment_terms", "work_order_parts", "activity_audit_events", "workshop_spare_payment_allocations"}));
+    }
+}
+bool payInsideCashTransaction(QSqlDatabase db, const PurchaseDebt& expected, qint64 amount, QString* error)
+{
+    return change(db, expected, amount, false, error, -1, false);
 }
 bool pay(QSqlDatabase db,const PurchaseDebt& expected,qint64 amount,QString* error,int deferredDays) { return change(db,expected,amount,false,error,deferredDays); }
 QVector<PurchaseDebt> orderPartDebts(QSqlDatabase db, int orderNumber, QString* error) {

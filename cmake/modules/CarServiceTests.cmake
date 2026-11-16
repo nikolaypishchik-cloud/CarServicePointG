@@ -35,6 +35,17 @@ if (CS_INTERNAL_QT_TESTS_AVAILABLE)
         if(test_name STREQUAL "PurchasePaymentTests")
             add_test(NAME ${test_name} COMMAND ${CS_PYTHON_NO_BYTECODE_CMD}
                 "${CMAKE_SOURCE_DIR}/scripts/run_purchase_acceptance.py" $<TARGET_FILE:${test_name}>)
+        elseif(test_name STREQUAL "ReportsOrdersTests")
+            foreach(part IN ITEMS reports migration canonical)
+                if(part STREQUAL "reports")
+                    set(report_test_name ReportsOrdersTests)
+                else()
+                    set(report_test_name ReportsOrdersTests_${part})
+                endif()
+                add_test(NAME ${report_test_name} COMMAND ${CS_PYTHON_NO_BYTECODE_CMD}
+                    "${CMAKE_SOURCE_DIR}/scripts/run_report_suite.py" $<TARGET_FILE:ReportsOrdersTests> ${part})
+                set_tests_properties(${report_test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 300)
+            endforeach()
         elseif(cs_uses_qtest)
             add_test(NAME ${test_name} COMMAND ${CS_PYTHON_NO_BYTECODE_CMD}
                 "${CMAKE_SOURCE_DIR}/scripts/run_qt_test.py" $<TARGET_FILE:${test_name}>)

@@ -124,8 +124,10 @@ set(CS_UI_SOURCES
     src/ui/main/MainWindowBuildUi.cpp
     src/ui/main/CashOpeningDialog.cpp
     src/ui/main/CashMovementForm.cpp
+    src/ui/main/CashTreasuryForm.cpp
     src/ui/main/CashBankForm.cpp
     src/ui/main/CashOperationsWidget.cpp
+    src/ui/main/CashJournalPdf.cpp
     src/ui/main/CashOutflowDialog.cpp
     src/ui/main/CashShiftDialog.cpp
     src/ui/main/CashAdvanceDialog.cpp

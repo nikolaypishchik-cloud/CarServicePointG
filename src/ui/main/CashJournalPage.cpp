@@ -142,6 +142,7 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     };
     scrollTab(cashBankForm(tabs,false),tr("Банківська звірка"));
     scrollTab(cashMovementForm(tabs),tr("Переміщення"));
+    scrollTab(cashTreasuryForm(tabs),tr("Касові документи"));
     auto* refund=new QPushButton(tr("Повернення"),this);
     auto* expense=new QPushButton(tr("Видаток"),this);
     refund->setObjectName("refundReceipt");
@@ -192,10 +193,11 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     summary = new QLabel(this);
     summary->setObjectName("cashTotal");
     summary->setWordWrap(true);
+    summary->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     summary->setFixedWidth(215);
     summary->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Minimum);
     summary->setTextFormat(Qt::PlainText);
-    body->addWidget(summary,0,1,2,1,Qt::AlignTop);
+    body->addWidget(summary,0,1,2,1);
     layout->addLayout(body,1);
     // Keep every financial action accessible on narrow windows through the same handlers.
     auto* receiptMenu=new QMenu(this);auto* serviceMenu=new QMenu(this);
@@ -228,7 +230,7 @@ void CashJournalPage::resizeEvent(QResizeEvent* event)
         body->addWidget(summary,1,0);body->addWidget(tabs,2,0);
     }else{
         summary->setFixedWidth(qBound(190,width/5,265));
-        body->addWidget(summary,0,1,2,1,Qt::AlignTop);body->addWidget(tabs,1,0);
+        body->addWidget(summary,0,1,2,1);body->addWidget(tabs,1,0);
     }
     body->setColumnStretch(0,1);
     body->setRowStretch(1,narrow?0:1);body->setRowStretch(2,narrow?1:0);

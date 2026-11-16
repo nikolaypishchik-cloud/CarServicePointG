@@ -57,6 +57,9 @@ bool payInvoice(QSqlDatabase db, const RegisteredInvoice& expected, QString* err
 bool payInvoiceOrders(QSqlDatabase db, const RegisteredInvoice& expected, const QVector<int>& orderNumbers, QString* error = nullptr, qint64 amountCents = -1);
 // deferredDays: -1 preserves the current date, 0 clears it, positive values count from today.
 bool pay(QSqlDatabase db, const PurchaseDebt& expected, qint64 amountCents, QString* error = nullptr, int deferredDays = -1);
+// The cash posting owns the outer transaction and publishes only after commit.
+bool payInsideCashTransaction(QSqlDatabase db, const PurchaseDebt& expected, qint64 amount, QString* error);
+void notifyPaymentCommitted(const PurchaseDebt& current);
 bool resetPart(QSqlDatabase db, int id, QString* error = nullptr);
 bool resetPart(int id,QString* error=nullptr);
 bool refreshPayment(PartRowSnapshot& row,QString* error=nullptr);
