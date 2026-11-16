@@ -84,8 +84,9 @@ ClientList clients(const QString& term) {
     auto db=Database::db();ClientList result;
     const auto like="%"+term+"%";
             QSqlQuery q(db);
+            bool prepared;
             if (term.isEmpty()) {
-                q.prepare(QStringLiteral(
+                prepared = q.prepare(QStringLiteral(
                     "SELECT c.client_uid, c.full_name, c.phone, "
                     "       (SELECT COUNT(*) FROM crm_vehicles v WHERE v.client_uid=c.client_uid), "
                     "       COALESCE((SELECT TRIM(vv.brand || ' ' || vv.model) FROM crm_vehicles vv "
@@ -93,7 +94,7 @@ ClientList clients(const QString& term) {
                     "                 ORDER BY COALESCE(vv.is_primary,0) DESC, vv.updated_at DESC, vv.id DESC LIMIT 1),'') "
                     "FROM crm_clients c ORDER BY c.updated_at DESC, c.id DESC LIMIT 400"));
             } else {
-                q.prepare(QStringLiteral(
+                prepared = q.prepare(QStringLiteral(
                     "SELECT c.client_uid, c.full_name, c.phone, "
                     "       (SELECT COUNT(*) FROM crm_vehicles vcount WHERE vcount.client_uid=c.client_uid), "
                     "       COALESCE((SELECT TRIM(vv.brand || ' ' || vv.model) FROM crm_vehicles vv "
@@ -104,9 +105,17 @@ ClientList clients(const QString& term) {
                     "   OR EXISTS (SELECT 1 FROM crm_vehicles v WHERE v.client_uid=c.client_uid "
                     "              AND (v.plate LIKE ? OR v.vin LIKE ? OR (v.brand || ' ' || v.model) LIKE ?)) "
                     "ORDER BY c.updated_at DESC, c.id DESC LIMIT 400"));
-                for (int i = 0; i < 6; ++i) q.addBindValue(like);
+                if (prepared) for (int i = 0; i < 6; ++i) q.addBindValue(like);
             }
 
+    if (!prepared) {
+        result.error = q.lastError().text();
+        QSqlQuery schema(db);
+        if (schema.exec(QStringLiteral("SELECT count(*) FROM main.sqlite_master WHERE name IN ('crm_clients','crm_vehicles')"))
+            && schema.next() && schema.value(0).toInt() == 0)
+            result.error = QStringLiteral("Довідник клієнтів ще не підготовлено. Відкрийте «Клієнти» та натисніть «Оновити CRM».");
+        return result;
+    }
     collect(q,&result.clients,&result.error);
     if(!result.error.isEmpty())result.clients.clear();return result;
 }

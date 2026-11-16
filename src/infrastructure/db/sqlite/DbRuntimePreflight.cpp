@@ -15,6 +15,9 @@
 #include "infrastructure/db/sqlite/OrderArchiveShardSqlSupport.h"
 #include "core/services/LegacyMutationLogSupport.h"
 #include "core/services/OrderIdentityService.h"
+#include "core/services/WorkshopSpareStockService.h"
+#include "core/crm/CrmClientService.h"
+#include "core/repository/RepositoryWriteBoundary.h"
 #include "core/services/OrderStoragePolicyService.h"
 #include "core/services/legacyimport/RuntimeRecoveryCoordinator.h"
 #include "core/services/OrderArchiveRotationService.h"
@@ -89,6 +92,15 @@ bool Database::runStartupSchemaCheck(QString* errorText)
     if (!d.isValid() || (!d.isOpen() && !d.open())) {
         if (errorText) *errorText = d.lastError().text();
         return false;
+    }
+    // Read-only reports and statements can open before either feature's editor.
+    {
+        RepositoryWriteBoundary setup(d, errorText);
+        if (!setup.started() || !WorkshopSpareStockService::ensureSchema(d, errorText)) return false;
+        const auto tables = d.tables();
+        if (!tables.contains("crm_clients") && !tables.contains("crm_vehicles")
+            && !CrmClientService::ensureLocalSchema(d, errorText)) return false;
+        if (!setup.finish()) return false;
     }
     if (!rebuildRouterViews(d)) {
         if (errorText) *errorText = QStringLiteral("Router schema/view rebuild failed");

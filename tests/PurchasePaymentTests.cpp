@@ -4591,6 +4591,30 @@ private slots:
             QVERIFY(!error.isEmpty());
         }
     }
+    void freshProfileReportsBeforeEditors() {
+        const auto clients = CrmPageReadService::clients(QString());
+        QVERIFY2(clients.error.isEmpty(), qPrintable(clients.error));
+        QVERIFY(clients.clients.isEmpty());
+        const auto parts = ReportsDataLoader::buildPartsSnapshot(db.databaseName(), "2026-11-01", "2026-11-30", 0, 0, {}, {});
+        QVERIFY2(parts.error.isEmpty(), qPrintable(parts.error));
+        QVERIFY2(parts.supplierDebtError.isEmpty(), qPrintable(parts.supplierDebtError));
+        QVERIFY(parts.rows.isEmpty());
+    }
+    void statementClientsDistinguishUnpreparedAndDamagedCrm() {
+        const auto before = db.tables();
+        for (const auto& term : {QString(), QStringLiteral("QA")}) {
+            const auto list = CrmPageReadService::clients(term);
+            QVERIFY(list.clients.isEmpty());
+            QVERIFY2(list.error.contains(tr("Оновити CRM")), qPrintable(list.error));
+            QCOMPARE(db.tables(), before);
+        }
+        QSqlQuery query(db);
+        QVERIFY(query.exec("CREATE TABLE crm_clients(id INTEGER PRIMARY KEY)"));
+        const auto partial = CrmPageReadService::clients(QString());
+        QVERIFY(!partial.error.isEmpty());
+        QVERIFY(!partial.error.contains(tr("Оновити CRM")));
+        QVERIFY(!db.tables().contains("crm_vehicles"));
+    }
     void statementApprovalOpensSourceCard() { checkStatementApprovalAndPreview(db); }
     void pendingFinanceHeaderActions() {
         ActivityAuditService::setCurrentActor({"owner","Owner","owner","test"});
@@ -7390,7 +7414,8 @@ private slots:
         QVERIFY2(Database::openPrepared(&runtimeError),qPrintable(runtimeError));
         db=Database::db();
         QCOMPARE(QFileInfo(db.databaseName()).absoluteFilePath(),QFileInfo(App::activeDbFilePath()).absoluteFilePath());
-        if (QByteArray(QTest::currentTestFunction())=="linkedOrderClickOpensMatchingUid") {
+        if (QByteArray(QTest::currentTestFunction())=="linkedOrderClickOpensMatchingUid"
+            || QByteArray(QTest::currentTestFunction())=="freshProfileReportsBeforeEditors") {
             QVERIFY2(Database::runStartupSchemaCheck(&runtimeError),qPrintable(runtimeError));
             return;
         }

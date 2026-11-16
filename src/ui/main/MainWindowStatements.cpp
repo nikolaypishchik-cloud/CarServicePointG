@@ -1,4 +1,5 @@
 #include "ui/main/MainWindow.h"
+#include "ui/common/dialogs/PersonnelDialogStyle.h"
 #include "core/crm/CrmPageReadService.h"
 #include <QComboBox>
 #include <QDateEdit>
@@ -102,6 +103,10 @@ void MainWindow::openHeaderStatements()
     dialog->setObjectName("headerStatementsWindow");
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setWindowTitle(tr("Виписки"));
+    PersonnelDialogStyle::apply(*dialog);
+    dialog->setStyleSheet(dialog->styleSheet() + QStringLiteral(
+        "QTabBar::tab {background:#354b5b;color:#ffffff;padding:6px 10px;}"
+        "QTabBar::tab:selected {background:#e5edf5;color:#101418;}"));
     auto* layout = new QVBoxLayout(dialog);
     auto* form = new QFormLayout;
     layout->addLayout(form);
@@ -436,6 +441,8 @@ void MainWindow::openHeaderStatements()
         for (const auto& person : result.clients)
             client->addItem(person.value(1).toString()+" "+person.value(2).toString(), person.value(0));
         if (!result.error.isEmpty()) message->setText(result.error);
+        else if (result.clients.isEmpty())
+            message->setText(search->text().isEmpty() ? tr("У довіднику немає клієнтів.") : tr("За цим пошуком клієнтів не знайдено."));
         generate->setEnabled(client->currentIndex()>=0);
     };
     connect(search,&QLineEdit::returnPressed,dialog,load);

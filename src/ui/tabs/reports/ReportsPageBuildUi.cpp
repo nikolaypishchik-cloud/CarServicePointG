@@ -271,7 +271,12 @@ void ReportsPage::buildUi()
     m_tabs->addTab(periodPage, QString::fromUtf8("Звіт за період"));
     auto* ordersPage = makeTab(m_ordersTable, m_ordersModel);
     m_orderPager = new OrderReportPager(m_ordersTable, m_ordersModel, ordersPage);
-    auto* orderFilterLayout = new QHBoxLayout;
+    auto* orderFilters = new QWidget(ordersPage);
+    orderFilters->setObjectName("orderReportFilters");
+    orderFilters->setAttribute(Qt::WA_StyledBackground);
+    orderFilters->setStyleSheet("#orderReportFilters {background:#eef3f7;} #orderReportFilters QLabel {background:transparent;color:#172a3a;}");
+    auto* orderFilterLayout = new QHBoxLayout(orderFilters);
+    orderFilterLayout->setContentsMargins(8, 2, 8, 2);
     auto* payment = new QComboBox(ordersPage);
     payment->setObjectName("orderReportPaymentFilter");
     payment->setAccessibleName(tr("Оплата"));
@@ -287,7 +292,7 @@ void ReportsPage::buildUi()
     orderFilterLayout->addWidget(new QLabel(tr("Групування"), ordersPage));
     orderFilterLayout->addWidget(orderGrouping);
     orderFilterLayout->addStretch();
-    qobject_cast<QVBoxLayout*>(ordersPage->layout())->insertLayout(0, orderFilterLayout);
+    qobject_cast<QVBoxLayout*>(ordersPage->layout())->insertWidget(0, orderFilters);
     connect(payment, &QComboBox::currentIndexChanged, this, [this, payment] {
         m_orderPaymentFilter = payment->currentData().toString();
         markDirty(); scheduleRefresh(0);
