@@ -152,11 +152,22 @@ bool setIsolatedTestRoot(const QString& value)
 
 class ReportsOrdersTests final : public QObject {
     Q_OBJECT
+    const QString initialAppName = QCoreApplication::applicationName();
+    const QString initialOrgName = QCoreApplication::organizationName();
+    const QSettings::Format initialSettingsFormat = QSettings::defaultFormat();
+    const QString initialIniPath = QFileInfo(QSettings(QSettings::IniFormat, QSettings::UserScope,
+                                                       QStringLiteral("ReportsSettingsPath")).fileName()).absolutePath();
+    const bool initialTestMode = QStandardPaths::isTestModeEnabled();
 private slots:
     void cleanup() {
         // QtTest also calls cleanup after an assertion returns early. Never let
         // a deliberately minimal SQL fixture become the next slot's runtime.
         Database::close();
+        QCoreApplication::setApplicationName(initialAppName);
+        QCoreApplication::setOrganizationName(initialOrgName);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, initialIniPath);
+        QSettings::setDefaultFormat(initialSettingsFormat);
+        QStandardPaths::setTestModeEnabled(initialTestMode);
     }
     void initTestCase() {
         QNetworkProxy::setApplicationProxy(QNetworkProxy(QNetworkProxy::HttpProxy,"127.0.0.1",9));
