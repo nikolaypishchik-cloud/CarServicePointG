@@ -33,6 +33,7 @@ struct Journal {
     bool available = false;
     QString error;
 };
+Journal readJournal(QDate firstDay, QDate lastDay);
 Journal readJournal(QSqlDatabase db, QDate firstDay, QDate lastDay);
 struct PaymentHistory {
     QList<Payment> payments;

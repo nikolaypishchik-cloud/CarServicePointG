@@ -144,6 +144,7 @@ void MainWindow::buildUi()
         "QPushButton#sb_btn_orders:pressed{background:#ecb800;border-color:white;}"));
     auto* btnHistory = mkMenuButton(QString::fromUtf8("Завершені наряди"), m_menu, topMenuContent);
     auto* btnParts   = mkMenuButton(QString::fromUtf8("Замовлення запчастин"), m_menu, topMenuContent);
+    auto* btnCash = mkMenuButton(tr("Каса"), m_menu, topMenuContent);
     auto* btnReports = mkMenuButton(QString::fromUtf8("Звіти"), m_menu, topMenuContent);
     auto* btnCrm     = mkMenuButton(QString::fromUtf8("Клієнти"), m_menu, topMenuContent);
     auto* btnWorkshopInventory = mkMenuButton(QString::fromUtf8("Склад СТО"), m_menu, bottomMenu);
@@ -172,6 +173,7 @@ void MainWindow::buildUi()
     topMenuL->addWidget(btnCurrent);
     topMenuL->addWidget(btnHistory);
     topMenuL->addWidget(btnParts);
+    topMenuL->addWidget(btnCash);
     topMenuL->addWidget(btnReports);
     topMenuL->addWidget(btnCrm);
     topMenuL->addStretch(1);
@@ -292,7 +294,7 @@ void MainWindow::buildUi()
     auto* rate = makeModuleButton("headerExchangeRate", tr("Курс"), tr("Екран «Курс» буде додано пізніше."));
     rate->setIcon(pendingHeaderIcon(true));
     rate->setEnabled(false);
-    auto* cash = makeModuleButton("headerCash", tr("Каса"), tr("Екран «Каса» буде доступний після додавання модуля каси."));
+    auto* cash = makeModuleButton("headerCash", tr("Каса"), tr("Відкрити Касу"));
     QPixmap safeImage(64, 64);
     safeImage.fill(Qt::transparent);
     {
@@ -308,7 +310,9 @@ void MainWindow::buildUi()
     QIcon safeIcon(safeImage);
     safeIcon.addPixmap(safeImage, QIcon::Disabled);
     cash->setIcon(safeIcon);
+    m_headerCash = cash;
     cash->setEnabled(false);
+    connect(cash,&QToolButton::clicked,this,[this,btnCash] { if (canAccessPage(15)) btnCash->click(); });
     m_headerStatements = makeModuleButton("headerStatements", tr("Виписки"), tr("Відкрити Виписки"));
     m_headerStatements->setIcon(pendingHeaderIcon(false));
     m_headerStatements->setEnabled(false);
@@ -390,6 +394,7 @@ void MainWindow::buildUi()
     m_stack->addWidget(m_placeholderVehicleIntake); // 12
     m_stack->addWidget(m_placeholderWorkshopInventory); // 13
     m_stack->addWidget(m_placeholderPhoneSync); // 14
+    m_stack->addWidget(new QWidget(m_stack)); // 15: cash journal
 
     // Materialize the initial Current Orders page eagerly so the main window
     // opens on the real first tab instead of a placeholder flash. Heavy page
@@ -438,6 +443,7 @@ void MainWindow::buildUi()
         if (index == 3) btnHistory->setChecked(true);
     });
     connect(btnParts,    &QPushButton::clicked, this, [this]() { gotoPage(4); });
+    connect(btnCash,&QPushButton::clicked,this,[this] { gotoPage(15); if (m_stack->currentIndex()==15) m_stack->currentWidget()->setFocus(); });
     connect(btnReports,  &QPushButton::clicked, this, [this]() { gotoPage(5); });
     connect(btnCrm,      &QPushButton::clicked, this, [this]() { gotoPage(9); });
     connect(btnVehicleIntake, &QPushButton::clicked, this, [this]() { gotoPage(12); });
@@ -457,6 +463,7 @@ void MainWindow::buildUi()
         {QStringLiteral("nav.current_orders"), btnCurrent},
         {QStringLiteral("nav.history"), btnHistory},
         {QStringLiteral("nav.parts"), btnParts},
+        {QStringLiteral("cash.view"), btnCash},
         {QStringLiteral("nav.reports"), btnReports},
         {QStringLiteral("nav.clients"), btnCrm},
         {QStringLiteral("nav.inventory"), btnWorkshopInventory},

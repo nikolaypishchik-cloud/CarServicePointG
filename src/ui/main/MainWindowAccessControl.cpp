@@ -1,4 +1,5 @@
 #include "ui/main/MainWindow.h"
+#include "ui/main/CashJournalPage.h"
 #include "ui/main/ExternalDisplayController.h"
 
 #include "core/services/AccessControlService.h"
@@ -34,6 +35,7 @@ QString permissionForPage(int index)
     case 11: return QStringLiteral("nav.planning");
     case 12: return QStringLiteral("nav.intake");
     case 13: return QStringLiteral("nav.inventory");
+    case 15: return QStringLiteral("cash.view");
     case 14: return QStringLiteral("mobile.pair");
     default: return {};
     }
@@ -51,6 +53,13 @@ bool MainWindow::hasPermission(const QString& permissionKey) const
 void MainWindow::refreshAccessControl()
 {
     if (auto* dialog = findChild<QDialog*>("headerStatementsWindow")) delete dialog;
+    if (m_cashJournal) {
+        if (m_stack->currentWidget() == m_cashJournal) m_stack->setCurrentIndex(1);
+        m_stack->removeWidget(m_cashJournal);
+        delete m_cashJournal;
+        m_cashJournal = nullptr;
+        m_stack->insertWidget(15,new QWidget(m_stack));
+    }
     if (m_externalDisplays) m_externalDisplays->stopAll();
     applyAccessControl();
     // Remove the preceding session's role-sensitive content immediately.
@@ -96,7 +105,7 @@ void MainWindow::switchUser()
 
 bool MainWindow::canAccessPage(int idx) const
 {
-    if (AccessControlService::currentActorIsMaster()
+    if (idx != 15 && AccessControlService::currentActorIsMaster()
         && !QList<int>{0, 1, 3, 4, 14}.contains(idx)) return false;
     return hasPermission(permissionForPage(idx));
 }
@@ -112,6 +121,7 @@ void MainWindow::applyAccessControl()
         it.value()->setEnabled(allowed);
     }
 
+    if (m_headerCash) m_headerCash->setEnabled(canAccessPage(15));
     if (m_headerStatements) m_headerStatements->setEnabled(canAccessPage(9));
     if (m_headerExpenses) m_headerExpenses->setEnabled(canAccessPage(5));
     if (m_headerWarehouse) m_headerWarehouse->setEnabled(canAccessPage(13));

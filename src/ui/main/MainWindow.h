@@ -11,6 +11,7 @@
 #include <QJsonObject>
 
 class UnpaidBannerWidget;
+class CashJournalPage;
 class PlanningPage;
 class CurrentOrdersPage;
 class HistoryPage;
@@ -98,6 +99,8 @@ private:
     QWidget* m_sidebar = nullptr;
     QWidget* m_content = nullptr;
     QWidget* m_topPill = nullptr;
+    QAbstractButton* m_headerCash = nullptr;
+    CashJournalPage* m_cashJournal = nullptr;
     QAbstractButton* m_headerStatements = nullptr;
     QAbstractButton* m_headerExpenses = nullptr;
     QAbstractButton* m_headerWarehouse = nullptr;

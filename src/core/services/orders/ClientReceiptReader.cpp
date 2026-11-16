@@ -1,6 +1,7 @@
 #include "core/services/orders/ClientReceiptReader.h"
 #include "core/finance/ExactMoney.h"
 #include "core/services/AccessControlService.h"
+#include "infrastructure/db/sqlite/Db.h"
 #include <QSqlQuery>
 #include <QSqlError>
 
@@ -51,6 +52,11 @@ Result read(QSqlDatabase db, const QSet<QString>& orderUids) {
     if (query.lastError().isValid()) return fail(query.lastError().text());
     return result;
 }
+Journal readJournal(QDate firstDay, QDate lastDay)
+{
+    return readJournal(Database::db(), firstDay, lastDay);
+}
+
 Journal readJournal(QSqlDatabase db, QDate firstDay, QDate lastDay)
 {
     auto fail = [](QString error) { Journal result; result.error = error; return result; };

@@ -3,6 +3,7 @@
 
 #include "ui/main/MainWindowModulePrelude.h"
 #include "ui/main/ExternalDisplayController.h"
+#include "ui/main/CashJournalPage.h"
 #include "runtime/AsyncThreadScope.h"
 #include "core/services/AppRuntimeService.h"
 #include <QMessageBox>
@@ -259,6 +260,13 @@ QWidget* MainWindow::ensurePage(int idx)
     case 11: if (!m_pageOnlineBooking) m_pageOnlineBooking = static_cast<OnlineBookingPage*>(replacePlaceholder(m_placeholderOnlineBooking, new OnlineBookingPage(m_stack))); return m_pageOnlineBooking ? m_pageOnlineBooking : existing;
     case 12: if (!m_pageVehicleIntake) m_pageVehicleIntake = static_cast<VehicleIntakePage*>(replacePlaceholder(m_placeholderVehicleIntake, new VehicleIntakePage(m_stack))); return m_pageVehicleIntake ? m_pageVehicleIntake : existing;
     case 13: if (!m_pageWorkshopInventory) m_pageWorkshopInventory = static_cast<WorkshopInventoryPage*>(replacePlaceholder(m_placeholderWorkshopInventory, new WorkshopInventoryPage(m_stack))); return m_pageWorkshopInventory ? m_pageWorkshopInventory : existing;
+    case 15:
+        if (!canAccessPage(idx)) return nullptr;
+        if (!m_cashJournal) {
+            m_cashJournal = new CashJournalPage(m_stack);
+            replacePlaceholder(existing,m_cashJournal);
+        }
+        return m_cashJournal;
     case 14: if (!m_pagePhoneSync) m_pagePhoneSync = replacePlaceholder(m_placeholderPhoneSync, PhoneSyncSettingsPage::build(m_stack)); return m_pagePhoneSync ? m_pagePhoneSync : existing;
     default: return existing;
     }
@@ -369,6 +377,7 @@ void MainWindow::refreshCurrentPage()
     case 11: if (m_pageOnlineBooking) m_pageOnlineBooking->refresh(); break;
     case 12: if (m_pageVehicleIntake) m_pageVehicleIntake->refresh(); break;
     case 13: if (m_pageWorkshopInventory) m_pageWorkshopInventory->refresh(); break;
+    case 15: if (m_cashJournal) m_cashJournal->refresh(); break;
     case 14: break;
     default: break;
     }
@@ -392,6 +401,7 @@ QString MainWindow::pageNameForIndex(int idx) const
     case 11: return QStringLiteral("online_booking");
     case 12: return QStringLiteral("vehicle_intake");
     case 13: return QStringLiteral("workshop_inventory");
+    case 15: return QStringLiteral("cash");
     case 14: return QStringLiteral("phone_sync");
     default: return QStringLiteral("unknown");
     }
@@ -414,6 +424,7 @@ QString MainWindow::pageTitleForIndex(int idx) const
     case 11: return QString::fromUtf8("Онлайн-заявки");
     case 12: return QString::fromUtf8("Приймання авто");
     case 13: return QString::fromUtf8("Склад СТО");
+    case 15: return tr("Каса");
     case 14: return QString::fromUtf8("Синхронізація телефону");
     default: return QString();
     }
@@ -485,6 +496,7 @@ bool MainWindow::isPageMaterialized(int idx) const
     case 11: return m_pageOnlineBooking != nullptr;
     case 12: return m_pageVehicleIntake != nullptr;
     case 13: return m_pageWorkshopInventory != nullptr;
+    case 15: return m_cashJournal != nullptr;
     case 14: return m_pagePhoneSync != nullptr;
     default: return false;
     }

@@ -1,4 +1,4 @@
-﻿#include "TestSourceAssertions.h"
+#include "TestSourceAssertions.h"
 #include "core/services/orders/OrderDialogReadQueryService.h"
 #include "ui/common/dialogs/InvoiceReviewDialog.h"
 #include "ui/tabs/orders/CurrentOrdersPageLocalSupport.h"
@@ -202,6 +202,7 @@ static void expectRejectedTransaction(const QString& reason)
 }
 
 void checkWeeklyReportScreen(QSqlDatabase db);
+void checkFinanceHeaderActions(QSqlDatabase db);
 void checkStatementApprovalAndPreview(QSqlDatabase db);
 
 class PurchasePaymentTests final : public QObject {
@@ -4616,67 +4617,7 @@ private slots:
         QVERIFY(!db.tables().contains("crm_vehicles"));
     }
     void statementApprovalOpensSourceCard() { checkStatementApprovalAndPreview(db); }
-    void pendingFinanceHeaderActions() {
-        ActivityAuditService::setCurrentActor({"owner","Owner","owner","test"});
-        MainWindow window;
-        window.resize(1280, 800);
-        window.show();
-        auto* header = window.findChild<QFrame*>("top_pill");
-        auto* pages = window.findChild<QStackedWidget*>("pages");
-        QVERIFY(header && pages);
-        auto* rate = header->findChild<QToolButton*>("headerExchangeRate");
-        auto* statements = header->findChild<QToolButton*>("headerStatements");
-        QVERIFY(rate && statements);
-        auto* logo = header->findChild<QWidget*>("animated_logo");
-        QVERIFY(logo);
-        QCOMPARE(logo->accessibleName(), QStringLiteral("CarService PointG"));
-        QCOMPARE(rate->text(), QStringLiteral("Курс"));
-        QCOMPARE(statements->text(), QStringLiteral("Виписки"));
-        for (int index : {1, 3, 9}) {
-            pages->setCurrentIndex(index);
-            QCoreApplication::processEvents();
-            for (auto* button : {rate, statements}) {
-                QVERIFY(button->isVisibleTo(&window));
-                QCOMPARE(button->isEnabled(), button == statements);
-                QVERIFY(!button->icon().isNull());
-                QVERIFY(button->toolTip().contains(button->text()));
-                QVERIFY(header->rect().contains(QRect(button->mapTo(header,QPoint()),button->size())));
-                button->click();
-                QCOMPARE(pages->currentIndex(), index);
-            }
-            auto* dialog = window.findChild<QDialog*>("headerStatementsWindow");
-            QVERIFY(dialog && dialog->isVisible());
-            statements->click();
-            QCOMPARE(window.findChildren<QDialog*>("headerStatementsWindow").size(), 1);
-            QCOMPARE(window.findChild<QDialog*>("headerStatementsWindow"), dialog);
-            QVERIFY(logo->isVisibleTo(&window));
-            const QRect brand(logo->mapTo(header, QPoint()), logo->size());
-            QVERIFY(header->rect().contains(brand));
-            QVERIFY(brand.left() < header->width() / 10);
-            QVERIFY(brand.right() < rate->mapTo(header, QPoint()).x());
-            QVERIFY(rate->mapTo(header, rate->rect().topRight()).x() < statements->mapTo(header,QPoint()).x());
-        }
-        const QStringList headerNames{"headerWarehouse", "headerExpenses", "headerInventoryBalance",
-                                      "headerExchangeRate", "headerCash", "headerStatements"};
-        const QString captures = qEnvironmentVariable("CS_HEADER_SIZE_CAPTURES");
-        for (const auto& size : {QSize(1280,720), QSize(1366,768), QSize(1920,1080)}) {
-            window.resize(size);
-            QCoreApplication::processEvents();
-            int edge = logo->mapTo(header, logo->rect().topRight()).x();
-            for (const auto& name : headerNames) {
-                auto* button = header->findChild<QToolButton*>(name);
-                QVERIFY2(button && button->isVisibleTo(&window), qPrintable(name));
-                QVERIFY(!button->icon().isNull());
-                const QRect bounds(button->mapTo(header, QPoint()), button->size());
-                QVERIFY2(header->rect().contains(bounds) && bounds.left() > edge, qPrintable(name));
-                edge = bounds.right();
-            }
-            QVERIFY(!header->findChild<QToolButton*>("headerCash")->isEnabled());
-            if (!captures.isEmpty()) QVERIFY(window.grab().save(QDir(captures).filePath(QString("shell-%1.png").arg(size.width()))));
-        }
-        const QString path = qEnvironmentVariable("CS_HEADER_PREVIEW");
-        if (!path.isEmpty()) QVERIFY(header->grab().save(path));
-    }
+    void pendingFinanceHeaderActions() { checkFinanceHeaderActions(db); }
     void debtBannerPinnedLayout() {
         MainWindow window;
         window.resize(1400, 900);

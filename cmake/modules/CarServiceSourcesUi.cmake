@@ -122,6 +122,7 @@ set(CS_UI_SOURCES
     src/ui/common/dialogs/OrderDialogLifecycleFlow.cpp
     src/ui/common/dialogs/OrderDialogPdfFlow.cpp
     src/ui/main/MainWindowBuildUi.cpp
+    src/ui/main/CashJournalPage.cpp
     src/ui/main/MainWindowStatements.cpp
     src/ui/main/MainWindowRuntime.cpp
     src/ui/main/MainWindowAccessControl.cpp
