@@ -113,6 +113,18 @@ private slots:
         QCOMPARE(result.entries.front().payment.uid,QStringLiteral("b"));
         QCOMPARE(result.entries.front().orderUid,QStringLiteral("o2"));
         QCOMPARE(result.entries.front().actor,QStringLiteral("staff-b"));
+        // The cash journal and order history are views of the same payment.
+        const auto repeatedJournal = ClientReceiptReader::readJournal(db,day,day);
+        const auto orderHistory = ClientReceiptReader::readPeriod(db,"o2",day,day);
+        QVERIFY(repeatedJournal.error.isEmpty() && orderHistory.error.isEmpty());
+        QCOMPARE(repeatedJournal.entries.size(),result.entries.size());
+        QCOMPARE(repeatedJournal.directPaymentsCents,result.directPaymentsCents);
+        QCOMPARE(orderHistory.payments.size(),1);
+        QCOMPARE(orderHistory.payments.front().uid,result.entries.front().payment.uid);
+        QCOMPARE(orderHistory.payments.front().cents,result.entries.front().payment.cents);
+        QVERIFY(q.exec("SELECT COUNT(*) FROM client_payments"));
+        QVERIFY(q.next());
+        QCOMPARE(q.value(0).toInt(),3);
         const auto empty = ClientReceiptReader::readJournal(db,day.addDays(1),day.addDays(1));
         QVERIFY(empty.available && empty.error.isEmpty() && empty.entries.isEmpty());
         QCOMPARE(empty.directPaymentsCents,0);
