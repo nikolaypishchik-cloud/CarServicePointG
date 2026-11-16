@@ -1,3 +1,4 @@
+#include "ui/tabs/reports/OrderReportPager.h"
 #include "core/services/orders/ClientReceiptReader.h"
 // P2 architecture migration: implementation module converted from legacy .ipp implementation-fragment decomposition.
 // Compiled as a separate P2 implementation module; include-order dependencies are isolated in the module prelude.
@@ -504,7 +505,7 @@ void ReportsPage::applyOrdersSnapshot(const OrdersSnapshot& snapshot)
 {
     auto visible=snapshot;
     if(m_orderStatusFilter!=0)visible.rows.removeIf([this](const OrdersSnapshotRow& row){return m_orderStatusFilter==1?row.closed:!row.closed;});
-    ReportsTableSupport::applyOrdersSnapshot(m_ordersTable, m_ordersModel, visible);
+    m_orderPager->setSnapshot(visible);
     QList<qint64> receipts;
     for(const auto& row:visible.rows)receipts.append(row.clientReceivedCents);
     const auto received=ClientReceiptReader::total(receipts);

@@ -21,6 +21,8 @@ class PartsRegisterView final : public QWidget {
 public:
     explicit PartsRegisterView(QWidget* parent) : QWidget(parent) {
         setObjectName("partsRegisterView");
+        setAttribute(Qt::WA_StyledBackground);
+        setStyleSheet(QStringLiteral("#partsRegisterView { background: #edf2f6; } #partsRegisterView QLabel { color: #203447; background: transparent; }"));
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
         auto* filters = new QHBoxLayout;

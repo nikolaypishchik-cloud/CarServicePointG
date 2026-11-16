@@ -6,6 +6,8 @@
 #include "core/util/FormatUtils.h"
 
 #include <QFrame>
+#include <QScrollArea>
+#include <QResizeEvent>
 #include <QGridLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -17,6 +19,17 @@
 
 namespace {
 using namespace ReportsUiSupport;
+
+class ExpensePanels final : public QWidget {
+public:
+    using QWidget::QWidget;
+protected:
+    void resizeEvent(QResizeEvent* event) override {
+        QWidget::resizeEvent(event);
+        auto* panels = static_cast<QBoxLayout*>(layout());
+        panels->setDirection(event->size().width() >= 780 ? QBoxLayout::LeftToRight : QBoxLayout::TopToBottom);
+    }
+};
 
 void setEnabledIfPresent(QWidget* widget, bool enabled)
 {
@@ -82,58 +95,53 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
     expTitle->setFont(expTitleFont);
     expRoot->addWidget(expTitle);
 
-    auto* electricityPanel = new QFrame(w.page);
+    auto* scroll = new QScrollArea(w.page);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    auto* content = new ExpensePanels;
+    auto* panels = new QBoxLayout(QBoxLayout::LeftToRight, content);
+    panels->setContentsMargins(0, 0, 0, 0);
+    panels->setSpacing(10);
+    scroll->setWidget(content);
+    expRoot->addWidget(scroll, 1);
+    auto* electricityPanel = new QFrame(content);
     electricityPanel->setObjectName(QStringLiteral("electricityPanel"));
-    expRoot->addWidget(electricityPanel);
+    panels->addWidget(electricityPanel, 2);
     auto* grid = new QGridLayout(electricityPanel);
     grid->setColumnStretch(1, 1);
-    grid->setColumnStretch(4, 1);
-    int rr = 0;
-    auto* elecHeader = new QLabel(QString::fromUtf8("Ел.енергія"), w.page);
+    auto* elecHeader = new QLabel(QStringLiteral("Електроенергія"), electricityPanel);
     QFont secf = elecHeader->font();
     secf.setBold(true);
     elecHeader->setFont(secf);
-    grid->addWidget(elecHeader, rr, 0);
-    ++rr;
-
-    grid->addWidget(new QLabel(QString::fromUtf8("Лічильник поточний"), w.page), rr, 0);
-    w.elecCurrEdit = makeWordField();
-    w.elecCurrEdit->setAccessibleName(QStringLiteral("Поточний показник"));
-    grid->addWidget(w.elecCurrEdit, rr, 1);
-    grid->addWidget(new QLabel(QString::fromUtf8("Лічильник минулий"), w.page), rr, 3);
-    w.elecPrevEdit = makeWordField();
-    w.elecPrevEdit->setAccessibleName(QStringLiteral("Попередній показник"));
-    w.elecPrevEdit->setMaximumWidth(170);
-    grid->addWidget(w.elecPrevEdit, rr, 4, Qt::AlignLeft);
-    ++rr;
-
-    grid->addWidget(new QLabel(QString::fromUtf8("Споживання (кВт·год)"), w.page), rr, 0);
-    w.elecKwhEdit = makeWordField();
-    w.elecKwhEdit->setReadOnly(true);
-    grid->addWidget(w.elecKwhEdit, rr, 1);
-    grid->addWidget(new QLabel(QString::fromUtf8("Тариф (грн/кВт·год)"), w.page), rr, 3);
-    w.elecTariffEdit = makeWordField();
-    w.elecTariffEdit->setAccessibleName(QStringLiteral("Тариф"));
-    w.elecTariffEdit->setMaximumWidth(170);
-    grid->addWidget(w.elecTariffEdit, rr, 4, Qt::AlignLeft);
-    ++rr;
-
-    grid->addWidget(new QLabel(QString::fromUtf8("Всього (грн)"), w.page), rr, 0);
-    w.elecCostEdit = makeWordField();
-    w.elecCostEdit->setReadOnly(true);
-    grid->addWidget(w.elecCostEdit, rr, 1);
-    ++rr;
-
-    auto* otherPanel = new QFrame(w.page);
+    grid->addWidget(elecHeader, 0, 0, 1, 2);
+    int rr = 1;
+    const auto addMeter = [&](QString caption, QLineEdit*& field, bool readOnly = false) {
+        auto* label = new QLabel(caption, electricityPanel);
+        field = makeWordField();
+        field->setAccessibleName(caption.section(QLatin1Char(','), 0, 0));
+        field->setReadOnly(readOnly);
+        label->setBuddy(field);
+        grid->addWidget(label, rr, 0);
+        grid->addWidget(field, rr++, 1);
+    };
+    addMeter(QStringLiteral("Попередній показник, кВт·год"), w.elecPrevEdit);
+    addMeter(QStringLiteral("Поточний показник, кВт·год"), w.elecCurrEdit);
+    addMeter(QStringLiteral("Тариф, грн/кВт·год"), w.elecTariffEdit);
+    addMeter(QStringLiteral("Споживання, кВт·год"), w.elecKwhEdit, true);
+    addMeter(QStringLiteral("Вартість, грн"), w.elecCostEdit, true);
+    auto* otherPanel = new QFrame(content);
     otherPanel->setObjectName(QStringLiteral("otherExpensesPanel"));
-    expRoot->addWidget(otherPanel);
+    panels->addWidget(otherPanel, 3);
     auto* expensesGrid = new QGridLayout(otherPanel);
     expensesGrid->setColumnStretch(1, 1);
     expensesGrid->setColumnStretch(4, 1);
     auto* otherHeader = new QLabel(QString::fromUtf8("Інші витрати"), otherPanel);
     otherHeader->setFont(secf);
     expensesGrid->addWidget(otherHeader, 0, 0, 1, 5);
-    int expenseRow = 1;
+    expensesGrid->addWidget(new QLabel(QStringLiteral("Категорія"), otherPanel), 1, 0);
+    expensesGrid->addWidget(new QLabel(QStringLiteral("Сума, грн"), otherPanel), 1, 1);
+    expensesGrid->addWidget(new QLabel(QStringLiteral("Примітка"), otherPanel), 1, 3, 1, 2);
+    int expenseRow = 2;
     addExpenseRow(otherPanel, expensesGrid, expenseRow, QString::fromUtf8("Витрати на миючі засоби"), w.cleaningEdit, w.cleaningNoteEdit);
     addExpenseRow(otherPanel, expensesGrid, expenseRow, QString::fromUtf8("Витрати на ПЗ OpenDataBot"), w.softwareEdit, w.softwareNoteEdit);
     addExpenseRow(otherPanel, expensesGrid, expenseRow, QString::fromUtf8("Опалення"), w.heatingEdit, w.heatingNoteEdit);
@@ -152,11 +160,13 @@ ExpensesWidgets buildExpensesPage(QWidget* parent)
     w.repeatButton = new QPushButton(QStringLiteral("Повторити минулий період"), w.page);
     w.repeatButton->setObjectName(QStringLiteral("expenseRepeat"));
     w.repeatButton->setEnabled(false);
-    footer->addWidget(w.repeatButton);
+    expensesGrid->addWidget(w.repeatButton, expenseRow, 0, 1, 5);
+    expensesGrid->setRowStretch(expenseRow + 1, 1);
     w.electricityPdfButton = new QPushButton(QString::fromUtf8("PDF ел.енергії"), w.page);
     w.expensesSaveButton = new QPushButton(QString::fromUtf8("Зберегти"), w.page);
     w.expensesSaveButton->setObjectName(QStringLiteral("expenseSave"));
-    footer->addWidget(w.electricityPdfButton);
+    grid->addWidget(w.electricityPdfButton, rr, 0, 1, 2);
+    grid->setRowStretch(rr + 1, 1);
     footer->addWidget(w.expensesSaveButton);
     w.validationLabel = new QLabel(w.page);
     w.validationLabel->setObjectName(QStringLiteral("expenseValidation"));

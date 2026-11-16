@@ -1,3 +1,4 @@
+#include "ui/tabs/reports/OrderReportPager.h"
 #include "AdminPayrollIdentityFixture.h"
 #include "PayrollGraphProjectionFixture.h"
 #include "PayrollIdentityFixture.h"
@@ -331,6 +332,38 @@ private slots:
         QVERIFY(dates->isHidden());
         for (int column = 0; column < 4; ++column) QVERIFY(!table->isColumnHidden(column));
         QCOMPARE(view.exportSelection().rows.size(),2);
+    }
+
+    void orderReportSortsBeforePagingAndDropsStaleRows() {
+        QTableView table;
+        ReportsTableSupport::ReportsSnapshotTableModel model;
+        table.setModel(&model);
+        OrderReportPager pager(&table, &model, nullptr);
+        OrdersSnapshot full;
+        for (int number = 61; number > 0; --number) {
+            OrdersSnapshotRow row;
+            row.orderNumber = QString::number(number);
+            row.invoiceTotal = FormatUtils::money(number + 0.25, 2);
+            row.internalOrderNumber = 1000 + number;
+            full.rows.append(row);
+        }
+        pager.setSnapshot(full);
+        QCOMPARE(model.rowCount(), 50);
+        auto* next = pager.findChild<QPushButton*>("reportOrdersNextPage");
+        auto* size = pager.findChild<QComboBox*>("reportOrdersPageSize");
+        QVERIFY(next && size);
+        next->click();
+        QCOMPARE(model.rowCount(), 11);
+        QCOMPARE(model.cellUserValue(0, 0).toInt(), 1011);
+        size->setCurrentIndex(0);
+        QCOMPARE(model.rowCount(), 10);
+        QVERIFY(QMetaObject::invokeMethod(table.horizontalHeader(), "sectionClicked", Q_ARG(int,4)));
+        QCOMPARE(model.cellUserValue(0, 0).toInt(), 1001);
+        next->click();
+        QCOMPARE(model.cellUserValue(0, 0).toInt(), 1011);
+        model.setMessageRow(QStringLiteral("Завантаження"));
+        QVERIFY(!pager.isEnabled());
+        QCOMPARE(model.rowCount(), 1);
     }
 
     void flatPartsRegister() {
@@ -1499,6 +1532,12 @@ private slots:
         rent->setText("120,50");
         QVERIFY(save->isEnabled());
         QVERIFY(!warning->isVisible());
+        page.resize(1200, 760);
+        QCoreApplication::processEvents();
+        auto* electricity = form->findChild<QFrame*>("electricityPanel");
+        auto* other = form->findChild<QFrame*>("otherExpensesPanel");
+        QTRY_VERIFY(electricity->geometry().right() < other->geometry().left());
+        QCOMPARE(electricity->geometry().top(), other->geometry().top());
         const QString capture = qEnvironmentVariable("CS_EXPENSE_PALETTE_CAPTURE");
         if (!capture.isEmpty()) QVERIFY(page.grab().save(capture));
         auto* fromDate = dashboard->findChild<QDateEdit*>("dashboardFrom");

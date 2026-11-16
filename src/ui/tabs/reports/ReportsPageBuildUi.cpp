@@ -3,6 +3,7 @@
 
 #include "ui/tabs/reports/ReportsPageModulePrelude.h"
 #include <QMenu>
+#include "ui/tabs/reports/OrderReportPager.h"
 #include <QComboBox>
 #include "ui/tabs/reports/PurchaseDebtsPage.h"
 #include "ui/tabs/reports/InvoicesPage.h"
@@ -268,7 +269,10 @@ void ReportsPage::buildUi()
     m_weekComparison->hide();
     static_cast<QVBoxLayout*>(periodPage->layout())->insertWidget(0, m_weekComparison);
     m_tabs->addTab(periodPage, QString::fromUtf8("Звіт за період"));
-    m_tabs->addTab(makeTab(m_ordersTable, m_ordersModel), QString::fromUtf8("Наряди"));
+    auto* ordersPage = makeTab(m_ordersTable, m_ordersModel);
+    m_orderPager = new OrderReportPager(m_ordersTable, m_ordersModel, ordersPage);
+    ordersPage->layout()->addWidget(m_orderPager);
+    m_tabs->addTab(ordersPage, tr("Наряди"));
     m_invoicesPage = new InvoicesPage(this);
     m_invoicesPage->periodExpanded=[this](QDate from,QDate to){m_from->setDate(from);m_to->setDate(to);};
     auto* invoiceSearch=m_invoicesPage->searchField();
@@ -452,6 +456,8 @@ void ReportsPage::buildUi()
     m_missingReturnPlan->setWordWrap(true);
     m_missingReturnPlan->hide();
     qobject_cast<QVBoxLayout*>(outsourcePage->layout())->addWidget(m_missingReturnPlan);
+    outsourcePage->setStyleSheet(QStringLiteral("#reportsTabPage { background: #edf2f6; } "
+        "#reportsTabPage QLabel { color: #203447; background: transparent; }"));
     auto* outsourceTitle = new QLabel(tr("Аутсорс"), outsourcePage);
     QFont outsourceTitleFont = outsourceTitle->font();
     outsourceTitleFont.setBold(true);

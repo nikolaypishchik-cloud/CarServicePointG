@@ -22,6 +22,7 @@ class QPushButton;
 class QWidget;
 class QLineEdit;
 class PartsRegisterView;
+class OrderReportPager;
 class QComboBox;
 class QDoubleSpinBox;
 class QTimer;
@@ -78,6 +79,7 @@ private:
     void buildUi();
     void updateDashboard();
     ReportDashboard* m_dashboard=nullptr;
+    OrderReportPager* m_orderPager = nullptr;
     int m_orderStatusFilter=0;
     bool m_expensesFound=false;
     QPushButton* m_repeatExpenses = nullptr;
