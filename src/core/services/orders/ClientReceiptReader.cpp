@@ -1,5 +1,6 @@
 #include "core/services/orders/ClientReceiptReader.h"
 #include "core/finance/ExactMoney.h"
+#include "core/services/AccessControlService.h"
 #include <QSqlQuery>
 #include <QSqlError>
 
@@ -53,6 +54,8 @@ Result read(QSqlDatabase db, const QSet<QString>& orderUids) {
 Journal readJournal(QSqlDatabase db, QDate firstDay, QDate lastDay)
 {
     auto fail = [](QString error) { Journal result; result.error = error; return result; };
+    if (!AccessControlService::currentUserHasPermission(db, QStringLiteral("cash.view")))
+        return fail(QStringLiteral("Немає доступу до журналу каси."));
     if (!db.isValid() || !db.isOpen() || !firstDay.isValid() || !lastDay.isValid() || firstDay > lastDay)
         return fail(QStringLiteral("Некоректні параметри журналу надходжень."));
     QSqlQuery query(db);

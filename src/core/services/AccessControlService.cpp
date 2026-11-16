@@ -38,6 +38,7 @@ const QVector<AccessPermissionDefinition>& definitions()
         {QStringLiteral("nav.history"), QString::fromUtf8("Розділи"), QString::fromUtf8("База виконаних нарядів")},
         {QStringLiteral("nav.reports"), QString::fromUtf8("Розділи"), QString::fromUtf8("Звіти")},
         {QStringLiteral("nav.clients"), QString::fromUtf8("Розділи"), QString::fromUtf8("Клієнти")},
+        {QStringLiteral("cash.view"), QString::fromUtf8("Каса"), QString::fromUtf8("Переглядати журнал каси")},
         {QStringLiteral("nav.inventory"), QString::fromUtf8("Розділи"), QString::fromUtf8("Склад СТО")},
         {QStringLiteral("nav.catalog"), QString::fromUtf8("Розділи"), QString::fromUtf8("Каталог")},
         {QStringLiteral("nav.statistics"), QString::fromUtf8("Розділи"), QString::fromUtf8("Статистика")},
@@ -87,7 +88,7 @@ QSet<QString> defaultGrants(const QString& roleId)
         return permissions({"nav.planning", "nav.intake", "nav.new_order", "nav.current_orders", "nav.parts", "nav.history",
                             "nav.reports", "nav.clients", "nav.inventory", "nav.catalog", "nav.statistics", "nav.settings",
                             "orders.create", "orders.edit", "orders.close", "parts.order", "parts.install",
-                            "inventory.purchase", "inventory.delete", "security.manage"});
+                            "inventory.purchase", "inventory.delete", "security.manage", "cash.view"});
     }
     if (roleId == QStringLiteral("manager")) {
         return permissions({"nav.planning", "nav.intake", "nav.new_order", "nav.current_orders", "nav.parts", "nav.history",
@@ -119,6 +120,19 @@ bool roleExists(QSqlDatabase database, const QString& roleId)
 bool canManage(QSqlDatabase database)
 {
     return AccessControlService::currentUserHasPermission(database, QStringLiteral("access.manage"));
+}
+
+bool mayAssignCashAccess(QSqlDatabase database, const QString& accountId, const QString& roleId, QString* error)
+{
+    if (ActivityAuditService::currentActor().role == QStringLiteral("owner")
+        || !AccessControlService::hasPermission(database, roleId, QStringLiteral("cash.view"))) return true;
+
+    QSqlQuery current(database);
+    current.prepare(QStringLiteral("SELECT role FROM staff_accounts WHERE id=? AND active=1"));
+    current.addBindValue(accountId);
+    if (current.exec() && current.next() && current.value(0).toString() == roleId) return true;
+    setError(error, QStringLiteral("Призначити роль із доступом до каси може лише власник."));
+    return false;
 }
 
 bool actorMatchesActiveAccount(QSqlDatabase database)
@@ -315,6 +329,15 @@ bool ensureSchema(QSqlDatabase database, QString* errorText)
             return false;
         }
         if (profileCheck.next()) {
+            // Seed access for existing administrator profiles. Explicit revocations are stored as zero.
+            if (role.id == QStringLiteral("administrator")) {
+                QSqlQuery seed(database);
+                if (!seed.exec(QStringLiteral("INSERT OR IGNORE INTO access_role_permissions(role_id,permission_key,granted) "
+                                              "VALUES('administrator','cash.view',1)"))) {
+                    setError(errorText, seed.lastError().text());
+                    return false;
+                }
+            }
             // Adds self-service phone pairing to the default Master role only.
             // INSERT OR IGNORE preserves an explicit owner revocation (granted=0).
             if (role.id == QStringLiteral("master")) {
@@ -474,6 +497,12 @@ bool setRolePermissions(QSqlDatabase database, const QString& roleId, const QSet
         setError(errorText, database.lastError().text());
         return false;
     }
+    if (ActivityAuditService::currentActor().role != QStringLiteral("owner")
+        && permissionKeys.contains(QStringLiteral("cash.view")) != hasPermission(database, roleId, QStringLiteral("cash.view"))) {
+        database.rollback();
+        setError(errorText, QStringLiteral("Лише власник може змінювати доступ до каси."));
+        return false;
+    }
     QSqlQuery remove(database);
     remove.prepare(QStringLiteral("DELETE FROM access_role_permissions WHERE role_id=?"));
     remove.addBindValue(roleId);
@@ -491,6 +520,15 @@ bool setRolePermissions(QSqlDatabase database, const QString& roleId, const QSet
         if (!insert.exec()) {
             database.rollback();
             setError(errorText, insert.lastError().text());
+            return false;
+        }
+    }
+    if (roleId == QStringLiteral("administrator") && !permissionKeys.contains(QStringLiteral("cash.view"))) {
+        QSqlQuery revoke(database);
+        if (!revoke.exec(QStringLiteral("INSERT INTO access_role_permissions(role_id,permission_key,granted) "
+                                        "VALUES('administrator','cash.view',0)"))) {
+            database.rollback();
+            setError(errorText, revoke.lastError().text());
             return false;
         }
     }
@@ -601,6 +639,7 @@ bool assignRole(QSqlDatabase database, const QString& accountId, const QString& 
         setError(errorText, QString::fromUtf8("Обрана роль не існує або неактивна."));
         return false;
     }
+    if (!mayAssignCashAccess(database, accountId, roleId, errorText)) return false;
     if (accountId == QStringLiteral("admin") && roleId != QStringLiteral("owner")) {
         setError(errorText, QString::fromUtf8("Роль власника не можна зняти з основного облікового запису."));
         return false;
@@ -628,6 +667,7 @@ bool saveAccount(QSqlDatabase database, const QString& accountId, const QString&
     if(!canManage(database) || name.trimmed().isEmpty() || !roleExists(database,roleId)) {
         setError(errorText,QString::fromUtf8("Потрібні права власника, ім’я працівника та чинна роль."));return false;
     }
+    if (!mayAssignCashAccess(database, accountId, roleId, errorText)) return false;
     if((accountId=="admin" || accountId==ActivityAuditService::currentActor().accountId) && roleId!="owner") {
         setError(errorText,QString::fromUtf8("Не можна зняти роль власника з поточного або основного облікового запису."));return false;
     }

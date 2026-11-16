@@ -92,6 +92,38 @@ private slots:
         QCOMPARE(result.payments[1].uid,QStringLiteral("p2"));
         QCOMPARE(result.payments[0].cents+result.payments[1].cents,400);
     }
+    void cashJournalRequiresAuthorizedActiveAccount() {
+        const auto day = QDate::currentDate();
+        QString error;
+        QSqlQuery q(db);
+        QVERIFY(q.exec("INSERT INTO staff_accounts(id,role,active) VALUES('cash-admin','administrator',1),('cash-viewer','viewer',1)"));
+        ActivityAuditService::setCurrentActor({"cash-admin","Admin","administrator","test"});
+        QVERIFY(ClientReceiptReader::readJournal(db,day,day).error.isEmpty());
+        ActivityAuditService::setCurrentActor({"cash-viewer","Viewer","viewer","test"});
+        QVERIFY(!ClientReceiptReader::readJournal(db,day,day).error.isEmpty());
+        owner();
+        auto viewerGrants = AccessControlService::grantedPermissions(db,"viewer",&error);
+        viewerGrants.insert("access.manage");
+        QVERIFY(AccessControlService::setRolePermissions(db,"viewer",viewerGrants,&error));
+        ActivityAuditService::setCurrentActor({"cash-viewer","Viewer","viewer","test"});
+        QVERIFY(!AccessControlService::assignRole(db,"cash-viewer","administrator",&error));
+        QVERIFY(!AccessControlService::saveAccount(db,{},"New admin","administrator",&error));
+        viewerGrants.insert("cash.view");
+        QVERIFY(!AccessControlService::setRolePermissions(db,"viewer",viewerGrants,&error));
+        owner();
+        QVERIFY(AccessControlService::setRolePermissions(db,"viewer",viewerGrants,&error));
+        ActivityAuditService::setCurrentActor({"cash-viewer","Viewer","viewer","test"});
+        QVERIFY(ClientReceiptReader::readJournal(db,day,day).error.isEmpty());
+        owner();
+        auto grants = AccessControlService::grantedPermissions(db,"administrator",&error);
+        QVERIFY(grants.remove("cash.view"));
+        QVERIFY2(AccessControlService::setRolePermissions(db,"administrator",grants,&error),qPrintable(error));
+        QVERIFY(AccessControlService::ensureSchema(db,&error));
+        ActivityAuditService::setCurrentActor({"cash-admin","Admin","administrator","test"});
+        QVERIFY(!ClientReceiptReader::readJournal(db,day,day).error.isEmpty());
+        ActivityAuditService::clearCurrentActor();
+        QVERIFY(!ClientReceiptReader::readJournal(db,day,day).error.isEmpty());
+    }
     void cashJournalUsesRecordedReceiptsAcrossOrders() {
         const QDate day(2026,11,15);
         const auto missing = ClientReceiptReader::readJournal(db,day,day);
