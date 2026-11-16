@@ -50,6 +50,7 @@ bool MainWindow::hasPermission(const QString& permissionKey) const
 
 void MainWindow::refreshAccessControl()
 {
+    if (auto* dialog = findChild<QDialog*>("headerStatementsWindow")) delete dialog;
     if (m_externalDisplays) m_externalDisplays->stopAll();
     applyAccessControl();
     // Remove the preceding session's role-sensitive content immediately.
@@ -111,6 +112,7 @@ void MainWindow::applyAccessControl()
         it.value()->setEnabled(allowed);
     }
 
+    if (m_headerStatements) m_headerStatements->setEnabled(canAccessPage(9));
     if (m_headerExpenses) m_headerExpenses->setEnabled(canAccessPage(5));
     if (m_headerWarehouse) m_headerWarehouse->setEnabled(canAccessPage(13));
     if (m_headerBalance) m_headerBalance->setEnabled(canAccessPage(13));

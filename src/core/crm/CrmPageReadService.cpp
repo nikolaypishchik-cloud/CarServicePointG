@@ -1,5 +1,6 @@
 #include "core/crm/CrmPageReadService.h"
 #include "core/crm/CrmClientService.h"
+#include "core/crm/BusinessExtensionsService.h"
 #include "infrastructure/db/sqlite/Db.h"
 #include <QSqlQuery>
 #include <QSqlRecord>
@@ -108,6 +109,17 @@ ClientList clients(const QString& term) {
 
     collect(q,&result.clients,&result.error);
     if(!result.error.isEmpty())result.clients.clear();return result;
+}
+Rows statementVehicles(const QString& clientUid, QString* error) {
+    QSqlQuery query(Database::db());
+    query.prepare("SELECT vehicle_uid, TRIM(brand || ' ' || model),plate FROM crm_vehicles WHERE client_uid=? ORDER BY brand,model,plate,vehicle_uid");
+    query.addBindValue(clientUid);
+    Rows vehicles;
+    if (!collect(query, &vehicles, error)) vehicles.clear();
+    return vehicles;
+}
+bool statementDecisions(const QString& clientUid, const QString& vehicleUid, QDate from, QDate through, QVariantList& rows, QString* error) {
+    return BusinessExtensionsService::readEstimateDecisions(Database::db(), clientUid, vehicleUid, from, through, rows, error);
 }
 ClientDetails details(const QString& uid) {
     ClientDetails result;if(uid.isEmpty())return result;

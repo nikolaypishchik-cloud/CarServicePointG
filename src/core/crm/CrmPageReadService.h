@@ -1,5 +1,6 @@
 #pragma once
 #include "core/crm/CrmFinancialService.h"
+#include <QDate>
 #include <QVariantList>
 #include <QVector>
 namespace CrmPageReadService {
@@ -27,5 +28,7 @@ struct ClientDetails {
 };
 RefreshResult refresh(bool runBackfillNow);
 ClientList clients(const QString& term);
+Rows statementVehicles(const QString& clientUid, QString* error);
+bool statementDecisions(const QString& clientUid, const QString& vehicleUid, QDate from, QDate through, QVariantList& rows, QString* error);
 ClientDetails details(const QString& uid);
 }

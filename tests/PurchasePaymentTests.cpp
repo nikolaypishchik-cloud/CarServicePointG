@@ -4568,6 +4568,7 @@ private slots:
     }
 
     void pendingFinanceHeaderActions() {
+        ActivityAuditService::setCurrentActor({"owner","Owner","owner","test"});
         MainWindow window;
         window.resize(1280, 800);
         window.show();
@@ -4587,13 +4588,18 @@ private slots:
             QCoreApplication::processEvents();
             for (auto* button : {rate, statements}) {
                 QVERIFY(button->isVisibleTo(&window));
-                QVERIFY(!button->isEnabled());
+                QCOMPARE(button->isEnabled(), button == statements);
                 QVERIFY(!button->icon().isNull());
                 QVERIFY(button->toolTip().contains(button->text()));
                 QVERIFY(header->rect().contains(QRect(button->mapTo(header,QPoint()),button->size())));
                 button->click();
                 QCOMPARE(pages->currentIndex(), index);
             }
+            auto* dialog = window.findChild<QDialog*>("headerStatementsWindow");
+            QVERIFY(dialog && dialog->isVisible());
+            statements->click();
+            QCOMPARE(window.findChildren<QDialog*>("headerStatementsWindow").size(), 1);
+            QCOMPARE(window.findChild<QDialog*>("headerStatementsWindow"), dialog);
             QVERIFY(logo->isVisibleTo(&window));
             const QRect brand(logo->mapTo(header, QPoint()), logo->size());
             QVERIFY(header->rect().contains(brand));

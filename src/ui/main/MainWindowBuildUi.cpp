@@ -294,13 +294,17 @@ void MainWindow::buildUi()
         button->setObjectName(exchangeRate ? "headerExchangeRate" : "headerStatements");
         button->setText(exchangeRate ? tr("Курс") : tr("Виписки"));
         button->setAccessibleName(button->text());
-        button->setToolTip(tr("Екран «%1» буде додано пізніше.").arg(button->text()));
+        button->setToolTip(exchangeRate ? tr("Екран «%1» буде додано пізніше.").arg(button->text()) : tr("Відкрити Виписки"));
         button->setAccessibleDescription(button->toolTip());
         button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
         button->setIcon(pendingHeaderIcon(exchangeRate));
         button->setIconSize(QSize(22, 22));
         button->setStyleSheet(QStringLiteral("QToolButton:disabled { background: transparent; color: #aab9c5; border: none; padding: 0 4px; }"));
         button->setEnabled(false);
+        if (!exchangeRate) {
+            m_headerStatements = button;
+            connect(button, &QToolButton::clicked, this, &MainWindow::openHeaderStatements);
+        }
         headerActions->addWidget(button);
     }
     m_topRightSpacer->setAttribute(Qt::WA_StyledBackground, false);
