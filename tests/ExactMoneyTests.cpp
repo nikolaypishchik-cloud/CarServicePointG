@@ -55,6 +55,36 @@ int main(int argc,char** argv) {
         if (CustomerCash::movement(Operation::Advance, invalid))
             ++failures;
     }
+    using CustomerCash::Allocation;
+    using CustomerCash::AllocationError;
+    using CustomerCash::allocateAdvance;
+    const auto firstOrder = allocateAdvance("client-a", "client-a", 400000, 1000000, 250000);
+    const auto* first = std::get_if<Allocation>(&firstOrder);
+    ++count;
+    if (!first || first->change.received != 0 || first->change.paidOnOrders != 250000
+        || first->remainingOrderDebt != 750000 || first->remainingAdvance != 150000) {
+        ++failures;
+    } else {
+        const auto secondOrder = allocateAdvance("client-a", "client-a", first->remainingAdvance, 180000, 150000);
+        const auto* second = std::get_if<Allocation>(&secondOrder);
+        ++count;
+        if (!second || second->change.received != 0 || second->remainingAdvance != 0
+            || second->remainingOrderDebt != 30000 || first->change.paidOnOrders + second->change.paidOnOrders != 400000)
+            ++failures;
+    }
+    auto checkAllocationError = [&](const auto& result, AllocationError expected) {
+        ++count;
+        const auto* actual = std::get_if<AllocationError>(&result);
+        if (!actual || *actual != expected) ++failures;
+    };
+    checkAllocationError(allocateAdvance("a","b",100,100,1), AllocationError::ClientMismatch);
+    checkAllocationError(allocateAdvance("","",100,100,1), AllocationError::ClientMismatch);
+    checkAllocationError(allocateAdvance("a","a",100,100,0), AllocationError::InvalidAmount);
+    checkAllocationError(allocateAdvance("a","a",100,100,-1), AllocationError::InvalidAmount);
+    checkAllocationError(allocateAdvance("a","a",-1,100,1), AllocationError::InvalidBalance);
+    checkAllocationError(allocateAdvance("a","a",100,-1,1), AllocationError::InvalidBalance);
+    checkAllocationError(allocateAdvance("a","a",99,100,100), AllocationError::InsufficientAdvance);
+    checkAllocationError(allocateAdvance("a","a",100,99,100), AllocationError::ExceedsOrderDebt);
     using CustomerCash::Method;
     auto checkDrawer = [&](Operation op, Method method, bool reversal, std::optional<Cents> expected) {
         ++count;

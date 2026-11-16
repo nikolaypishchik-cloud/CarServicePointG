@@ -2,6 +2,7 @@
 
 #include "ExactMoney.h"
 #include <optional>
+#include <string_view>
 
 namespace CustomerCash {
 using ExactMoney::Cents;
@@ -28,6 +29,31 @@ inline std::optional<Movement> movement(Operation operation, Cents amount, bool 
     case Operation::AdvanceRefund: return Movement{-delta, 0, -delta};
     }
     return std::nullopt;
+}
+
+enum class AllocationError { ClientMismatch, InvalidAmount, InvalidBalance, InsufficientAdvance, ExceedsOrderDebt };
+struct Allocation {
+    Movement change;
+    Cents remainingAdvance;
+    Cents remainingOrderDebt;
+};
+
+// Both balances must come from the posting transaction, after prior allocations and returns.
+inline std::variant<Allocation, AllocationError> allocateAdvance(
+    std::string_view advanceClientUid, std::string_view orderClientUid,
+    Cents freeAdvance, Cents orderDebt, Cents amount)
+{
+    if (advanceClientUid.empty() || advanceClientUid != orderClientUid)
+        return AllocationError::ClientMismatch;
+    if (amount <= 0)
+        return AllocationError::InvalidAmount;
+    if (freeAdvance < 0 || orderDebt < 0)
+        return AllocationError::InvalidBalance;
+    if (amount > freeAdvance)
+        return AllocationError::InsufficientAdvance;
+    if (amount > orderDebt)
+        return AllocationError::ExceedsOrderDebt;
+    return Allocation{*movement(Operation::Allocation, amount), freeAdvance - amount, orderDebt - amount};
 }
 
 enum class Method { Cash, Card, Transfer, NoMoneyMovement };
