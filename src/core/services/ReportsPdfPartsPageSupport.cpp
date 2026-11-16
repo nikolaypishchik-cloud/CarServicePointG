@@ -201,12 +201,18 @@ void renderPartsPages(
     };
 
     auto summaryHeight = [&](bool oilMode) {
-        return summaryGap + summaryRowH * (oilMode ? 2 : 4);
+        return summaryGap + summaryRowH * (oilMode ? 3 : 5);
     };
 
     auto drawSummaryBlock = [&](int& y, int positions, double qtyTotal, bool oilUnits, double purchaseTotal, double addedTotal, double clientTotal, bool oilMode) {
         Q_UNUSED(positions);
         y += summaryGap;
+        const auto note = oilMode
+            ? QStringLiteral("«Ціна л.» — закупівельна ціна одного літра мастила, грн.")
+            : QStringLiteral("«Ціна л.» — сума закупівлі всієї позиції, грн.");
+        painter.setFont(summaryLabelFont);
+        painter.drawText(QRect(tableX,y,oilMode?oilTableWidth:tableWidth,summaryRowH),Qt::AlignLeft|Qt::AlignVCenter,note);
+        y+=summaryRowH;
         const auto lines = ReportsPdfPartsSupport::buildSummaryLines(qtyTotal, oilUnits, purchaseTotal, addedTotal, clientTotal, oilMode);
         for (const auto& line : lines) {
             painter.setFont(line.emphasize ? summaryBoldFont : summaryLabelFont);

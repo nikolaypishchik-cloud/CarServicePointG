@@ -440,6 +440,18 @@ private slots:
         }
     }
 
+    void supplierPdfPurchaseColumnNotes() {
+        preparePartsPayrollPdfFixture();
+        QSqlQuery q(db);
+        QVERIFY(q.exec("UPDATE work_order_parts SET qty=2,purchase_price=15.05 WHERE part_uid='pdf-part'"));
+        QVERIFY(q.exec("INSERT INTO work_order_parts(id,order_number,order_uid,part_uid,name,store,ordered_at,qty,purchase_price,purchase_amount,price,amount,service_id,pricing_calc_version) "
+                       "VALUES(22,11,'pdf-order','qa-oil','Моторне мастило 5W-30','Моторне мастило','2026-01-01',4,25,100,40,160,31,3)"));
+        ReportsPdfRenderer::ExportResult result;
+        QVERIFY2(ReportsPdfRenderer::renderPartsPdf(QDate(2026,1,1),QDate(2026,1,31),&result),qPrintable(result.errorText));
+        QCOMPARE(result.recordCount,2);
+        const auto sample=qEnvironmentVariable("CS_SUPPLIER_NOTE_PDF");
+        if(!sample.isEmpty()) QVERIFY(QFile::copy(result.path,sample));
+    }
     void partsPdfDependenciesScopeAndRepeat() {
         preparePartsPayrollPdfFixture();QString error;
         const auto groups=ReportsPdfSupport::collectPartsPdfGroups("2026-01-01","2026-01-31",&error);QVERIFY2(error.isEmpty(),qPrintable(error));QCOMPARE(groups.size(),1);
