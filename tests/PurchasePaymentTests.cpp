@@ -108,6 +108,7 @@
 #include "ui/tabs/reports/SupplierDebtOverview.h"
 #include "core/services/SupplierDebtApplicationService.h"
 #include "core/crm/CrmVehicleService.h"
+#include "core/crm/CrmPageReadService.h"
 #include "core/crm/CrmFinancialService.h"
 #include "core/services/orders/ClientReceiptReader.h"
 #include "core/crm/CrmTaskService.h"
@@ -4567,6 +4568,70 @@ private slots:
         QVERIFY(!first->isVisible());
     }
 
+    void statementOrderSourceUsesClientAndUid() {
+        QSqlQuery q(db);
+        QVERIFY(q.exec("ALTER TABLE work_orders ADD COLUMN client_uid TEXT"));
+        QVERIFY(q.exec("UPDATE work_orders SET client_uid='client-a' WHERE number=1"));
+        QVERIFY(q.exec("INSERT INTO work_orders(number,order_number,order_uid,client_uid,car) "
+                       "VALUES(2,1,'order-b','client-a','Second vehicle'),(3,1,'order-c','client-c','Other vehicle'),"
+                       "(4,2,'duplicated','client-a','First'),(5,3,'duplicated','client-a','Second')"));
+        QVERIFY(q.exec("PRAGMA query_only=1"));
+        QString error;
+        const auto row=CrmPageReadService::statementOrder("client-a","order-b",&error);
+        QVERIFY2(!row.isEmpty(),qPrintable(error));
+        QCOMPARE(row.value("car").toString(),QStringLiteral("Second vehicle"));
+        QCOMPARE(row.value("display_number").toInt(),1);
+        for (const auto& uid : {"order-c","missing","duplicated",""}) {
+            error.clear();
+            QVERIFY(CrmPageReadService::statementOrder("client-a",uid,&error).isEmpty());
+            QVERIFY(!error.isEmpty());
+        }
+    }
+    void statementApprovalOpensSourceCard() {
+        QSqlQuery q(db);
+        QVERIFY(q.exec("ALTER TABLE work_orders ADD COLUMN client_uid TEXT"));
+        QVERIFY(q.exec("UPDATE work_orders SET client_uid='client-a' WHERE number=1"));
+        QVERIFY(q.exec("CREATE TABLE crm_clients(id INTEGER,client_uid TEXT,full_name TEXT,phone TEXT,updated_at TEXT)"));
+        QVERIFY(q.exec("CREATE TABLE crm_vehicles(id INTEGER,vehicle_uid TEXT,client_uid TEXT,brand TEXT,model TEXT,plate TEXT,is_primary INTEGER,updated_at TEXT)"));
+        QVERIFY(q.exec("INSERT INTO crm_clients VALUES(1,'client-a','QA client','','')"));
+        QString error;
+        QVERIFY2(ActivityAuditService::ensureSchema(db,&error),qPrintable(error));
+        QJsonObject decision{{"client_uid","client-a"},{"order_uid","order-a"},{"status","approved"},
+                             {"decision_at",QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}};
+        q.prepare("INSERT INTO activity_audit_events(category,action,title,entity_type,entity_id,payload_json) "
+                  "VALUES('crm','decision','QA','estimate_approval','approval-a',?)");
+        q.addBindValue(QString::fromUtf8(QJsonDocument(QJsonObject{{"after",decision}}).toJson()));
+        QVERIFY2(q.exec(),qPrintable(q.lastError().text()));
+        ActivityAuditService::setCurrentActor({"owner","Owner","owner","test"});
+        MainWindow window;
+        auto* header=window.findChild<QToolButton*>("headerStatements");
+        QVERIFY(header && header->isEnabled());
+        header->click();
+        auto* dialog=window.findChild<QDialog*>("headerStatementsWindow");
+        QVERIFY(dialog);
+        auto* table=dialog->findChild<QTableWidget*>();
+        QVERIFY(table);
+        auto button=[&](const QString& text)->QPushButton* {
+            for (auto* item:dialog->findChildren<QPushButton*>()) if(item->text()==text) return item;
+            return nullptr;
+        };
+        auto* generate=button(QStringLiteral("Сформувати"));
+        auto* open=button(QStringLiteral("Переглянути наряд"));
+        QVERIFY(generate && open);
+        generate->click();
+        QCOMPARE(table->rowCount(),1);
+        table->setCurrentCell(0,0);
+        QVERIFY(open->isEnabled());
+        open->click();
+        auto* card=dialog->findChild<QDialog*>("statementOrderCard");
+        QVERIFY(card && card->isVisible());
+        QCOMPARE(card->windowTitle(),QStringLiteral("Наряд №1"));
+        QStringList values;
+        for (auto* field:card->findChildren<QLabel*>()) values.append(field->text());
+        QVERIFY(values.contains("order-a"));
+        QVERIFY(values.contains("AA1234AA"));
+        card->close();
+    }
     void pendingFinanceHeaderActions() {
         ActivityAuditService::setCurrentActor({"owner","Owner","owner","test"});
         MainWindow window;

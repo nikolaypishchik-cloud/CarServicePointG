@@ -110,6 +110,29 @@ ClientList clients(const QString& term) {
     collect(q,&result.clients,&result.error);
     if(!result.error.isEmpty())result.clients.clear();return result;
 }
+QVariantMap statementOrder(const QString& clientUid, const QString& orderUid, QString* error) {
+    if (clientUid.trimmed().isEmpty() || orderUid.trimmed().isEmpty()) {
+        *error = QStringLiteral("У погодженні немає підтвердженого зв’язку з нарядом.");
+        return {};
+    }
+    auto db = Database::db();
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral("SELECT client_uid,order_uid,COALESCE(NULLIF(order_number,0),number) AS display_number,"
+                                 "opened_at,closed_at,car,plate,status FROM %1 WHERE order_uid=? LIMIT 2")
+                  .arg(crmOrderHistorySource(db)));
+    query.addBindValue(orderUid);
+    if (!query.exec()) { *error = query.lastError().text(); return {}; }
+    if (!query.next() || query.value(0).toString()!=clientUid) {
+        *error = query.lastError().isValid() ? query.lastError().text() : QStringLiteral("Пов’язаний наряд цього клієнта недоступний.");
+        return {};
+    }
+    QVariantMap row;
+    const auto fields = query.record();
+    for (int i=0; i<fields.count(); ++i) row.insert(fields.fieldName(i),query.value(i));
+    if (query.next()) { *error = QStringLiteral("UID відповідає кільком нарядам."); return {}; }
+    if (query.lastError().isValid()) { *error = query.lastError().text(); return {}; }
+    return row;
+}
 Rows statementVehicles(const QString& clientUid, QString* error) {
     QSqlQuery query(Database::db());
     query.prepare("SELECT vehicle_uid, TRIM(brand || ' ' || model),plate FROM crm_vehicles WHERE client_uid=? ORDER BY brand,model,plate,vehicle_uid");

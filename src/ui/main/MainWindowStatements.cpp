@@ -53,6 +53,8 @@ void MainWindow::openHeaderStatements()
     tabs->setCurrentWidget(table);
     table->setHorizontalHeaderLabels({tr("Дата й час (UTC)"),tr("Статус"),tr("Коментар"),tr("Виконавець"),tr("UID наряду")});
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setSelectionMode(QAbstractItemView::SingleSelection);
     table->horizontalHeader()->setStretchLastSection(true);
     auto* message = new QLabel(dialog);
     layout->addWidget(message);
@@ -78,8 +80,46 @@ void MainWindow::openHeaderStatements()
                 if (value=="declined" && column==1) value=tr("Відхилено");
                 table->setItem(index,column++,new QTableWidgetItem(value.isEmpty()?tr("Немає даних"):value));
             }
+            table->item(index,4)->setData(Qt::UserRole,row.value("order_uid"));
         }
     });
+    auto* openOrder = new QPushButton(tr("Переглянути наряд"),dialog);
+    layout->addWidget(openOrder);
+    openOrder->setEnabled(false);
+    connect(table,&QTableWidget::itemSelectionChanged,dialog,[=] {
+        openOrder->setEnabled(!table->selectedItems().isEmpty());
+    });
+    auto showOrder = [=] {
+        if (!canAccessPage(9) || table->selectedItems().isEmpty()) return;
+        const auto* source = table->item(table->currentRow(),4);
+        if (!source) return;
+        QString error;
+        const auto order = CrmPageReadService::statementOrder(client->currentData().toString(),
+                source->data(Qt::UserRole).toString(), &error);
+        if (order.isEmpty()) { message->setText(error); return; }
+        auto* card = new QDialog(dialog);
+        card->setAttribute(Qt::WA_DeleteOnClose);
+        card->setObjectName("statementOrderCard");
+        card->setWindowTitle(tr("Наряд №%1").arg(order.value("display_number").toString()));
+        auto* fields = new QFormLayout(card);
+        auto field = [&](const QString& label, const QString& key) {
+            auto* value = new QLabel(card);
+            value->setTextFormat(Qt::PlainText);
+            value->setTextInteractionFlags(Qt::TextSelectableByMouse);
+            const auto text = order.value(key).toString();
+            value->setText(text.isEmpty()?tr("Немає даних"):text);
+            fields->addRow(label,value);
+        };
+        field(tr("UID наряду"),"order_uid");
+        field(tr("Автомобіль"),"car");
+        field(tr("Державний номер"),"plate");
+        field(tr("Статус"),"status");
+        field(tr("Відкрито"),"opened_at");
+        field(tr("Закрито"),"closed_at");
+        card->open();
+    };
+    connect(openOrder,&QPushButton::clicked,dialog,showOrder);
+    connect(table,&QTableWidget::cellActivated,dialog,showOrder);
     auto invalidate = [=] { table->setRowCount(0); message->clear(); };
     connect(car,&QComboBox::currentIndexChanged,dialog,invalidate);
     connect(from,&QDateEdit::dateChanged,dialog,invalidate);

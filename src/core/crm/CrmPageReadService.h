@@ -28,6 +28,7 @@ struct ClientDetails {
 };
 RefreshResult refresh(bool runBackfillNow);
 ClientList clients(const QString& term);
+QVariantMap statementOrder(const QString& clientUid, const QString& orderUid, QString* error);
 Rows statementVehicles(const QString& clientUid, QString* error);
 bool statementDecisions(const QString& clientUid, const QString& vehicleUid, QDate from, QDate through, QVariantList& rows, QString* error);
 ClientDetails details(const QString& uid);
