@@ -152,44 +152,55 @@ bool renderPeriodPdf(const QDate& fromDate, const QDate& toDate, ExportResult* r
     }
     if (RuntimeLoggingControl::deepDebugEnabled()) qInfo() << "Report PDF export started:" << QStringLiteral("period") << path << "records" << rows.size();
 
-    QPdfWriter pdf(path);
-    pdf.setPageSize(QPageSize(QPageSize::A4));
-    pdf.setPageOrientation(QPageLayout::Landscape);
-    pdf.setResolution(144);
-    QPainter p(&pdf);
-    p.setRenderHint(QPainter::Antialiasing, false);
-    p.setRenderHint(QPainter::TextAntialiasing, true);
-    const PdfTheme th = buildTheme(pdf);
-
-    const QString title = QStringLiteral("CarService PointG");
-    const QString subtitle = QString::fromUtf8("ЗВІТ ЗА ПЕРІОД: %1 — %2")
-        .arg(fromDate.toString(QStringLiteral("dd.MM.yy")), toDate.toString(QStringLiteral("dd.MM.yy")));
-
     const auto visibleTotals = ReportsPdfPeriodSupport::collectVisibleTotals(rows, outsourceMargin, salaryTotal, expensesTotal);
-    const auto formattedRowCells = ReportsPdfPeriodSupport::buildPeriodRowCells(rows);
+    QSaveFile file(path);
+    const auto writeDocument=[&] {
+        QPdfWriter pdf(&file);
+        pdf.setPageSize(QPageSize(QPageSize::A4));
+        pdf.setPageOrientation(QPageLayout::Landscape);
+        pdf.setResolution(144);
+        QPainter p(&pdf);
+        if (!p.isActive()) return false;
+        p.setRenderHint(QPainter::Antialiasing, false);
+        p.setRenderHint(QPainter::TextAntialiasing, true);
+        const PdfTheme th = buildTheme(pdf);
 
-    ReportsPdfPeriodPageSupport::renderSummary(pdf,p,th,fromDate,toDate,summary);
-    pdf.newPage();
-    ReportsPdfPeriodPageSupport::renderPeriodPage(
-        pdf,
-        p,
-        th,
-        title,
-        subtitle,
-        formattedRowCells,
-        visibleTotals,
-        titleFont(27, false),
-        titleFont(13, true),
-        bodyFont(7, true),
-        bodyFont(8, true),
-        bodyFont(8, false),
-        bodyFont(8, false),
-        bodyFont(7, false),
-        bodyFont(11, false),
-        bodyFont(11, true),
-        bodyFont(12, true));
+        const QString title = QStringLiteral("CarService PointG");
+        const QString subtitle = QString::fromUtf8("ЗВІТ ЗА ПЕРІОД: %1 — %2")
+            .arg(fromDate.toString(QStringLiteral("dd.MM.yy")), toDate.toString(QStringLiteral("dd.MM.yy")));
 
-    const bool ok = finalizePdf(p, path, result);
+        const auto formattedRowCells = ReportsPdfPeriodSupport::buildPeriodRowCells(rows);
+
+        const int pages=ReportsPdfPeriodPageSupport::renderSummary(pdf,p,th,fromDate,toDate,summary);
+        if (!pages || !pdf.newPage()) return false;
+        const bool rendered=ReportsPdfPeriodPageSupport::renderPeriodPage(
+            pdf,
+            p,
+            th,
+            pages+1,
+            title,
+            subtitle,
+            formattedRowCells,
+            visibleTotals,
+            titleFont(27, false),
+            titleFont(13, true),
+            bodyFont(7, true),
+            bodyFont(8, true),
+            bodyFont(8, false),
+            bodyFont(8, false),
+            bodyFont(7, false),
+            bodyFont(11, false),
+            bodyFont(11, true),
+            bodyFont(12, true));
+        return p.end() && rendered;
+    };
+    const bool ok=file.open(QIODevice::WriteOnly) && writeDocument() && file.commit();
+    if (result) {
+        result->success=ok;
+        result->path=path;
+        result->fileSizeBytes=ok?QFileInfo(path).size():-1;
+        result->errorText=ok?QString():QStringLiteral("Не вдалося записати PDF: %1").arg(file.errorString());
+    }
     if (ok) {
         if (RuntimeLoggingControl::deepDebugEnabled()) qInfo() << "Report PDF export finished:" << QStringLiteral("period") << path
                 << "records" << rows.size()

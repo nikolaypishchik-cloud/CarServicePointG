@@ -8,6 +8,7 @@
 #include <QPdfWriter>
 #include <QPen>
 #include <numeric>
+#include "AppVersion.h"
 #include <QTextDocument>
 #include <QAbstractTextDocumentLayout>
 
@@ -18,11 +19,21 @@ QString moneyFromCents(qint64 value)
     return FormatUtils::money(value/100.0, 2);
 }
 
+void footer(QPainter& painter,const ReportsPdfLayoutSupport::PdfTheme& theme,int page)
+{
+    painter.save();
+    painter.setFont(QFont("Arial",8));
+    const QRect rect(theme.left,theme.bottom,theme.contentWidth,theme.pageHeight-theme.bottom);
+    painter.drawText(rect,Qt::AlignVCenter|Qt::AlignLeft,
+        QStringLiteral("CarService PointG %1").arg(CarService::AppVersion::versionString()));
+    painter.drawText(rect,Qt::AlignVCenter|Qt::AlignRight,QStringLiteral("Сторінка %1").arg(page));
+    painter.restore();
+}
 } // namespace
 
 namespace ReportsPdfPeriodPageSupport {
 
-void renderSummary(QPdfWriter& pdf,QPainter& painter,const ReportsPdfLayoutSupport::PdfTheme& theme,
+int renderSummary(QPdfWriter& pdf,QPainter& painter,const ReportsPdfLayoutSupport::PdfTheme& theme,
                    QDate first,QDate last,const ReportsPdfSupport::PeriodSummary& summary)
 {
     using ReportsPdfSupport::PeriodAmount;
@@ -90,20 +101,23 @@ void renderSummary(QPdfWriter& pdf,QPainter& painter,const ReportsPdfLayoutSuppo
     document.setHtml(html);
     const int pages=document.pageCount();
     for(int i=0;i<pages;++i) {
-        if(i) pdf.newPage();
+        if(i && !pdf.newPage()) return 0;
         painter.save();
         painter.translate(theme.left,theme.top-i*area.height());
         const QRectF clip(0,i*area.height(),area.width(),area.height());
         painter.setClipRect(clip);
         document.drawContents(&painter,clip);
         painter.restore();
+        footer(painter,theme,i+1);
     }
+    return pages;
 }
 
-void renderPeriodPage(
+bool renderPeriodPage(
     QPdfWriter& pdf,
     QPainter& painter,
     const ReportsPdfLayoutSupport::PdfTheme& theme,
+    int pageNumber,
     const QString& title,
     const QString& subtitle,
     const QList<QStringList>& formattedRowCells,
@@ -216,7 +230,8 @@ void renderPeriodPage(
         }
 
         if (y + rowH > theme.bottom || (rowsLeft > carryRows && rowsLeft <= carryRows + 2 && y + carryHeight + summaryBlockH > theme.bottom && y > theme.top + headerRowH + mmToPx(&pdf, 8.0))) {
-            newPdfPage(pdf, painter, y, theme);
+            footer(painter,theme,pageNumber++);
+            if (!pdf.newPage()) return false;
             drawPageIntroAndHeader(y);
         }
 
@@ -231,6 +246,13 @@ void renderPeriodPage(
         ++rowIndex;
     }
 
+    if (y+summaryBlockH>theme.bottom) {
+        footer(painter,theme,pageNumber++);
+        if (!pdf.newPage()) return false;
+        y=theme.top;
+        drawCenteredText(painter,QRect(theme.left,y,theme.contentWidth,subtitleH),subtitle,subtitleFont);
+        y+=subtitleH;
+    }
     y += summaryGapAfterTable;
     const int summaryX = tableX;
     const int labelW = mmToPx(&pdf, 52.0);
@@ -260,6 +282,8 @@ void renderPeriodPage(
     drawLeftText(painter, QRect(summaryX, y, mmToPx(&pdf, 70.0), mmToPx(&pdf, 8.0)), QString::fromUtf8("Загальна маржа"), totalMarginFont);
     drawRightText(painter, QRect(valueX, y, valueW, mmToPx(&pdf, 8.0)), moneyFromCents(visibleTotals.totalMargin), totalMarginFont);
     drawLeftText(painter, QRect(currencyX, y, currencyW, mmToPx(&pdf, 8.0)), QString::fromUtf8("грн"), totalMarginFont);
+    footer(painter,theme,pageNumber);
+    return true;
 }
 
 } // namespace ReportsPdfPeriodPageSupport
