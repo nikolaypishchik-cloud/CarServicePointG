@@ -58,14 +58,15 @@ int main(int argc,char** argv) {
     using CustomerCash::Allocation;
     using CustomerCash::AllocationError;
     using CustomerCash::allocateAdvance;
-    const auto firstOrder = allocateAdvance("client-a", "client-a", 400000, 1000000, 250000);
+    constexpr auto confirmed = CustomerCash::BalanceAuthority::Confirmed;
+    const auto firstOrder = allocateAdvance("client-a", "client-a", 400000, 1000000, 250000, confirmed);
     const auto* first = std::get_if<Allocation>(&firstOrder);
     ++count;
     if (!first || first->change.received != 0 || first->change.paidOnOrders != 250000
         || first->remainingOrderDebt != 750000 || first->remainingAdvance != 150000) {
         ++failures;
     } else {
-        const auto secondOrder = allocateAdvance("client-a", "client-a", first->remainingAdvance, 180000, 150000);
+        const auto secondOrder = allocateAdvance("client-a", "client-a", first->remainingAdvance, 180000, 150000, confirmed);
         const auto* second = std::get_if<Allocation>(&secondOrder);
         ++count;
         if (!second || second->change.received != 0 || second->remainingAdvance != 0
@@ -77,15 +78,22 @@ int main(int argc,char** argv) {
         const auto* actual = std::get_if<AllocationError>(&result);
         if (!actual || *actual != expected) ++failures;
     };
-    checkAllocationError(allocateAdvance("a","b",100,100,1), AllocationError::ClientMismatch);
-    checkAllocationError(allocateAdvance("","",100,100,1), AllocationError::ClientMismatch);
-    checkAllocationError(allocateAdvance("a","a",100,100,0), AllocationError::InvalidAmount);
-    checkAllocationError(allocateAdvance("a","a",100,100,-1), AllocationError::InvalidAmount);
-    checkAllocationError(allocateAdvance("a","a",-1,100,1), AllocationError::InvalidBalance);
-    checkAllocationError(allocateAdvance("a","a",100,-1,1), AllocationError::InvalidBalance);
-    checkAllocationError(allocateAdvance("a","a",99,100,100), AllocationError::InsufficientAdvance);
-    checkAllocationError(allocateAdvance("a","a",100,99,100), AllocationError::ExceedsOrderDebt);
+    checkAllocationError(allocateAdvance("a","b",100,100,1, confirmed), AllocationError::ClientMismatch);
+    checkAllocationError(allocateAdvance("","",100,100,1, confirmed), AllocationError::ClientMismatch);
+    checkAllocationError(allocateAdvance("a","a",100,100,0, confirmed), AllocationError::InvalidAmount);
+    checkAllocationError(allocateAdvance("a","a",100,100,-1, confirmed), AllocationError::InvalidAmount);
+    checkAllocationError(allocateAdvance("a","a",-1,100,1, confirmed), AllocationError::InvalidBalance);
+    checkAllocationError(allocateAdvance("a","a",100,-1,1, confirmed), AllocationError::InvalidBalance);
+    checkAllocationError(allocateAdvance("a","a",99,100,100, confirmed), AllocationError::InsufficientAdvance);
+    checkAllocationError(allocateAdvance("a","a",100,99,100, confirmed), AllocationError::ExceedsOrderDebt);
     using CustomerCash::Method;
+    checkAllocationError(allocateAdvance("a","a",100,100,90,CustomerCash::BalanceAuthority::DisconnectedReplica),
+                         AllocationError::UnconfirmedBalance);
+    ++count;
+    if (CustomerCash::canReceiveAdvance(Method::Cash,false)
+        || !CustomerCash::canReceiveAdvance(Method::Cash,true)
+        || CustomerCash::canReceiveAdvance(Method::NoMoneyMovement,true))
+        ++failures;
     auto checkDrawer = [&](Operation op, Method method, bool reversal, std::optional<Cents> expected) {
         ++count;
         if (CustomerCash::drawerChange(op, 1250, method, reversal) != expected)

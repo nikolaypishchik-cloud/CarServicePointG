@@ -31,7 +31,8 @@ inline std::optional<Movement> movement(Operation operation, Cents amount, bool 
     return std::nullopt;
 }
 
-enum class AllocationError { ClientMismatch, InvalidAmount, InvalidBalance, InsufficientAdvance, ExceedsOrderDebt };
+enum class BalanceAuthority { Confirmed, DisconnectedReplica };
+enum class AllocationError { UnconfirmedBalance, ClientMismatch, InvalidAmount, InvalidBalance, InsufficientAdvance, ExceedsOrderDebt };
 struct Allocation {
     Movement change;
     Cents remainingAdvance;
@@ -41,8 +42,10 @@ struct Allocation {
 // Both balances must come from the posting transaction, after prior allocations and returns.
 inline std::variant<Allocation, AllocationError> allocateAdvance(
     std::string_view advanceClientUid, std::string_view orderClientUid,
-    Cents freeAdvance, Cents orderDebt, Cents amount)
+    Cents freeAdvance, Cents orderDebt, Cents amount, BalanceAuthority authority)
 {
+    if (authority != BalanceAuthority::Confirmed)
+        return AllocationError::UnconfirmedBalance;
     if (advanceClientUid.empty() || advanceClientUid != orderClientUid)
         return AllocationError::ClientMismatch;
     if (amount <= 0)
@@ -57,6 +60,17 @@ inline std::variant<Allocation, AllocationError> allocateAdvance(
 }
 
 enum class Method { Cash, Card, Transfer, NoMoneyMovement };
+
+inline bool canReceiveAdvance(Method method, bool shiftOpen)
+{
+    switch (method) {
+    case Method::Cash: return shiftOpen;
+    case Method::Card:
+    case Method::Transfer: return true;
+    case Method::NoMoneyMovement: return false;
+    }
+    return false;
+}
 
 // A non-customer expense, opening count or transfer is recorded separately.
 inline std::optional<Cents> drawerChange(Operation operation, Cents amount, Method method,
