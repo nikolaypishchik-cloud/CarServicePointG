@@ -173,7 +173,10 @@ bool decideEstimateApproval(QSqlDatabase db, const QString& approvalUid, const Q
         q.addBindValue(status);
         q.addBindValue(comment);
         q.addBindValue(approvalUid);
-        return execPrepared(q, txError);
+        if (!execPrepared(q, txError)) return false;
+        if (q.numRowsAffected() == 1) return true;
+        if (txError) *txError = QStringLiteral("Estimate approval not found");
+        return false;
     });
     if (!result.ok && errorText) *errorText = result.errorText;
     return result.ok;

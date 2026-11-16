@@ -11,6 +11,8 @@
 #include "core/cloudsync/SyncBatchIsolation.h"
 #include "core/cloudsync/CloudSyncOutboxService.h"
 #include "core/cloudsync/CloudSyncSchemaService.h"
+#include "core/crm/BusinessExtensionsService.h"
+#include "core/services/ActivityAuditService.h"
 #include "core/cloudsync/ConflictResolverService.h"
 #include "core/backup/BackupSnapshotService.h"
 #include "core/backup/BackupPaths.h"
@@ -302,6 +304,20 @@ private slots:
     }
     void cleanup() {
         db.close(); db = {}; QSqlDatabase::removeDatabase("carservice_main");
+    }
+    void missingEstimateCannotRecordDecision() {
+        QString error;
+        QVERIFY2(CloudSyncSchemaService::ensureSchema(db, &error), qPrintable(error));
+        QVERIFY2(ActivityAuditService::ensureSchema(db, &error), qPrintable(error));
+        const QString reason = QStringLiteral("Estimate approval not found");
+        expectRollback(reason);
+        QVERIFY(!BusinessExtensionsService::decideEstimateApproval(db, "missing-estimate", "approved",
+                                                                    "test decision", &error));
+        QCOMPARE(error, reason);
+        QSqlQuery check(db);
+        QVERIFY(check.exec("SELECT count(*) FROM activity_audit_events WHERE entity_id='missing-estimate'"));
+        QVERIFY(check.next());
+        QCOMPARE(check.value(0).toInt(), 0);
     }
     void completionResolvesLocalOrderNumberByUid() {
         QString error;
