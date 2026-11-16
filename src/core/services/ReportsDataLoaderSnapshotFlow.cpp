@@ -52,13 +52,14 @@ PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, con
                 for (int week = 1; week <= 4; ++week)
                     snapshot.previousWeeks.append(PeriodComparison{first.addDays(-7 * week), last.addDays(-7 * week)});
             }
-            q.prepare(
+            const QString uidColumn=db.record("router_work_orders").contains("order_uid") ? "wo.order_uid" : "NULL";
+            q.prepare(QStringLiteral(
                 "SELECT date(CASE WHEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),3,1)='.' AND substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),6,1)='.' THEN CASE WHEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,4) GLOB '[0-9][0-9][0-9][0-9]' THEN substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,4) ELSE '20'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),7,2) END||'-'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),4,2)||'-'||substr(trim(COALESCE(NULLIF(wo.closed_at,''), wo.opened_at)),1,2) ELSE COALESCE(NULLIF(wo.closed_at,''), wo.opened_at) END) AS report_day, "
                 "COALESCE(wo.order_number,wo.number), wo.number, wo.car, "
                 "COALESCE(NULLIF(wo.master_name_closed,''),m.name,''), "
-                "COALESCE(wo.works_sum,0), COALESCE(wo.parts_sum,0) "
+                "COALESCE(wo.works_sum,0), COALESCE(wo.parts_sum,0), wo.master_id, %1 "
                 "FROM router_work_orders wo LEFT JOIN masters m ON m.id = wo.master_id "
-                "WHERE report_day BETWEEN date(?) AND date(?) ORDER BY report_day DESC, wo.number DESC");
+                "WHERE report_day BETWEEN date(?) AND date(?) ORDER BY report_day DESC, wo.number DESC").arg(uidColumn));
             q.addBindValue(snapshot.previousWeeks.isEmpty() ? df : snapshot.previousWeeks.last().from.toString(Qt::ISODate));
             q.addBindValue(last.toString(Qt::ISODate));
 
@@ -84,6 +85,11 @@ PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, con
                         continue;
                     }
                     PeriodSnapshotRow row;
+                    row.day = day;
+                    row.orderUid = q.value(8).toString();
+                    row.masterId = q.value(7).toString();
+                    row.worksCents = qRound64(ws * 100);
+                    row.partsCents = qRound64(ps * 100);
                     row.date = ReportsDateUtils::dmy(q.value(0).toString());
                     row.orderNumber = q.value(1).toString();
                     row.internalOrderNumber = q.value(2).toInt();

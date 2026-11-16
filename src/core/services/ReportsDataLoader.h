@@ -8,6 +8,11 @@
 #include <QStringList>
 
 struct PeriodSnapshotRow {
+    QDate day;
+    QString masterId;
+    QString orderUid;
+    qint64 worksCents = 0;
+    qint64 partsCents = 0;
     QString date;
     QString orderNumber;
     int internalOrderNumber = 0;

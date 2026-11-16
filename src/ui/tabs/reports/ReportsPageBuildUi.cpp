@@ -9,6 +9,7 @@
 #include <QScrollArea>
 #include <QTabBar>
 #include <QStackedWidget>
+#include "ui/tabs/reports/PeriodGroupsView.h"
 #include <QPainter>
 #include "ui/tabs/reports/ReportDashboard.h"
 
@@ -233,6 +234,19 @@ void ReportsPage::buildUi()
     m_electricityPdfButton = expensesWidgets.electricityPdfButton;
 
     auto* periodPage = makeTab(m_periodTable, m_periodModel);
+    m_periodGroups = new PeriodGroupsView(periodPage);
+    auto* periodLayout=static_cast<QVBoxLayout*>(periodPage->layout());
+    periodLayout->addWidget(m_periodGroups,1);
+    m_periodGrouping = new QComboBox(periodPage);
+    m_periodGrouping->setObjectName("periodGrouping");
+    m_periodGrouping->setAccessibleName(tr("Групування нарядів"));
+    m_periodGrouping->addItems({tr("За тижнями й днями"),tr("Список нарядів")});
+    m_periodGrouping->hide();
+    static_cast<QVBoxLayout*>(periodPage->layout())->insertWidget(0,m_periodGrouping,0,Qt::AlignLeft);
+    connect(m_periodGrouping,&QComboBox::currentIndexChanged,this,[this](int mode) {
+        m_periodGroups->setVisible(mode==0);
+        m_periodTable->setVisible(mode==1);
+    });
     m_weekComparison = new QLabel(periodPage);
     m_weekComparison->setWordWrap(true);
     m_weekComparison->setStyleSheet(QStringLiteral("background:#202c38;color:#f2f6fa;padding:5px 8px;"));
@@ -601,13 +615,19 @@ void ReportsPage::buildUi()
     connect(m_expensesSaveButton, &QPushButton::clicked, this, &ReportsPage::saveExpenses);
     connect(m_electricityPdfButton, &QPushButton::clicked, this, &ReportsPage::exportElectricityPdf);
 
-    connect(m_periodTable, &QTableView::doubleClicked, this, [this](const QModelIndex& index) {
-        const int row = index.row();
+    const auto openPeriodOrder = [this](int row) {
         ReportsInteractionSupport::openOrderFromReportTable(this, m_periodTable, 1, row, [this]() {
             markDirty();
             scheduleRefresh(0);
             queueRefreshAll(0);
         });
+    };
+    connect(m_periodTable,&QTableView::doubleClicked,this,[openPeriodOrder](const QModelIndex& index) {
+        openPeriodOrder(index.row());
+    });
+    connect(m_periodGroups,&QTreeWidget::itemActivated,this,[openPeriodOrder](QTreeWidgetItem* item) {
+        const QVariant row=item->data(0,Qt::UserRole);
+        if (row.isValid()) openPeriodOrder(row.toInt());
     });
     connect(m_ordersTable, &QTableView::clicked, this, [this](const QModelIndex& index) {
         if(!index.isValid() || (index.column()!=3 && index.column()!=6))return;

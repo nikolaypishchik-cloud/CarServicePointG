@@ -289,10 +289,11 @@ void applyPeriodSnapshot(QTableView* table, ReportsSnapshotTableModel* model, co
             makeCell(row.parts, int(Qt::AlignRight | Qt::AlignVCenter)),
             makeCell(row.total, int(Qt::AlignRight | Qt::AlignVCenter))
         };
+        out.cells[1].extraRoles[OrderUidRole]=row.orderUid;
         rows.push_back(out);
     }
     model->setSnapshot(periodHeaders(), rows);
-    if (rows.isEmpty()) model->setMessageRow(QString::fromUtf8("За вибраний період немає закритих нарядів"));
+    if (rows.isEmpty()) model->setMessageRow(snapshot.error.isEmpty() ? QStringLiteral("За вибраний період немає нарядів") : snapshot.error);
 
     table->blockSignals(false);
     table->setUpdatesEnabled(true);

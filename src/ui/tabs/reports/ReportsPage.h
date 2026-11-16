@@ -31,6 +31,7 @@ class PurchaseDebtsPage;
 class PurchaseDebtAnalysisPage;
 class InvoicesPage;
 class ReportDashboard;
+class PeriodGroupsView;
 
 namespace ReportsTableSupport { class ReportsSnapshotTableModel; }
 
@@ -148,6 +149,8 @@ private:
     QTabWidget* m_tabs = nullptr;
     QPushButton* m_pdfButton = nullptr;
 
+    QComboBox* m_periodGrouping = nullptr;
+    PeriodGroupsView* m_periodGroups = nullptr;
     QLabel* m_weekComparison = nullptr;
     QTableView* m_periodTable = nullptr;
     QTableView* m_ordersTable = nullptr;

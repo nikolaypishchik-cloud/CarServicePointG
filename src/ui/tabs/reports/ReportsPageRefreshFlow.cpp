@@ -4,6 +4,7 @@
 
 #include "ui/tabs/reports/ReportsPageModulePrelude.h"
 #include <QComboBox>
+#include "ui/tabs/reports/PeriodGroupsView.h"
 #include "ui/tabs/reports/PartsRegisterView.h"
 #include "ui/tabs/reports/PurchaseDebtsPage.h"
 #include "ui/tabs/reports/InvoicesPage.h"
@@ -427,6 +428,11 @@ void ReportsPage::updateDashboard()
 void ReportsPage::applyPeriodSnapshot(const PeriodSnapshot& snapshot)
 {
     ReportsTableSupport::applyPeriodSnapshot(m_periodTable, m_periodModel, snapshot);
+    m_periodGroups->showSnapshot(snapshot);
+    m_periodGrouping->setVisible(!snapshot.rows.isEmpty());
+    const bool grouped=!snapshot.rows.isEmpty() && m_periodGrouping->currentIndex()==0;
+    m_periodGroups->setVisible(grouped);
+    m_periodTable->setVisible(!grouped);
     QStringList lines;
     for (const auto& week : snapshot.previousWeeks) {
         const auto interval = week.from.toString("dd.MM.yyyy") + QStringLiteral(" – ") + week.to.toString("dd.MM.yyyy");
@@ -457,6 +463,9 @@ void ReportsPage::refreshPeriod()
     const AsyncTaskHandle asyncHandle(this, generation, cancelToken);
 
     m_weekComparison->hide();
+    m_periodGroups->hide();
+    m_periodGrouping->hide();
+    m_periodTable->show();
     setTabDescription(ReportTab::Period, QString::fromUtf8("Звіт за період — табличний перегляд по поточному діапазону дат."));
     setTabAuxStats(ReportTab::Period, QString());
     updateStats({QString::fromUtf8("Завантаження звіту за період…")});

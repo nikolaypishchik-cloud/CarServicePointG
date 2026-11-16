@@ -1,5 +1,9 @@
 #include "ui/tabs/reports/ReportsPage.h"
 #include <QtTest>
+#include <QTreeWidget>
+#include <QTableView>
+#include "ui/tabs/reports/ReportsTableSupport.h"
+#include <QComboBox>
 #include <QApplication>
 #include <QDateEdit>
 #include <QDialog>
@@ -293,10 +297,11 @@ void checkWeeklyReportScreen(QSqlDatabase db) {
     QVERIFY(q.exec("CREATE TABLE IF NOT EXISTS masters(id INTEGER, name TEXT)"));
     QVERIFY2(q.exec("CREATE VIEW router_work_orders AS SELECT 10 AS number, 10 AS order_number,"
         "'2025-01-08' AS opened_at,'' AS closed_at,'Car' AS car,'M' AS master_name_closed,"
-        "NULL AS master_id,100 AS works_sum,20 AS parts_sum UNION ALL "
-        "SELECT 9,9,'2025-01-01','','B','M',NULL,30,30 UNION ALL "
-        "SELECT 8,8,'2025-01-02','','C','M',NULL,900,900 UNION ALL "
-        "SELECT 7,7,'2024-12-25','','D','M',NULL,0,0"),qPrintable(q.lastError().text()));
+        "NULL AS master_id,70.13 AS works_sum,9.87 AS parts_sum,'order-10' AS order_uid UNION ALL "
+        "SELECT 11,11,'2025-01-06','','Car2','N',NULL,29.87,10.13,'order-11' UNION ALL "
+        "SELECT 9,9,'2025-01-01','','B','M',NULL,30,30,'order-9' UNION ALL "
+        "SELECT 8,8,'2025-01-02','','C','M',NULL,900,900,'order-8' UNION ALL "
+        "SELECT 7,7,'2024-12-25','','D','M',NULL,0,0,'order-7'"),qPrintable(q.lastError().text()));
     ReportsPage page;
     page.resize(1280,800);
     page.show();
@@ -311,6 +316,36 @@ void checkWeeklyReportScreen(QSqlDatabase db) {
         return {};
     };
     QTRY_VERIFY_WITH_TIMEOUT(!text().isEmpty(),15000);
+    auto* groups=page.findChild<QTreeWidget*>("reportPeriodGroups");
+    QVERIFY(groups && groups->isVisible());
+    QCOMPARE(groups->topLevelItemCount(),2);
+    auto* week=groups->topLevelItem(0);
+    QCOMPARE(week->text(1),QStringLiteral("2"));
+    QCOMPARE(week->text(6),groups->locale().toString(120.0,'f',2));
+    QCOMPARE(week->childCount(),2);
+    auto* day=week->child(0);
+    QCOMPARE(day->text(0),QStringLiteral("08.01.2025"));
+    QCOMPARE(day->text(6),groups->locale().toString(80.0,'f',2));
+    QCOMPARE(week->child(1)->text(6),groups->locale().toString(40.0,'f',2));
+    const auto* masters=groups->topLevelItem(1);
+    QCOMPARE(masters->childCount(),2);
+    QCOMPARE(masters->child(0)->text(4),groups->locale().toString(70.13,'f',2));
+    QCOMPARE(masters->child(1)->text(5),groups->locale().toString(10.13,'f',2));
+    auto* grouping=page.findChild<QComboBox*>("periodGrouping");
+    QVERIFY(grouping);
+    grouping->setCurrentIndex(1);
+    QVERIFY(!groups->isVisible());
+    auto* list=groups->parentWidget()->findChild<QTableView*>();
+    QVERIFY(list && list->isVisible());
+    QCOMPARE(list->model()->index(0,1).data(ReportsTableSupport::OrderUidRole).toString(),QStringLiteral("order-10"));
+    grouping->setCurrentIndex(0);
+    QVERIFY(groups->isVisible());
+    QCOMPARE(day->child(0)->text(0),QStringLiteral("Наряд №10"));
+    week->setExpanded(false);
+    QVERIFY(!week->isExpanded());
+    week->setExpanded(true);
+    QCoreApplication::processEvents();
+    QVERIFY(groups->height()>page.height()/2);
     const auto weeks=text().split('\n');
     QCOMPARE(weeks.size(),4);
     QVERIFY(weeks[0].contains("01.01.2025") && weeks[0].contains("100")
