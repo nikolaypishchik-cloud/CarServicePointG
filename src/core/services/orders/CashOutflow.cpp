@@ -19,6 +19,38 @@ bool execute(QSqlQuery& q,const QString& sql,const QVariantList& args={})
     return q.exec();
 }
 }
+Totals totals(QDate first,QDate last)
+{
+    Totals result;
+    auto db=Database::db();
+    if(!AccessControlService::currentUserHasPermission(db,"cash.view") || !first.isValid() || !last.isValid() || first>last){
+        result.error=QStringLiteral("Перевірте доступ і межі періоду.");return result;
+    }
+    // Each ledger contributes one economic effect per posting. Allocations move only free advances.
+    QStringList sources;
+    const auto tables=db.tables();
+    if(tables.contains("client_payments"))
+        sources<<"SELECT paid_on AS day,amount_cents AS gross,0 AS refund,amount_cents AS net,0 AS free FROM main.client_payments WHERE method<>'advance_allocation'";
+    if(tables.contains("cash_advance_events"))
+        sources<<"SELECT day,CASE WHEN source_uid IS NULL THEN cents ELSE 0 END AS gross,0 AS refund,"
+                 "CASE WHEN source_uid IS NULL THEN cents ELSE 0 END AS net,CASE WHEN source_uid IS NULL THEN cents ELSE -cents END AS free FROM main.cash_advance_events";
+    if(tables.contains("cash_outflows"))
+        sources<<"SELECT day,0 AS gross,CASE WHEN kind IN ('advance','payment') THEN cents ELSE 0 END AS refund,"
+                 "CASE WHEN reversed_uid IS NULL THEN -cents ELSE cents END AS net,"
+                 "CASE kind WHEN 'advance' THEN -cents WHEN 'undo_advance' THEN cents ELSE 0 END AS free FROM main.cash_outflows WHERE kind<>'expense'";
+    if(sources.isEmpty()){result.error=QStringLiteral("Журнал коштів ще не ініціалізовано.");return result;}
+    QSqlQuery query(db);
+    const auto sql="WITH movements AS ("+sources.join(" UNION ALL ")+"), scoped AS "
+        "(SELECT *,day BETWEEN ? AND ? AS in_period FROM movements) SELECT "
+        "COALESCE(SUM(CASE WHEN in_period THEN gross END),0),COALESCE(SUM(CASE WHEN in_period THEN refund END),0),"
+        "COALESCE(SUM(CASE WHEN in_period THEN net END),0),COALESCE(SUM(free),0),COALESCE(SUM(net),0) FROM scoped";
+    if(!execute(query,sql,{first.toString(Qt::ISODate),last.toString(Qt::ISODate)}) || !query.next()){
+        result.error=query.lastError().text();return result;
+    }
+    result.received=query.value(0).toLongLong();result.refunded=query.value(1).toLongLong();
+    result.net=query.value(2).toLongLong();result.freeAdvances=query.value(3).toLongLong();result.allNet=query.value(4).toLongLong();
+    return result;
+}
 bool allowed(bool expense)
 {
     const auto db=Database::db();

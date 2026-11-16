@@ -60,9 +60,9 @@ QString balance(QSqlDatabase db,const QString& shift,qint64& amount,bool allowUn
     if(db.tables().contains("cash_advance_events") && !addSum("SELECT COALESCE(SUM(cents),0) FROM main.cash_advance_events WHERE shift_uid=? AND method='cash' AND source_uid IS NULL"))
         return q.lastError().text();
     if(db.tables().contains("client_payments")){
-        if(!q.exec("CREATE TABLE IF NOT EXISTS main.cash_shift_receipts(payment_uid TEXT PRIMARY KEY NOT NULL,shift_uid TEXT NOT NULL REFERENCES cash_shifts(shift_uid))"))return q.lastError().text();
-        if(!run(q,"SELECT 1 FROM main.client_payments p WHERE p.method='cash' AND p.recorded_ms >= (SELECT opened_ms FROM main.cash_shifts WHERE shift_uid=?) "
-                   "AND NOT EXISTS(SELECT 1 FROM main.cash_shift_receipts r WHERE r.payment_uid=p.payment_uid) LIMIT 1",{shift}))return q.lastError().text();
+        const QString unmatched=db.tables().contains("cash_shift_receipts")
+            ?" AND NOT EXISTS(SELECT 1 FROM main.cash_shift_receipts r WHERE r.payment_uid=p.payment_uid)":"";
+        if(!run(q,"SELECT 1 FROM main.client_payments p WHERE p.method='cash' AND p.recorded_ms >= (SELECT opened_ms FROM main.cash_shifts WHERE shift_uid=?)"+unmatched+" LIMIT 1",{shift}))return q.lastError().text();
         if(q.next() && !allowUnlinked)return QStringLiteral("Є готівкова оплата без підтвердженого зв’язку зі зміною. Потрібна звірка.");
     }
     if(db.tables().contains("cash_shift_receipts") && !addSum("SELECT COALESCE(SUM(p.amount_cents),0) FROM main.cash_shift_receipts l JOIN main.client_payments p ON p.payment_uid=l.payment_uid WHERE l.shift_uid=?"))
@@ -75,25 +75,36 @@ QString balance(QSqlDatabase db,const QString& shift,qint64& amount,bool allowUn
     amount=*balance;
     return {};
 }
+QString currentBalance(qint64& amount)
+{
+    if(auto error=CashAdvanceService::postingAuthorityError("cash.view");!error.isEmpty())return error;
+    auto db=Database::db();
+    QSqlQuery q(db);
+    if(!q.exec("SAVEPOINT cash_drawer_read"))return q.lastError().text();
+    auto cleanup=qScopeGuard([&]{q.exec("ROLLBACK TO cash_drawer_read");q.exec("RELEASE cash_drawer_read");});
+    const auto shift=read(db);
+    if(!shift.error.isEmpty())return shift.error;
+    if(shift.uid.isEmpty())return QStringLiteral("Початковий залишок очікує підтвердження.");
+    return balance(db,shift.uid,amount);
+}
 State current()
 {
-    if(auto error=CashAdvanceService::postingAuthorityError();!error.isEmpty()) return {{},{},{},{},error};
+    if(auto error=CashAdvanceService::postingAuthorityError("cash.view");!error.isEmpty()) return {{},{},{},{},error};
     return read(Database::db());
 }
 QList<QPair<QString,QString>> recipients()
 {
     QList<QPair<QString,QString>> result;
-    if(!CashAdvanceService::postingAuthorityError().isEmpty())return result;
+    if(!CashAdvanceService::postingAuthorityError("cash.shift").isEmpty())return result;
     QSqlQuery q(Database::db());
-    if(run(q,"SELECT id,display_name,role FROM staff_accounts WHERE active=1 AND role IN ('owner','administrator') AND id<>? ORDER BY display_name,id",
+    if(run(q,"SELECT id,display_name,role FROM staff_accounts WHERE active=1 AND id<>? ORDER BY display_name,id",
            {ActivityAuditService::currentActor().accountId}))
-        while(q.next())if(AccessControlService::hasPermission(Database::db(),q.value(2).toString(),"cash.view"))result.append({q.value(0).toString(),q.value(1).toString()});
+        while(q.next())if(AccessControlService::hasPermission(Database::db(),q.value(2).toString(),"cash.view") && AccessControlService::hasPermission(Database::db(),q.value(2).toString(),"cash.shift"))result.append({q.value(0).toString(),q.value(1).toString()});
     return result;
 }
 Result apply(const Command& c)
 {
     auto fail=[](QString error){return Result{false,{},error};};
-    if(auto error=CashAdvanceService::postingAuthorityError();!error.isEmpty()) return fail(error);
     const auto action=kind(c.action),actor=ActivityAuditService::currentActor().accountId;
     const QString reason=c.reason.trimmed(),recipient=c.recipient.trimmed();
     if (QUuid(c.requestUid).isNull() || c.shiftUid.isEmpty() || action.isEmpty() || c.counted<0 ||
@@ -103,6 +114,7 @@ Result apply(const Command& c)
     QSqlQuery q(db);
     if (!q.exec("BEGIN IMMEDIATE")) return fail(q.lastError().text());
     auto rollback=qScopeGuard([&]{db.rollback();});
+    if(auto error=CashAdvanceService::postingAuthorityError(c.action==Action::Adjust?"cash.reconcile":"cash.shift");!error.isEmpty())return fail(error);
     if (!q.exec("CREATE TABLE IF NOT EXISTS main.cash_shift_transitions(request_uid TEXT PRIMARY KEY NOT NULL,shift_uid TEXT NOT NULL,"
                 "action TEXT NOT NULL,actor TEXT NOT NULL,recipient TEXT,reason TEXT,counted INTEGER NOT NULL,expected INTEGER NOT NULL,"
                 "delta INTEGER NOT NULL,outcome TEXT NOT NULL,phase TEXT NOT NULL,message TEXT NOT NULL,recorded_ms INTEGER NOT NULL)"))
@@ -127,7 +139,7 @@ Result apply(const Command& c)
         (c.action==Action::Adjust && state.phase=="open"))
         return fail(QStringLiteral("Стан зміни або обліковий запис не дозволяє цю дію."));
     if(c.action==Action::HandOver){
-        if(actor==recipient || !run(q,"SELECT role FROM staff_accounts WHERE id=? AND active=1 AND role IN ('owner','administrator')",{recipient}) || !q.next() || !AccessControlService::hasPermission(db,q.value(0).toString(),"cash.view"))
+        if(actor==recipient || !run(q,"SELECT role FROM staff_accounts WHERE id=? AND active=1",{recipient}) || !q.next() || !AccessControlService::hasPermission(db,q.value(0).toString(),"cash.view") || !AccessControlService::hasPermission(db,q.value(0).toString(),"cash.shift"))
             return fail(QStringLiteral("Оберіть іншого чинного отримувача каси."));
     }
     qint64 expected=0;

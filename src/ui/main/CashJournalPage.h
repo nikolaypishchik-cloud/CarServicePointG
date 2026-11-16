@@ -14,5 +14,6 @@ private:
     QTableWidget* outflowTable;
     QTableWidget* advanceTable;
     QLabel* advanceStatus;
+    QList<QLabel*> metricValues;
     QLabel* summary;
 };

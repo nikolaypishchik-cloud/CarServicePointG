@@ -1,8 +1,10 @@
 #include "CashJournalPage.h"
 #include "CashAdvanceDialog.h"
+#include "CashBankForm.h"
+#include "core/services/orders/CashShiftService.h"
 #include "core/services/orders/CashOutflow.h"
 #include "core/services/orders/CashAdvanceService.h"
-#include "core/services/ActivityAuditService.h"
+#include "core/services/AccessControlService.h"
 #include <QMessageBox>
 #include "core/services/orders/ClientReceiptReader.h"
 #include <QDateEdit>
@@ -33,18 +35,17 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     receive->setObjectName("receiveAdvance");
     auto* allocate = new QPushButton(tr("Зарахувати аванс"),this);
     allocate->setObjectName("allocateAdvance");
-    const auto role=ActivityAuditService::currentActor().role;
-    receive->setEnabled(role=="owner" || role=="administrator");
-    allocate->setEnabled(receive->isEnabled());
+    receive->setEnabled(AccessControlService::currentUserHasPermission("cash.receive"));
+    allocate->setEnabled(AccessControlService::currentUserHasPermission("cash.allocate"));
     actions->addWidget(receive);
     actions->addWidget(allocate);
-    if (receive->isEnabled()) {
+    if (AccessControlService::currentUserHasPermission("cash.shift") || AccessControlService::currentUserHasPermission("cash.reconcile")) {
         auto* opening=new QPushButton(tr("Касова зміна"),this);
         opening->setObjectName("cashShift");
         actions->addWidget(opening);
         connect(opening,&QPushButton::clicked,this,[this]{openCashShiftDialog(this);});
     }
-    if (ActivityAuditService::currentActor().role=="owner") {
+    if (AccessControlService::currentUserHasPermission("cash.configure")) {
         auto* station = new QPushButton(tr("Підтвердити єдиний ПК"),this);
         actions->addWidget(station);
         connect(station,&QPushButton::clicked,this,[this] {
@@ -79,7 +80,18 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     range->addWidget(refreshButton);
     range->addStretch();
     layout->addLayout(range);
-    layout->addWidget(new QLabel(tr("Операції · Прямі оплати нарядів"),this));
+    auto* metrics=new QHBoxLayout;
+    const QStringList names{tr("Отримано за період"),tr("Повернено за період"),tr("Чистий рух за період"),tr("Вільні аванси")};
+    for(const auto& name:names){
+        auto* card=new QFrame(this);
+        card->setStyleSheet("QFrame{background:white;border:1px solid #cbd5da;border-radius:6px;} QLabel{border:0;}");
+        auto* content=new QVBoxLayout(card);
+        content->addWidget(new QLabel(name,card));
+        auto* value=new QLabel(card);
+        value->setStyleSheet("font-size:17px;font-weight:bold;");
+        content->addWidget(value);metricValues.append(value);metrics->addWidget(card,1);
+    }
+    layout->addLayout(metrics);
     auto* body = new QHBoxLayout;
     table = new QTableWidget(0,5,this);
     table->setObjectName("directCashPayments");
@@ -109,6 +121,7 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     outflowTable->setHorizontalHeaderLabels({tr("Дата"),tr("Операція"),tr("Сума"),tr("Спосіб"),tr("Причина"),tr("Автор")});
     outflowTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     tabs->addTab(outflowTable,tr("Повернення й видатки"));
+    tabs->addTab(cashBankForm(tabs,false),tr("Банківська звірка"));
     auto* refund=new QPushButton(tr("Повернення"),this);
     auto* expense=new QPushButton(tr("Видаток"),this);
     refund->setObjectName("refundReceipt");
@@ -154,6 +167,13 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
 
 void CashJournalPage::refresh()
 {
+    const auto totals=CashOutflow::totals(firstDay->date(),lastDay->date());
+    const QList<qint64> values{totals.received,totals.refunded,totals.net,totals.freeAdvances};
+    for(int i=0;i<metricValues.size();++i){
+        metricValues[i]->setText(totals.error.isEmpty()?ClientReceiptReader::money(values[i]):QStringLiteral("—"));
+        metricValues[i]->setToolTip(totals.error);
+    }
+    table->setRowCount(0);advanceTable->setRowCount(0);
     QString outflowError;
     const auto entries=CashOutflow::ledger(firstDay->date(),lastDay->date(),outflowError);
     outflowTable->setRowCount(entries.size());
@@ -187,7 +207,14 @@ void CashJournalPage::refresh()
         summary->setText(journal.error.isEmpty() ? tr("Журнал оплат недоступний.") : journal.error);
         return;
     }
-    summary->setText(tr("Прямі оплати за період\n%1").arg(ClientReceiptReader::money(journal.directPaymentsCents)));
+    summary->setText(totals.error.isEmpty()
+        ?tr("Кошти клієнтів за всім локальним журналом\n%1\n\nПрямі оплати за період\n%2")
+            .arg(ClientReceiptReader::money(totals.allNet),ClientReceiptReader::money(journal.directPaymentsCents))
+        :totals.error);
+    qint64 drawerCents=0;
+    QString drawer=CashShiftService::currentBalance(drawerCents);
+    if(drawer.isEmpty())drawer=ClientReceiptReader::money(drawerCents);
+    summary->setText(summary->text()+tr("\n\nОбліковий залишок готівки\n")+drawer);
     table->setRowCount(journal.entries.size());
     int row = 0;
     for (const auto& entry : journal.entries) {

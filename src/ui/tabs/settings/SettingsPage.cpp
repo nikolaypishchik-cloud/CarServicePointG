@@ -154,6 +154,7 @@ SettingsPage::SettingsPage(QWidget* parent)
     };
 
     m_itemsByCategory[Category::Finance] = {
+        {"fin.cash", QStringLiteral("Каси та рахунки")},
         {"fin.defaults",        QString::fromUtf8("Націнка запчастин")},
         {"out.defaults",        QString::fromUtf8("Аутсорс")},
     };

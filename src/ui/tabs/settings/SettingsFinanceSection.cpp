@@ -1,4 +1,5 @@
 #include "ui/tabs/settings/SettingsFinanceSection.h"
+#include "ui/main/CashBankForm.h"
 
 #include "ui/tabs/settings/SettingsPageDataSupport.h"
 #include "ui/tabs/settings/SettingsFinanceSectionUiSupport.h"
@@ -872,6 +873,7 @@ QWidget* buildOutsourceDefaultsWidget(QWidget* parent)
 
 QWidget* SettingsFinanceSection::build(const QString& id, QWidget* owner)
 {
+    if(id=="fin.cash")return cashBankForm(owner,true);
     if (id == QStringLiteral("fin.defaults")) {
         return buildFinanceDefaultsWidget(owner);
     }

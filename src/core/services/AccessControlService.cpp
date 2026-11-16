@@ -38,6 +38,12 @@ const QVector<AccessPermissionDefinition>& definitions()
         {QStringLiteral("nav.history"), QString::fromUtf8("Розділи"), QString::fromUtf8("База виконаних нарядів")},
         {QStringLiteral("nav.reports"), QString::fromUtf8("Розділи"), QString::fromUtf8("Звіти")},
         {QStringLiteral("nav.clients"), QString::fromUtf8("Розділи"), QString::fromUtf8("Клієнти")},
+        {QStringLiteral("cash.bank"), QStringLiteral("Каса"), QStringLiteral("Підтверджувати банківську звірку")},
+        {QStringLiteral("cash.receive"), QStringLiteral("Каса"), QStringLiteral("Приймати оплату й аванси")},
+        {QStringLiteral("cash.allocate"), QStringLiteral("Каса"), QStringLiteral("Зараховувати аванси")},
+        {QStringLiteral("cash.shift"), QStringLiteral("Каса"), QStringLiteral("Відкривати, закривати й передавати зміну")},
+        {QStringLiteral("cash.reconcile"), QStringLiteral("Каса"), QStringLiteral("Підтверджувати початковий залишок і розбіжності")},
+        {QStringLiteral("cash.configure"), QStringLiteral("Каса"), QStringLiteral("Налаштовувати касу й обліковий ПК")},
         {QStringLiteral("cash.reverse"), QStringLiteral("Каса"), QStringLiteral("Сторнувати повернення")},
         {QStringLiteral("cash.refund"), QStringLiteral("Каса"), QStringLiteral("Проводити повернення")},
         {QStringLiteral("cash.expense"), QStringLiteral("Каса"), QStringLiteral("Проводити видатки")},
@@ -80,6 +86,14 @@ QSet<QString> permissions(const std::initializer_list<const char*>& values)
     return result;
 }
 
+QStringList cashPermissions()
+{
+    QStringList result;
+    for(const auto& permission:definitions())
+        if(permission.key.startsWith("cash."))result.append(permission.key);
+    return result;
+}
+
 QSet<QString> defaultGrants(const QString& roleId)
 {
     if (roleId == QStringLiteral("owner")) {
@@ -91,7 +105,7 @@ QSet<QString> defaultGrants(const QString& roleId)
         return permissions({"nav.planning", "nav.intake", "nav.new_order", "nav.current_orders", "nav.parts", "nav.history",
                             "nav.reports", "nav.clients", "nav.inventory", "nav.catalog", "nav.statistics", "nav.settings",
                             "orders.create", "orders.edit", "orders.close", "parts.order", "parts.install",
-                            "inventory.purchase", "inventory.delete", "security.manage", "cash.view", "cash.refund", "cash.expense", "cash.reverse"});
+                            "inventory.purchase", "inventory.delete", "security.manage", "cash.view", "cash.refund", "cash.expense", "cash.reverse", "cash.receive", "cash.allocate", "cash.shift", "cash.reconcile", "cash.configure", "cash.bank"});
     }
     if (roleId == QStringLiteral("manager")) {
         return permissions({"nav.planning", "nav.intake", "nav.new_order", "nav.current_orders", "nav.parts", "nav.history",
@@ -127,15 +141,20 @@ bool canManage(QSqlDatabase database)
 
 bool mayAssignCashAccess(QSqlDatabase database, const QString& accountId, const QString& roleId, QString* error)
 {
-    if (ActivityAuditService::currentActor().role == QStringLiteral("owner")
-        || !AccessControlService::hasPermission(database, roleId, QStringLiteral("cash.view"))) return true;
+    if (ActivityAuditService::currentActor().role == "owner")return true;
 
     QSqlQuery current(database);
     current.prepare(QStringLiteral("SELECT role FROM staff_accounts WHERE id=? AND active=1"));
     current.addBindValue(accountId);
-    if (current.exec() && current.next() && current.value(0).toString() == roleId) return true;
-    setError(error, QStringLiteral("Призначити роль із доступом до каси може лише власник."));
-    return false;
+    if(!current.exec()){setError(error,current.lastError().text());return false;}
+    const auto previous=current.next()?current.value(0).toString():QString();
+    if(previous==roleId)return true;
+    for(const auto& key:cashPermissions()){
+        if(AccessControlService::hasPermission(database,roleId,key)==AccessControlService::hasPermission(database,previous,key))continue;
+        setError(error,QStringLiteral("Змінювати касові права працівника може лише власник."));
+        return false;
+    }
+    return true;
 }
 
 bool actorMatchesActiveAccount(QSqlDatabase database)
@@ -335,10 +354,10 @@ bool ensureSchema(QSqlDatabase database, QString* errorText)
             // Seed access for existing administrator profiles. Explicit revocations are stored as zero.
             if (role.id == QStringLiteral("administrator")) {
                 QSqlQuery seed(database);
-                if (!seed.exec(QStringLiteral("INSERT OR IGNORE INTO access_role_permissions(role_id,permission_key,granted) "
-                                              "VALUES('administrator','cash.view',1),('administrator','cash.refund',1),('administrator','cash.expense',1),('administrator','cash.reverse',1)"))) {
-                    setError(errorText, seed.lastError().text());
-                    return false;
+                for(const auto& key:cashPermissions()){
+                    seed.prepare("INSERT OR IGNORE INTO access_role_permissions(role_id,permission_key,granted) VALUES('administrator',?,1)");
+                    seed.addBindValue(key);
+                    if(!seed.exec()){setError(errorText,seed.lastError().text());return false;}
                 }
             }
             // Adds self-service phone pairing to the default Master role only.
@@ -500,14 +519,13 @@ bool setRolePermissions(QSqlDatabase database, const QString& roleId, const QSet
         setError(errorText, database.lastError().text());
         return false;
     }
-    if (ActivityAuditService::currentActor().role != QStringLiteral("owner")
-        && (permissionKeys.contains("cash.view") != hasPermission(database,roleId,"cash.view") ||
-            permissionKeys.contains("cash.refund") != hasPermission(database,roleId,"cash.refund") ||
-            permissionKeys.contains("cash.reverse") != hasPermission(database,roleId,"cash.reverse") ||
-            permissionKeys.contains("cash.expense") != hasPermission(database,roleId,"cash.expense"))) {
-        database.rollback();
-        setError(errorText, QStringLiteral("Лише власник може змінювати доступ до каси."));
-        return false;
+    if(ActivityAuditService::currentActor().role!="owner"){
+        for(const auto& key:cashPermissions()){
+            if(permissionKeys.contains(key)==hasPermission(database,roleId,key))continue;
+            database.rollback();
+            setError(errorText,QStringLiteral("Лише власник може змінювати доступ до каси."));
+            return false;
+        }
     }
     QSqlQuery remove(database);
     remove.prepare(QStringLiteral("DELETE FROM access_role_permissions WHERE role_id=?"));
@@ -529,7 +547,7 @@ bool setRolePermissions(QSqlDatabase database, const QString& roleId, const QSet
             return false;
         }
     }
-    for(const QString key : {QStringLiteral("cash.view"),QStringLiteral("cash.refund"),QStringLiteral("cash.expense"),QStringLiteral("cash.reverse")}) {
+    for(const auto& key:cashPermissions()) {
         if(roleId!="administrator" || permissionKeys.contains(key))continue;
         QSqlQuery revoke(database);
         revoke.prepare("INSERT INTO access_role_permissions(role_id,permission_key,granted) VALUES('administrator',?,0)");

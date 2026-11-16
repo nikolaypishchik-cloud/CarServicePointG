@@ -12,6 +12,7 @@
 #include <QTableWidget>
 #include <QTabWidget>
 #include "core/services/orders/CashOutflow.h"
+#include "core/services/orders/CashBankService.h"
 #include <QTemporaryDir>
 #include "app/App.h"
 #include "core/services/AccessControlService.h"
@@ -318,6 +319,68 @@ private slots:
         QVERIFY(transition(Step::Freeze,0).recorded);
         QVERIFY(transition(Step::Close,55000).recorded);
         QCOMPARE(CashShiftService::current().phase,"closed");
+        ActivityAuditService::setCurrentActor({"worker","Operator","owner","test"});
+        QVERIFY(q.exec("INSERT INTO staff_accounts VALUES('delegated','','Responsible','manager',1)"));
+        QVERIFY(q.exec("PRAGMA query_only=ON"));
+        const auto summary=CashOutflow::totals(day,day);
+        QVERIFY2(summary.error.isEmpty(),qPrintable(summary.error));
+        QCOMPARE(summary.received,29001);
+        QCOMPARE(summary.refunded,9101);
+        QCOMPARE(summary.net,22001);
+        QCOMPARE(summary.freeAdvances,10000);
+        const auto earlier=CashOutflow::totals(day.addDays(-1),day.addDays(-1));
+        QCOMPARE(earlier.received,0);
+        QCOMPARE(earlier.freeAdvances,summary.freeAdvances);
+        QCOMPARE(earlier.allNet,summary.net);
+        QVERIFY(q.exec("PRAGMA query_only=OFF"));
+        const auto bank=id();
+        using Bank=CashBankService::Command;
+        QVERIFY(CashBankService::post(Bank{id(),"account",bank,"QA bank","bank",{},"Налаштування",day}).error.isEmpty());
+        const auto bankPayment=id();
+        q.prepare("INSERT INTO client_payments VALUES(?,?,'order',100000,'card',?,'worker',1)");
+        q.addBindValue(bankPayment);q.addBindValue(id());q.addBindValue(day.toString(Qt::ISODate));
+        QVERIFY(q.exec());
+        auto beforeBank=ClientReceiptReader::read(db,{"order"});
+        Bank credit{id(),"credit",bank,"QA-82",{},{},"Виписка",day,98000,2000,0};
+        auto credited=CashBankService::post(credit);
+        QVERIFY2(credited.error.isEmpty(),qPrintable(credited.error));
+        QVERIFY(CashBankService::post(credit).replay);
+        credit.uid=id();
+        QVERIFY(!CashBankService::post(credit).error.isEmpty());
+        Bank match{id(),"match",bank,"QA-82","payment",bankPayment,"Звірено з чеком",day,0,0,100000};
+        auto matched=CashBankService::post(match);
+        QVERIFY2(matched.error.isEmpty(),qPrintable(matched.error));
+        QVERIFY(CashBankService::post(match).replay);
+        match.uid=id();QVERIFY(!CashBankService::post(match).error.isEmpty());
+        auto creditedRows=CashBankService::credits(error);
+        QVERIFY2(error.isEmpty(),qPrintable(error));
+        QCOMPARE(creditedRows.size(),1);
+        QCOMPARE(creditedRows.front().unmatched,0);
+        QCOMPARE(creditedRows.front().net,98000);
+        QCOMPARE(creditedRows.front().fee,2000);
+        QCOMPARE(ClientReceiptReader::read(db,{"order"}).centsByOrder,beforeBank.centsByOrder);
+        auto grants=AccessControlService::grantedPermissions(db,"manager",&error);
+        grants.unite({"cash.view","cash.receive","cash.shift","cash.configure"});
+        QVERIFY2(AccessControlService::setRolePermissions(db,"manager",grants,&error),qPrintable(error));
+        QVERIFY(CashShiftService::recipients().contains({"delegated","Responsible"}));
+        ActivityAuditService::setCurrentActor({"delegated","Responsible","manager","test"});
+        QVERIFY(CashAdvanceService::designateSingleWorkstation().isEmpty());
+        QVERIFY(transition(Step::OpenNext,55000).recorded);
+        cash.requestUid=id();
+        QVERIFY(CashAdvanceService::post(cash).error.isEmpty());
+        QVERIFY(!CashAdvanceService::postingAuthorityError("cash.bank").isEmpty());
+        QVERIFY(!CashAdvanceService::postingAuthorityError("cash.allocate").isEmpty());
+        QVERIFY(!CashAdvanceService::postingAuthorityError("cash.reconcile").isEmpty());
+        CashJournalPage delegatedPage(nullptr);
+        QVERIFY(delegatedPage.findChild<QPushButton*>("receiveAdvance")->isEnabled());
+        QVERIFY(!delegatedPage.findChild<QPushButton*>("allocateAdvance")->isEnabled());
+        ActivityAuditService::setCurrentActor({"worker","Operator","owner","test"});
+        grants.remove("cash.receive");
+        QVERIFY(AccessControlService::setRolePermissions(db,"manager",grants,&error));
+        QVERIFY(AccessControlService::ensureSchema(db,&error));
+        ActivityAuditService::setCurrentActor({"delegated","Responsible","manager","test"});
+        cash.requestUid=id();
+        QVERIFY(!CashAdvanceService::post(cash).error.isEmpty());
     }
 };
 QTEST_MAIN(CashAdvanceScreenTests)

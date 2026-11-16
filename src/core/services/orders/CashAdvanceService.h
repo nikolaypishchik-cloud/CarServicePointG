@@ -13,7 +13,7 @@ struct Result { QString operationUid, error; bool replay = false; };
 struct Choices { QList<Choice> rows; QString error; };
 QString designateSingleWorkstation();
 QString stationError();
-QString postingAuthorityError();
+QString postingAuthorityError(const QString& permission);
 struct Entry { QString uid, order, source; QDate day; qint64 cents; };
 struct Ledger { QList<Entry> entries; QString error; };
 Ledger ledger(QDate firstDay, QDate lastDay);

@@ -199,7 +199,7 @@ QJsonObject close(QSqlDatabase db,QJsonObject& s,const QJsonObject& p,qint64 now
         require(date.isValid() && date<=QDateTime::fromMSecsSinceEpoch(now,QTimeZone("Europe/Kyiv")).date() && QStringList{"cash","card","bank_transfer"}.contains(pay["method"].toString()),"Invalid payment date/method",422);
         paymentUid=uuid();
         if(pay["method"]=="cash" && db.tables().contains("cash_shifts")){
-            require(permission(db,"cash.view"),QStringLiteral("Немає права приймати готівку."),403);
+            require(permission(db,"cash.view") && permission(db,"cash.receive"),QStringLiteral("Немає права приймати готівку."),403);
             auto shift=query(db,"SELECT shift_uid FROM main.cash_shifts WHERE state='open' AND operator_uid=?",{actor});
             require(shift.next(),QStringLiteral("Для приймання готівки потрібна відкрита зміна цього оператора."));
             const auto shiftUid=shift.value(0).toString();

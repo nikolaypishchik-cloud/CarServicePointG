@@ -19,7 +19,6 @@ bool execute(QSqlQuery& q,const QString& sql,const QVariantList& args)
 Result apply(const Command& c)
 {
     auto db=Database::db();
-    if (const auto error=CashAdvanceService::postingAuthorityError();!error.isEmpty()) return {error};
     const auto actor=ActivityAuditService::currentActor().accountId;
     if (QUuid(c.uid).isNull() || c.counted<0 || c.counted>9000000000000000LL || !c.start.isValid() || c.start>QDate::currentDate())
         return {QStringLiteral("Перевірте дату початку та фактично перераховану суму.")};
@@ -28,6 +27,7 @@ Result apply(const Command& c)
     QSqlQuery q(db);
     if (!q.exec("BEGIN IMMEDIATE")) return {q.lastError().text()};
     auto rollback=qScopeGuard([&]{db.rollback();});
+    if(const auto error=CashAdvanceService::postingAuthorityError(c.action==Action::Count?"cash.shift":"cash.reconcile");!error.isEmpty())return {error};
     if (!q.exec("CREATE TABLE IF NOT EXISTS main.cash_opening_events(uid TEXT PRIMARY KEY NOT NULL,kind TEXT NOT NULL,"
                 "effective_on TEXT NOT NULL,expected INTEGER NOT NULL,counted INTEGER NOT NULL,delta INTEGER NOT NULL,reason TEXT NOT NULL,"
                 "actor TEXT NOT NULL,recorded_ms INTEGER NOT NULL,outcome TEXT NOT NULL,source_uid TEXT)"))

@@ -26,8 +26,7 @@ QString binding(QSqlDatabase db)
 }
 bool authorized(QSqlDatabase db)
 {
-    const auto role = ActivityAuditService::currentActor().role;
-    return (role == "owner" || role == "administrator") && AccessControlService::currentUserHasPermission(db,"cash.view");
+    return AccessControlService::currentUserHasPermission(db,"cash.view");
 }
 bool exec(QSqlQuery& q, const QString& sql, const QVariantList& args)
 {
@@ -50,8 +49,8 @@ Choices choices(const QString& sql, const QVariantList& args)
 QString designateSingleWorkstation()
 {
     auto db = Database::db();
-    if (!authorized(db) || ActivityAuditService::currentActor().role != "owner" || !CloudSyncSettings::localBackendEnabled())
-        return QStringLiteral("Підтвердити єдиний ПК може власник в автономному режимі.");
+    if (!authorized(db) || !AccessControlService::currentUserHasPermission(db,"cash.configure") || !CloudSyncSettings::localBackendEnabled())
+        return QStringLiteral("Підтвердити єдиний ПК може працівник із правом налаштування каси в автономному режимі.");
     const auto key = binding(db);
     if (key.isEmpty()) return QStringLiteral("Не вдалося визначити локальний профіль.");
     const auto registered = Database::getSetting("cash.single_station",QString()).toString();
@@ -94,10 +93,10 @@ Choices advances(const QString& client)
                    "WHERE b.source_uid=a.uid),0)"+refunds+" AS remaining FROM main.cash_advance_events a "
                    "WHERE a.source_uid IS NULL AND a.client_uid=?) WHERE remaining>0 ORDER BY day,uid",{client});
 }
-QString postingAuthorityError()
+QString postingAuthorityError(const QString& permission)
 {
     const auto db=Database::db();
-    if (!authorized(db)) return QStringLiteral("Немає прав на проведення.");
+    if (!authorized(db) || !AccessControlService::currentUserHasPermission(db,permission)) return QStringLiteral("Немає прав на проведення.");
     return stationError();
 }
 QString stationError()
@@ -113,7 +112,6 @@ Result post(const Command& c)
     auto fail=[](const QString& error){return Result{{},error,false};};
     auto db=Database::db();
     const auto actor=ActivityAuditService::currentActor().accountId;
-    if (const auto error=postingAuthorityError(); !error.isEmpty()) return fail(error);
     if (QUuid(c.requestUid).isNull() || c.cents<=0 || c.cents>9000000000000000LL || c.clientUid.trimmed().isEmpty() || !c.day.isValid())
         return fail(QStringLiteral("Некоректні реквізити авансу."));
     const bool allocation=!c.advanceUid.isEmpty();
@@ -123,6 +121,7 @@ Result post(const Command& c)
     QSqlQuery q(db);
     if (!q.exec("BEGIN IMMEDIATE")) return fail(q.lastError().text());
     auto rollback=qScopeGuard([&]{db.rollback();});
+    if(const auto error=postingAuthorityError(allocation?"cash.allocate":"cash.receive"); !error.isEmpty())return fail(error);
     if (!q.exec("CREATE TABLE IF NOT EXISTS main.cash_advance_events(uid TEXT PRIMARY KEY NOT NULL,client_uid TEXT NOT NULL,"
                 "order_uid TEXT,source_uid TEXT REFERENCES cash_advance_events(uid),method TEXT NOT NULL,cents INTEGER NOT NULL CHECK(cents>0),"
                 "day TEXT NOT NULL,note TEXT NOT NULL,actor TEXT NOT NULL,recorded_ms INTEGER NOT NULL,shift_uid TEXT)"))

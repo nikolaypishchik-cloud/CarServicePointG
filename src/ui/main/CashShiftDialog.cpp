@@ -3,6 +3,7 @@
 #include "core/services/orders/CashShiftService.h"
 #include "core/services/ActivityAuditService.h"
 #include "core/finance/ExactMoney.h"
+#include "core/services/AccessControlService.h"
 #include <QDialog>
 #include <QFormLayout>
 #include <QComboBox>
@@ -28,14 +29,15 @@ void openCashShiftDialog(CashJournalPage* page)
     action->setObjectName("shiftAction");
     auto add=[&](QString label,Action value){action->addItem(label,static_cast<int>(value));};
     const auto actor=ActivityAuditService::currentActor().accountId;
-    if(shift.phase=="open" && shift.operatorUid==actor)add(QObject::tr("Почати закриття та перерахунок"),Action::Freeze);
-    if(shift.phase=="closing" && shift.operatorUid==actor){
+    const bool operate=AccessControlService::currentUserHasPermission("cash.shift");
+    if(operate && shift.phase=="open" && shift.operatorUid==actor)add(QObject::tr("Почати закриття та перерахунок"),Action::Freeze);
+    if(operate && shift.phase=="closing" && shift.operatorUid==actor){
         add(QObject::tr("Підтвердити закриття"),Action::Close);
         add(QObject::tr("Здати касу працівнику"),Action::HandOver);
     }
-    if(shift.phase=="handover" && shift.recipient==actor)add(QObject::tr("Підтвердити приймання каси"),Action::Accept);
-    if(shift.phase=="closed")add(QObject::tr("Відкрити наступну зміну"),Action::OpenNext);
-    if(shift.phase!="open")add(QObject::tr("Документувати коригування розбіжності"),Action::Adjust);
+    if(operate && shift.phase=="handover" && shift.recipient==actor)add(QObject::tr("Підтвердити приймання каси"),Action::Accept);
+    if(operate && shift.phase=="closed")add(QObject::tr("Відкрити наступну зміну"),Action::OpenNext);
+    if(shift.phase!="open" && AccessControlService::currentUserHasPermission("cash.reconcile"))add(QObject::tr("Документувати коригування розбіжності"),Action::Adjust);
     form->addRow(QObject::tr("Дія"),action);
     auto* receiver=new QComboBox(dialog);
     receiver->setObjectName("shiftRecipient");
