@@ -4,6 +4,8 @@
 #include <QList>
 #include "core/services/orders/CashOperations.h"
 class QLineEdit;class QComboBox;class QTableWidget;class QPushButton;class QLabel;
+namespace CashReport { struct Table; }
+QString writeCashReportPdf(const QString& path,const CashReport::Table& report);
 QString writeCashJournalPdf(const QString& path,QDate first,QDate last,const QString& search,const QString& kind,const QString& method);
 class CashOperationsWidget : public QWidget {
 public:

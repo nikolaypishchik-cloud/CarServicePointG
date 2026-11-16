@@ -2,6 +2,8 @@
 #include <QWidget>
 class CashOperationsWidget;
 class QTabWidget;
+class QScrollArea;
+class QComboBox;
 class QGridLayout;
 class QResizeEvent;
 class QDateEdit;
@@ -26,4 +28,6 @@ private:
     CashOperationsWidget* operations;
     QList<QLabel*> metricValues;
     QLabel* summary;
+    QComboBox* selectedAccount;
+    QScrollArea* balanceArea;
 };

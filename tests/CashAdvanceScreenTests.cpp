@@ -2,12 +2,14 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QSettings>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QSqlRecord>
 #include <QStandardPaths>
 #include <QTableWidget>
 #include <QTabWidget>
@@ -16,8 +18,10 @@
 #include "core/services/orders/CashOperations.h"
 #include "core/services/orders/CashAccountMovement.h"
 #include "core/services/orders/CashTreasury.h"
+#include "core/services/orders/CashReport.h"
 #include <QTemporaryDir>
 #include "app/App.h"
+#include "core/backup/BackupSnapshotService.h"
 #include "core/services/AccessControlService.h"
 #include "core/services/ActivityAuditService.h"
 #include "core/services/orders/CashAdvanceService.h"
@@ -33,6 +37,13 @@ class CashAdvanceScreenTests : public QObject {
     Q_OBJECT
 private slots:
     void postAndReplayFromScreen() {
+        // The headless Windows plugin does not enumerate the system fonts.
+        const auto fontFile=qEnvironmentVariable("WINDIR")+"/Fonts/arial.ttf";
+        if(QFileInfo::exists(fontFile)){
+            const int fontId=QFontDatabase::addApplicationFont(fontFile);
+            QVERIFY(fontId>=0);
+            QApplication::setFont(QFont(QFontDatabase::applicationFontFamilies(fontId).first(),10));
+        }
         QTemporaryDir work;
         QVERIFY(work.isValid());
         QStandardPaths::setTestModeEnabled(true);
@@ -438,6 +449,19 @@ private slots:
         QCOMPARE(safeBalance,12345);QCOMPARE(drawerBalance,55001-12345);
         const auto priorClientNet = CashOutflow::totals(day,day).net;
         CashTreasury::Command deposit{id(),"deposit","primary-cash","Розмінні кошти",2400,day,{}};
+        const auto otherConnection=id();
+        {
+            auto other=QSqlDatabase::addDatabase("QSQLITE",otherConnection);
+            other.setDatabaseName(db.databaseName());QVERIFY(other.open());
+            QSqlQuery held(other);
+            QVERIFY(held.exec("BEGIN IMMEDIATE"));
+            QVERIFY(q.exec("PRAGMA busy_timeout=25"));
+            QVERIFY(!CashTreasury::post(deposit).error.isEmpty());
+            QVERIFY(held.exec("ROLLBACK"));
+            QVERIFY(q.exec("PRAGMA busy_timeout=5000"));
+            other.close();
+        }
+        QSqlDatabase::removeDatabase(otherConnection);
         auto receipt = CashTreasury::post(deposit);
         QVERIFY2(receipt.error.isEmpty(),qPrintable(receipt.error));
         QVERIFY(CashTreasury::post(deposit).replay);
@@ -460,10 +484,60 @@ private slots:
         const auto exportRows=CashOperations::exportSelection(day,day,"test-export","payment","card");
         QVERIFY2(exportRows.error.isEmpty(),qPrintable(exportRows.error));
         QCOMPARE(exportRows.rows.size(),103);
+        const auto acquiring=CashReport::read(CashReport::Type::Acquiring,day,day);
+        QVERIFY2(acquiring.error.isEmpty(),qPrintable(acquiring.error));
+        QVERIFY(acquiring.totals.join(" ").contains(ClientReceiptReader::money(98000)));
+        const auto transferReport=CashReport::read(CashReport::Type::Transfers,day,day);
+        QVERIFY2(transferReport.error.isEmpty(),qPrintable(transferReport.error));
+        QCOMPARE(transferReport.rows.size(),1);
+        QCOMPARE(transferReport.rows.front().at(5),ClientReceiptReader::money(12345));
+        const auto shiftReport=CashReport::read(CashReport::Type::Shift,day,day,CashShiftService::current().uid);
+        QVERIFY2(shiftReport.error.isEmpty(),qPrintable(shiftReport.error));
+        QVERIFY(shiftReport.totals.join(" ").contains(ClientReceiptReader::money(drawerBalance)));
+        const auto discrepancies=CashReport::read(CashReport::Type::Discrepancies,day,day);
+        QVERIFY2(discrepancies.error.isEmpty(),qPrintable(discrepancies.error));
+        QVERIFY(!discrepancies.rows.isEmpty());
+        const auto movements=CashReport::read(CashReport::Type::Account,day,day,safe);
+        QVERIFY2(movements.error.isEmpty(),qPrintable(movements.error));
+        QVERIFY(movements.totals.join(" ").contains(ClientReceiptReader::money(12345)));
         const auto exported=qEnvironmentVariable("CS_CASH_PDF_SAMPLE",work.filePath("cash-journal.pdf"));
         error=writeCashJournalPdf(exported,day,day,"test-export","payment","card");
         QVERIFY2(error.isEmpty(),qPrintable(error));
         QVERIFY(QFileInfo(exported).size()>0);
+        const auto backupRoot=work.filePath("cash-backups");
+        QVERIFY(QDir().mkpath(backupRoot));
+        QVERIFY(Database::setSetting("settings.int.autobackup.dir",backupRoot));
+        SnapshotJobContext job;
+        job.event.entityType="cash";job.event.operationType="test_snapshot";
+        SnapshotMetadata meta;
+        QVERIFY2(BackupSnapshotService::createSnapshot(job,&meta,&error),qPrintable(error));
+        QVERIFY(QFileInfo(meta.snapshotPath).absoluteFilePath().startsWith(backupRoot+"/"));
+        QVERIFY2(BackupSnapshotService::rehearseRestore(meta.snapshotPath,&error),qPrintable(error));
+        const auto restoredDb=work.filePath("restored-cash.db");
+        QVERIFY(QFile::copy(meta.snapshotPath,restoredDb));
+        const auto restoreId=id();
+        {
+            auto restored=QSqlDatabase::addDatabase("QSQLITE",restoreId);
+            restored.setConnectOptions("QSQLITE_OPEN_READONLY");restored.setDatabaseName(restoredDb);
+            QVERIFY(restored.open());
+            qint64 recoveredDrawer=0,recoveredSafe=0;
+            QVERIFY(CashShiftService::balance(restored,CashShiftService::current().uid,recoveredDrawer).isEmpty());
+            QVERIFY(CashAccountMovement::balance(restored,safe,recoveredSafe).isEmpty());
+            QCOMPARE(recoveredDrawer,drawerBalance);QCOMPARE(recoveredSafe,safeBalance);
+            for(const auto& table:db.tables()){
+                if(!table.startsWith("cash_") && table!="client_payments" && table!="activity_audit_events")continue;
+                QSqlQuery original(db),copy(restored);
+                const QString sql="SELECT * FROM main."+table+" ORDER BY rowid";
+                QVERIFY(original.exec(sql) && copy.exec(sql));
+                while(original.next()){
+                    QVERIFY(copy.next());
+                    for(int col=0;col<original.record().count();++col)QCOMPARE(copy.value(col),original.value(col));
+                }
+                QVERIFY(!copy.next());
+            }
+            restored.close();
+        }
+        QSqlDatabase::removeDatabase(restoreId);
         grants.remove("cash.receive");
         QVERIFY(AccessControlService::setRolePermissions(db,"manager",grants,&error));
         QVERIFY(AccessControlService::ensureSchema(db,&error));

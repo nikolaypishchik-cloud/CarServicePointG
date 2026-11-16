@@ -7,6 +7,11 @@
 #include <QResizeEvent>
 #include <QGridLayout>
 #include <QScrollArea>
+#include <QComboBox>
+#include <QSignalBlocker>
+#include "core/services/orders/CashAccountMovement.h"
+#include "core/services/orders/CashBankService.h"
+#include "core/finance/ExactMoney.h"
 #include "core/services/orders/CashShiftService.h"
 #include "core/services/orders/CashOutflow.h"
 #include "core/services/orders/CashAdvanceService.h"
@@ -93,6 +98,10 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     range->addWidget(lastDay);
     auto* refreshButton = new QPushButton(tr("Оновити"),this);
     range->addWidget(refreshButton);
+    selectedAccount=new QComboBox(this);
+    selectedAccount->setObjectName("cashBalanceAccount");
+    range->addWidget(new QLabel(tr("Рахунок для балансу"),this));
+    range->addWidget(selectedAccount);
     range->addStretch();
     layout->addLayout(range);
     metrics=new QGridLayout;
@@ -143,6 +152,7 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     scrollTab(cashBankForm(tabs,false),tr("Банківська звірка"));
     scrollTab(cashMovementForm(tabs),tr("Переміщення"));
     scrollTab(cashTreasuryForm(tabs),tr("Касові документи"));
+    scrollTab(cashReportForm(tabs),tr("Касові звіти"));
     auto* refund=new QPushButton(tr("Повернення"),this);
     auto* expense=new QPushButton(tr("Видаток"),this);
     refund->setObjectName("refundReceipt");
@@ -194,10 +204,14 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     summary->setObjectName("cashTotal");
     summary->setWordWrap(true);
     summary->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-    summary->setFixedWidth(215);
+    balanceArea=new QScrollArea(this);
+    balanceArea->setWidgetResizable(true);
+    balanceArea->setFrameShape(QFrame::NoFrame);
+    balanceArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    balanceArea->setWidget(summary);
     summary->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Minimum);
     summary->setTextFormat(Qt::PlainText);
-    body->addWidget(summary,0,1,2,1);
+    body->addWidget(balanceArea,0,1,2,1);
     layout->addLayout(body,1);
     // Keep every financial action accessible on narrow windows through the same handlers.
     auto* receiptMenu=new QMenu(this);auto* serviceMenu=new QMenu(this);
@@ -214,6 +228,7 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
         button->setMenu(menu);actions->addWidget(button);
     }
 
+    connect(selectedAccount,&QComboBox::currentIndexChanged,this,&CashJournalPage::refresh);
     connect(refreshButton,&QPushButton::clicked,this,&CashJournalPage::refresh);
     connect(firstDay,&QDateEdit::dateChanged,this,&CashJournalPage::refresh);
     connect(lastDay,&QDateEdit::dateChanged,this,&CashJournalPage::refresh);
@@ -224,13 +239,15 @@ void CashJournalPage::resizeEvent(QResizeEvent* event)
     QWidget::resizeEvent(event);
     const int width=event->size().width();
     const bool narrow=window()->width()<=1100 || width<780;
-    body->removeWidget(tabs);body->removeWidget(summary);
+    body->removeWidget(tabs);body->removeWidget(balanceArea);
     if(narrow){
-        summary->setMinimumWidth(0);summary->setMaximumWidth(QWIDGETSIZE_MAX);
-        body->addWidget(summary,1,0);body->addWidget(tabs,2,0);
+        balanceArea->setMinimumWidth(0);balanceArea->setMaximumWidth(QWIDGETSIZE_MAX);
+        balanceArea->setFixedHeight(120);
+        body->addWidget(balanceArea,1,0);body->addWidget(tabs,2,0);
     }else{
-        summary->setFixedWidth(qBound(190,width/5,265));
-        body->addWidget(summary,0,1,2,1);body->addWidget(tabs,1,0);
+        balanceArea->setMinimumHeight(0);balanceArea->setMaximumHeight(QWIDGETSIZE_MAX);
+        balanceArea->setFixedWidth(qBound(190,width/5,265));
+        body->addWidget(balanceArea,0,1,2,1);body->addWidget(tabs,1,0);
     }
     body->setColumnStretch(0,1);
     body->setRowStretch(1,narrow?0:1);body->setRowStretch(2,narrow?1:0);
@@ -288,10 +305,33 @@ void CashJournalPage::refresh()
         ?tr("Баланс каси\n\nКошти клієнтів за всім локальним журналом\n%1\n\nПрямі оплати за період\n%2")
             .arg(ClientReceiptReader::money(totals.allNet),ClientReceiptReader::money(journal.directPaymentsCents))
         :totals.error);
-    qint64 drawerCents=0;
-    QString drawer=CashShiftService::currentBalance(drawerCents);
-    if(drawer.isEmpty())drawer=ClientReceiptReader::money(drawerCents);
-    summary->setText(summary->text()+tr("\n\nОбліковий залишок готівки\n")+drawer);
+    const QString prior=selectedAccount->currentData().toString();
+    QString error;
+    const auto accounts=CashBankService::accounts(error);
+    {
+        QSignalBlocker block(selectedAccount);
+        selectedAccount->clear();
+        for(const auto& account:accounts)selectedAccount->addItem(account.name,account.uid);
+        const int index=selectedAccount->findData(prior.isEmpty()?QStringLiteral("primary-cash"):prior);
+        selectedAccount->setCurrentIndex(index);
+    }
+    const QString accountUid=selectedAccount->currentData().toString();
+    const QString balance=error.isEmpty() && !accountUid.isEmpty() ? CashAccountMovement::displayBalance(accountUid) : error;
+    summary->setText(summary->text()+tr("\n\n%1 · обліковий залишок\n%2").arg(selectedAccount->currentText(),balance));
+    const auto shift=CashShiftService::current();
+    if(!shift.error.isEmpty())summary->setText(summary->text()+"\n"+shift.error);
+    if(!shift.uid.isEmpty()){
+        const QHash<QString,QString> phases{{"open",tr("Відкрита")},{"closing",tr("Перерахунок")},{"handover",tr("Очікує передачі")},{"closed",tr("Закрита")}};
+        summary->setText(summary->text()+tr("\n\nЗміна · %1\n%2\nВідповідальний · %3").arg(phases.value(shift.phase,shift.phase),shift.uid,shift.operatorUid));
+    }
+    const auto pending=CashBankService::pending(error);
+    std::vector<ExactMoney::Cents> amounts;
+    for(const auto& entry:pending)amounts.push_back(entry.cents);
+    const auto acquiring=ExactMoney::sum(amounts);
+    if(error.isEmpty() && std::holds_alternative<ExactMoney::Cents>(acquiring))
+        summary->setText(summary->text()+tr("\n\nКарткові кошти до звірки за весь час\n")+ClientReceiptReader::money(std::get<ExactMoney::Cents>(acquiring)));
+    else summary->setText(summary->text()+"\n"+(error.isEmpty()?tr("Переповнення еквайрингу."):error));
+    summary->setMinimumHeight(summary->heightForWidth(qMax(90,balanceArea->viewport()->width()-18)));
     table->setRowCount(journal.entries.size());
     int row = 0;
     for (const auto& entry : journal.entries) {

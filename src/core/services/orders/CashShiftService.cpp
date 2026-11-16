@@ -79,8 +79,8 @@ QString balance(QSqlDatabase db,const QString& shift,qint64& amount,bool allowUn
 }
 QString currentBalance(qint64& amount)
 {
-    if(auto error=CashAdvanceService::postingAuthorityError("cash.view");!error.isEmpty())return error;
     auto db=Database::db();
+    if(!AccessControlService::currentUserHasPermission(db,"cash.view"))return QStringLiteral("Немає доступу до каси.");
     QSqlQuery q(db);
     if(!q.exec("SAVEPOINT cash_drawer_read"))return q.lastError().text();
     auto cleanup=qScopeGuard([&]{q.exec("ROLLBACK TO cash_drawer_read");q.exec("RELEASE cash_drawer_read");});
@@ -91,7 +91,7 @@ QString currentBalance(qint64& amount)
 }
 State current()
 {
-    if(auto error=CashAdvanceService::postingAuthorityError("cash.view");!error.isEmpty()) return {{},{},{},{},error};
+    if(!AccessControlService::currentUserHasPermission("cash.view")) return {{},{},{},{},QStringLiteral("Немає доступу до каси.")};
     return read(Database::db());
 }
 QList<QPair<QString,QString>> recipients()

@@ -1,10 +1,13 @@
 #include "CashOperationsWidget.h"
+#include "core/services/orders/CashReport.h"
 #include "core/finance/ExactMoney.h"
 #include "core/services/AccessControlService.h"
 #include "core/services/orders/ClientReceiptReader.h"
 #include <QPdfWriter>
 #include <QSaveFile>
 #include <QTextDocument>
+
+static QString saveCashPdfHtml(const QString& path,const QString& title,const QString& html);
 
 QString writeCashJournalPdf(const QString& path,QDate first,QDate last,const QString& search,
                             const QString& kind,const QString& method)
@@ -37,6 +40,31 @@ QString writeCashJournalPdf(const QString& path,QDate first,QDate last,const QSt
     }
     html += QObject::tr("</table><p>Кількість операцій %1 · Чистий рух коштів клієнта %2</p>")
         .arg(result.rows.size()).arg(ClientReceiptReader::money(total));
+    return saveCashPdfHtml(path,QObject::tr("Журнал касових операцій"),html);
+}
+QString writeCashReportPdf(const QString& path,const CashReport::Table& report)
+{
+    if(!report.error.isEmpty())return report.error;
+    QString html="<h1>"+report.title.toHtmlEscaped()+"</h1><p>"+report.scope.toHtmlEscaped()+"</p>"
+        "<table width='100%' border='1' cellpadding='3' cellspacing='0'><thead><tr>";
+    for(const auto& name:report.columns)html+="<th>"+name.toHtmlEscaped()+"</th>";
+    html+="</tr></thead>";
+    for(const auto& row:report.rows){
+        html+="<tr>";
+        for(auto text:row){
+            // Give long stable identifiers soft wrap opportunities in narrow PDF cells.
+            if(!text.contains(' ') && text.size()>20)for(int i=text.size()-8;i>0;i-=8)text.insert(i,QChar(0x200b));
+            html+="<td>"+text.toHtmlEscaped()+"</td>";
+        }
+        html+="</tr>";
+    }
+    html+="</table><p>"+QObject::tr("Рядків %1").arg(report.rows.size())+" · "+report.totals.join(" · ").toHtmlEscaped()+"</p>";
+    return saveCashPdfHtml(path,report.title,html);
+}
+static QString saveCashPdfHtml(const QString& path,const QString& title,const QString& html)
+{
+    if (!AccessControlService::currentUserHasPermission("cash.view") || !AccessControlService::currentUserHasPermission("cash.export"))
+        return QObject::tr("Немає права експорту каси.");
     QSaveFile output(path);
     if (!output.open(QIODevice::WriteOnly)) return output.errorString();
     {
@@ -44,8 +72,9 @@ QString writeCashJournalPdf(const QString& path,QDate first,QDate last,const QSt
         if (!pdf.setPageLayout(QPageLayout(QPageSize(QPageSize::A4),QPageLayout::Landscape,
                                            QMarginsF(12,12,12,12),QPageLayout::Millimeter)))
             return QObject::tr("Не вдалося встановити формат PDF.");
-        pdf.setTitle(QObject::tr("Журнал касових операцій"));
+        pdf.setTitle(title);
         QTextDocument document;
+        document.setDefaultFont(QFont("Arial",10));
         document.setHtml(html);
         document.print(&pdf);
     }
