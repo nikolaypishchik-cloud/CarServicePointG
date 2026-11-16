@@ -121,12 +121,12 @@ void MainWindow::openHeaderStatements()
     layout->addWidget(generate);
     auto* tabs = new QTabWidget(dialog);
     layout->addWidget(tabs);
-    auto* finances = new QTableWidget(0,7,tabs);
+    auto* finances = new QTableWidget(0,8,tabs);
     finances->setObjectName("statementFinances");
     finances->setEditTriggers(QAbstractItemView::NoEditTriggers);
     finances->setSelectionBehavior(QAbstractItemView::SelectRows);
     finances->setSelectionMode(QAbstractItemView::SingleSelection);
-    finances->setHorizontalHeaderLabels({tr("Дата"),tr("Наряд №"),tr("Автомобіль"),tr("Операція"),tr("Нараховано"),tr("Сплачено"),tr("Залишок")});
+    finances->setHorizontalHeaderLabels({tr("Дата"),tr("Наряд №"),tr("Автомобіль"),tr("Операція"),tr("Нараховано"),tr("Сплачено"),tr("Залишок"),tr("Попередньо")});
     tabs->addTab(finances,tr("Розрахунки"));
     auto* issues = new QTableWidget(0,10,tabs);
     tabs->addTab(issues,tr("Запчастини"));
@@ -186,10 +186,20 @@ void MainWindow::openHeaderStatements()
                 const auto& event=entry.event;
                 const QStringList cells={event.day.toString("dd.MM.yyyy"),QString::number(entry.orderNumber),entry.car,
                     event.payment?tr("Оплата"):tr("Закриття наряду"),event.payment?QString():money(event.cents),
-                    event.payment?money(event.cents):QString(),money(event.balance)};
+                    event.payment?money(event.cents):QString(),money(event.balance),QString()};
                 for (int c=0;c<cells.size();++c) finances->setItem(row,c,new QTableWidgetItem(cells[c]));
                 finances->item(row,1)->setData(Qt::UserRole,entry.orderUid);
                 finances->item(row,3)->setData(Qt::UserRole,event.sourceUid);
+            }
+            for (const auto& order:journal.preliminary) {
+                const int row=finances->rowCount();
+                finances->insertRow(row);
+                const QStringList cells={order.openedOn.isValid()?order.openedOn.toString("dd.MM.yyyy"):tr("Немає дати"),
+                    QString::number(order.number),order.car,tr("Відкритий наряд — поточна оцінка"),{},{},{},
+                    order.error.isEmpty()?money(order.estimatedCents):tr("Сума недоступна")};
+                for (int c=0;c<cells.size();++c) finances->setItem(row,c,new QTableWidgetItem(cells[c]));
+                finances->item(row,1)->setData(Qt::UserRole,order.uid);
+                finances->item(row,7)->setToolTip(order.error);
             }
             QString totals=tr("За журналом • На початок %1 • Нараховано %2 • Сплачено %3 • На кінець %4")
                 .arg(money(journal.opening),money(journal.charged),money(journal.paid),money(journal.closing));

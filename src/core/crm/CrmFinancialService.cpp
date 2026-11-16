@@ -10,6 +10,7 @@
 #include <QUuid>
 #include <algorithm>
 #include "core/services/PartOverduePolicy.h"
+#include "core/services/ReportsDateUtils.h"
 
 namespace CrmFinancialService {
 ClosureCharge readClosureCharge(QSqlDatabase db, const QString& uid, QDate firstDay, QDate lastDay) {
@@ -94,7 +95,7 @@ ClientJournal readClientJournal(QSqlDatabase db, const QString& clientUid, const
     auto cleanup=qScopeGuard([&] { QSqlQuery q(db); q.exec("ROLLBACK TO "+savepoint); q.exec("RELEASE "+savepoint); });
     const QString orders=db.tables(QSql::AllTables).contains("router_work_orders")?"router_work_orders":"work_orders";
     QString sql=QStringLiteral("SELECT o.order_uid,o.vehicle_uid,o.car,COALESCE(NULLIF(o.order_number,0),o.number),o.status,o.closed_at,"
-                               "(SELECT COUNT(*) FROM %1 x WHERE x.order_uid=o.order_uid) FROM %1 o WHERE o.client_uid=?").arg(orders);
+                               "(SELECT COUNT(*) FROM %1 x WHERE x.order_uid=o.order_uid),o.opened_at FROM %1 o WHERE o.client_uid=?").arg(orders);
     if (!vehicleUid.isEmpty()) sql+=" AND o.vehicle_uid=?";
     QSqlQuery query(db);
     query.prepare(sql+" ORDER BY o.order_uid");
@@ -119,6 +120,16 @@ ClientJournal readClientJournal(QSqlDatabase db, const QString& clientUid, const
         if (!order.closureRecorded && (!query.value(5).toString().trimmed().isEmpty()
             || PartOverduePolicy::isClosedOrderStatus(PartOverduePolicy::normalizedOrderStatus(query.value(4).toString()))))
             result.unverifiedClosures.append(number);
+        else if (!order.closureRecorded) {
+            const auto openedOn=ReportsDateUtils::parseFlexibleDate(query.value(7).toString());
+            if (!openedOn.isValid() || openedOn<=through) {
+                PreliminaryOrder pending{uid,query.value(2).toString(),number,openedOn,0,{}};
+                const auto estimate=readOrder(db,uid);
+                if (estimate.ok() && estimate.orders.size()==1) pending.estimatedCents=estimate.orders.first().totalCents;
+                else pending.error=estimate.error.isEmpty()?QStringLiteral("Суму не підтверджено."):estimate.error;
+                result.preliminary.append(pending);
+            }
+        }
         for (const auto& event:order.entries)
             result.entries.append({event,uid,query.value(1).toString(),query.value(2).toString(),number});
     }

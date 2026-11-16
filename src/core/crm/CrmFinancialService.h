@@ -39,7 +39,15 @@ struct ClientEntry {
     QString orderUid, vehicleUid, car;
     int orderNumber = 0;
 };
+struct PreliminaryOrder {
+    QString uid, car;
+    int number = 0;
+    QDate openedOn;
+    qint64 estimatedCents = 0;
+    QString error;
+};
 struct ClientJournal {
+    QList<PreliminaryOrder> preliminary;
     QList<ClientEntry> entries;
     qint64 opening = 0, charged = 0, paid = 0, closing = 0;
     QList<int> unverifiedClosures;

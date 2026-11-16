@@ -156,8 +156,12 @@ private slots:
         QString error;
         QVERIFY2(OrderClosureJournal::ensureSchema(db,&error),qPrintable(error));
         QSqlQuery q(db);
-        for (const auto& column:{"client_uid TEXT","vehicle_uid TEXT","car TEXT","order_number INTEGER"})
+        for (const auto& column:{"client_uid TEXT","vehicle_uid TEXT","car TEXT","order_number INTEGER","opened_at TEXT","discount_mode TEXT"})
             QVERIFY(q.exec("ALTER TABLE work_orders ADD COLUMN "+QString::fromLatin1(column)));
+        QVERIFY(q.exec("ALTER TABLE work_order_parts ADD COLUMN amount REAL"));
+        QVERIFY(q.exec("ALTER TABLE work_order_services ADD COLUMN amount REAL"));
+        QVERIFY(q.exec("ALTER TABLE work_order_services ADD COLUMN order_number INTEGER"));
+        QVERIFY(q.exec("UPDATE work_orders SET opened_at='2026-10-03'"));
         QVERIFY(q.exec("UPDATE work_orders SET client_uid='A',vehicle_uid=order_uid,order_number=42"));
         QVERIFY(q.exec("INSERT INTO work_orders(number,order_uid,client_uid,vehicle_uid,status) VALUES(3,'foreign','B','o2','open')"));
         QVERIFY(q.exec("UPDATE work_orders SET status='closed' WHERE order_uid='o2'"));
@@ -168,6 +172,11 @@ private slots:
         const QDate from(2026,11,1), through(2026,11,30);
         const auto both=CrmFinancialService::readClientJournal(db,"A",{},from,through);
         QVERIFY2(both.error.isEmpty(),qPrintable(both.error));
+        QCOMPARE(both.preliminary.size(),1);
+        const auto pending=both.preliminary.first();
+        QVERIFY2(pending.error.isEmpty(),qPrintable(pending.error));
+        QCOMPARE(pending.uid,QStringLiteral("o1")); QCOMPARE(pending.estimatedCents,500000);
+        QCOMPARE(pending.openedOn,QDate(2026,10,3));
         QCOMPARE(both.opening,-1000); QCOMPARE(both.paid,5000); QCOMPARE(both.closing,-6000);
         QCOMPARE(both.unverifiedClosures,QList<int>{42});
         QCOMPARE(both.entries.size(),2);

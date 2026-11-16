@@ -195,11 +195,23 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     q.prepare("INSERT INTO client_payments VALUES('prior','order-a',?,1,'cash',2500)");
     q.addBindValue(date->date().addDays(-1).toString(Qt::ISODate));
     QVERIFY(q.exec());
+    QVERIFY(q.exec("ALTER TABLE work_orders ADD COLUMN discount REAL DEFAULT 0"));
+    QVERIFY(q.exec("ALTER TABLE work_orders ADD COLUMN discount_mode TEXT DEFAULT 'uah'"));
+    QVERIFY(q.exec("CREATE TABLE IF NOT EXISTS work_order_services(order_uid TEXT,order_number INTEGER,qty REAL,price REAL,amount REAL)"));
+    QVERIFY(q.exec("CREATE VIEW IF NOT EXISTS router_work_order_services AS SELECT * FROM work_order_services"));
+    q.prepare("INSERT INTO work_orders(number,order_number,order_uid,client_uid,car,status,opened_at) "
+              "VALUES(72,72,'pending-a','client-a','QA pending','open',?),(73,73,'future-a','client-a','Future','open',?)");
+    q.addBindValue(day.toString(Qt::ISODate)); q.addBindValue(day.addDays(1).toString(Qt::ISODate));
+    QVERIFY(q.exec());
+    QVERIFY(q.exec("INSERT INTO work_order_services(order_uid,order_number,qty,price,amount) VALUES('pending-a',72,2,392.5,785)"));
     auto* financial=dialog->findChild<QTableWidget*>("statementFinances");
     QVERIFY(financial);
     tabs->setCurrentWidget(financial);
     generate->click();
-    QCOMPARE(financial->rowCount(),2);
+    QCOMPARE(financial->rowCount(),3);
+    QCOMPARE(financial->item(2,1)->data(Qt::UserRole).toString(),QStringLiteral("pending-a"));
+    QCOMPARE(financial->item(2,7)->text(),QStringLiteral("785,00 грн"));
+    for (int c:{4,5,6}) QVERIFY(financial->item(2,c)->text().isEmpty());
     QCOMPARE(financial->item(0,4)->text(),QStringLiteral("450,00 грн"));
     QCOMPARE(financial->item(0,6)->text(),QStringLiteral("425,00 грн"));
     QCOMPARE(financial->item(1,3)->data(Qt::UserRole).toString(),QStringLiteral("receiptx"));
