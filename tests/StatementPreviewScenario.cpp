@@ -217,6 +217,20 @@ void checkStatementApprovalAndPreview(QSqlDatabase db) {
     QCOMPARE(financial->item(1,3)->data(Qt::UserRole).toString(),QStringLiteral("receiptx"));
     QCOMPARE(financial->item(1,5)->text(),QStringLiteral("125,00 грн"));
     QCOMPARE(financial->item(1,6)->text(),QStringLiteral("300,00 грн"));
+    QVERIFY(q.exec("ALTER TABLE client_payments ADD COLUMN actor TEXT"));
+    QVERIFY(q.exec("UPDATE client_payments SET actor='QA receipt operator' WHERE payment_uid='receiptx'"));
+    financial->setCurrentCell(1,0);
+    QCOMPARE(open->text(),QStringLiteral("Переглянути оплату"));
+    open->click();
+    auto* receipt=dialog->findChild<QDialog*>("statementPaymentCard");
+    QVERIFY(receipt && receipt->isVisible());
+    QStringList receiptValues;
+    for (auto* label:receipt->findChildren<QLabel*>()) receiptValues.append(label->text());
+    for (const QString& value:QStringList{"receiptx","order-a","125,00 грн","QA receipt operator"})
+        QVERIFY(receiptValues.contains(value));
+    receipt->close();
+    QVERIFY(CrmPageReadService::statementPayment("another-client","order-a","receiptx",&error).isEmpty());
+    QVERIFY(CrmPageReadService::statementPayment("client-a","another-order","receiptx",&error).isEmpty());
     auto* totals=dialog->findChild<QLabel*>("statementFinancialTotals");
     QVERIFY(totals && totals->isVisibleTo(dialog));
     const auto generated=totals->text();

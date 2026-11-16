@@ -28,6 +28,7 @@ struct ClientDetails {
 };
 RefreshResult refresh(bool runBackfillNow);
 ClientList clients(const QString& term);
+QVariantMap statementPayment(const QString& clientUid, const QString& orderUid, const QString& paymentUid, QString* error);
 QVariantMap statementOrder(const QString& clientUid, const QString& orderUid, QString* error);
 Rows statementPartHistory(const QString& clientUid, const QString& vehicleUid, QDate from, QDate through, QString* error);
 struct IssueSource {

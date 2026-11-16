@@ -190,6 +190,7 @@ void MainWindow::openHeaderStatements()
                 for (int c=0;c<cells.size();++c) finances->setItem(row,c,new QTableWidgetItem(cells[c]));
                 finances->item(row,1)->setData(Qt::UserRole,entry.orderUid);
                 finances->item(row,3)->setData(Qt::UserRole,event.sourceUid);
+                finances->item(row,3)->setData(Qt::UserRole+1,event.payment);
             }
             for (const auto& order:journal.preliminary) {
                 const int row=finances->rowCount();
@@ -263,6 +264,8 @@ void MainWindow::openHeaderStatements()
         openOrder->setEnabled(!issues->selectedItems().isEmpty());
     });
     connect(finances,&QTableWidget::itemSelectionChanged,dialog,[=] {
+        const auto* operation=finances->item(finances->currentRow(),3);
+        openOrder->setText(operation && operation->data(Qt::UserRole+1).toBool()?tr("Переглянути оплату"):tr("Переглянути наряд"));
         openOrder->setEnabled(!finances->selectedItems().isEmpty());
     });
     auto showOrder = [=] {
@@ -271,13 +274,17 @@ void MainWindow::openHeaderStatements()
         const auto* source = active->item(active->currentRow(),active==finances?1:4);
         if (!source) return;
         QString error;
-        const auto order = CrmPageReadService::statementOrder(client->currentData().toString(),
-                source->data(Qt::UserRole).toString(), &error);
+        const auto uid=source->data(Qt::UserRole).toString();
+        const auto clientUid=client->currentData().toString();
+        const auto* operation=active->item(active->currentRow(),3);
+        const bool payment=active==finances && operation->data(Qt::UserRole+1).toBool();
+        const auto order=payment ? CrmPageReadService::statementPayment(clientUid,uid,operation->data(Qt::UserRole).toString(),&error)
+                                 : CrmPageReadService::statementOrder(clientUid,uid,&error);
         if (order.isEmpty()) { message->setText(error); return; }
         auto* card = new QDialog(dialog);
         card->setAttribute(Qt::WA_DeleteOnClose);
-        card->setObjectName("statementOrderCard");
-        card->setWindowTitle(tr("Наряд №%1").arg(order.value("display_number").toString()));
+        card->setObjectName(payment?"statementPaymentCard":"statementOrderCard");
+        card->setWindowTitle(payment?tr("Клієнтська оплата"):tr("Наряд №%1").arg(order.value("display_number").toString()));
         auto* fields = new QFormLayout(card);
         auto field = [&](const QString& label, const QString& key) {
             auto* value = new QLabel(card);
@@ -288,6 +295,15 @@ void MainWindow::openHeaderStatements()
             fields->addRow(label,value);
         };
         field(tr("UID наряду"),"order_uid");
+        if (payment) {
+            field(tr("UID платежу"),"payment_uid");
+            field(tr("Дата оплати"),"paid_on");
+            field(tr("Сума"),"amount");
+            field(tr("Спосіб оплати"),"method");
+            field(tr("Виконавець"),"actor");
+            card->open();
+            return;
+        }
         field(tr("Автомобіль"),"car");
         field(tr("Державний номер"),"plate");
         field(tr("Статус"),"status");

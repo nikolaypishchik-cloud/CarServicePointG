@@ -110,6 +110,26 @@ ClientList clients(const QString& term) {
     collect(q,&result.clients,&result.error);
     if(!result.error.isEmpty())result.clients.clear();return result;
 }
+QVariantMap statementPayment(const QString& clientUid, const QString& orderUid, const QString& paymentUid, QString* error) {
+    auto db=Database::db();
+    QSqlQuery query(db);
+    query.prepare(QStringLiteral("SELECT p.payment_uid,p.order_uid,p.paid_on,p.amount_cents,p.method,p.actor,"
+                                 "typeof(p.amount_cents) FROM main.client_payments p JOIN %1 o ON o.order_uid=p.order_uid "
+                                 "WHERE p.payment_uid=? AND p.order_uid=? AND o.client_uid=? "
+                                 "AND (SELECT count(*) FROM %1 x WHERE x.order_uid=o.order_uid)=1 LIMIT 2").arg(crmOrderHistorySource(db)));
+    query.addBindValue(paymentUid); query.addBindValue(orderUid); query.addBindValue(clientUid);
+    if (!query.exec()) { *error=query.lastError().text(); return {}; }
+    if (!query.next() || query.value(6).toString()!="integer" || query.value(3).toLongLong()<=0) {
+        *error=query.lastError().isValid()?query.lastError().text():QStringLiteral("Платіж цього клієнта і наряду не підтверджено.");
+        return {};
+    }
+    QVariantMap record;
+    for (int c=0;c<6;++c) record.insert(query.record().fieldName(c),query.value(c));
+    record.insert("amount",CrmFinancialService::money(query.value(3).toLongLong()));
+    if (query.next()) { *error=QStringLiteral("UID платежу неоднозначний."); return {}; }
+    if (query.lastError().isValid()) { *error=query.lastError().text(); return {}; }
+    return record;
+}
 QVariantMap statementOrder(const QString& clientUid, const QString& orderUid, QString* error) {
     if (clientUid.trimmed().isEmpty() || orderUid.trimmed().isEmpty()) {
         *error = QStringLiteral("У погодженні немає підтвердженого зв’язку з нарядом.");
