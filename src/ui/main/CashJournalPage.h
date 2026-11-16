@@ -1,6 +1,9 @@
 #pragma once
 #include <QWidget>
 class CashOperationsWidget;
+class QTabWidget;
+class QGridLayout;
+class QResizeEvent;
 class QDateEdit;
 class QLabel;
 class QTableWidget;
@@ -9,6 +12,11 @@ public:
     explicit CashJournalPage(QWidget* parent);
     void refresh();
 private:
+    void resizeEvent(QResizeEvent* event) override;
+    QGridLayout* body;
+    QWidget* metricsPanel;
+    QTabWidget* tabs;
+    QGridLayout* metrics;
     QDateEdit* firstDay;
     QDateEdit* lastDay;
     QTableWidget* table;

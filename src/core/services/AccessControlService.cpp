@@ -298,6 +298,32 @@ bool ensureSchema(QSqlDatabase database, QString* errorText)
         return false;
     }
 
+    // An initialized profile can be read while another SQLite connection is writing.
+    // A zero grant is an explicit revocation and counts as an initialized permission.
+    const auto cashKeys = cashPermissions();
+    QStringList roleIds, roleParams, cashParams;
+    for (const auto& role : defaultRoles()) {
+        roleIds << role.id;
+        roleParams << "?";
+    }
+    for (qsizetype i = 0; i < cashKeys.size(); ++i) cashParams << "?";
+    QSqlQuery ready(database);
+    if (ready.prepare("SELECT (SELECT COUNT(*) FROM access_roles r "
+                      "JOIN access_role_permission_profiles p ON p.role_id=r.id "
+                      "WHERE r.id IN (" + roleParams.join(',') + "))=?, "
+                      "(SELECT COUNT(*) FROM access_role_permissions WHERE role_id='administrator' "
+                      "AND permission_key IN (" + cashParams.join(',') + "))=?, "
+                      "EXISTS(SELECT 1 FROM access_role_permissions WHERE role_id='master' AND permission_key='mobile.pair'), "
+                      "NOT EXISTS(SELECT 1 FROM staff_accounts a WHERE a.role='admin' OR TRIM(COALESCE(a.role,''))='' "
+                      "OR NOT EXISTS(SELECT 1 FROM access_roles r WHERE r.id=a.role AND r.active=1))")) {
+        for (const auto& id : roleIds) ready.addBindValue(id);
+        ready.addBindValue(roleIds.size());
+        for (const auto& key : cashKeys) ready.addBindValue(key);
+        ready.addBindValue(cashKeys.size());
+        if (ready.exec() && ready.next() && ready.value(0).toBool() && ready.value(1).toBool()
+            && ready.value(2).toBool() && ready.value(3).toBool()) return true;
+    }
+    ready.finish();
     RepositoryWriteBoundary seed(database, errorText);
     if (!seed.started()) return false;
     QSqlQuery query(database);

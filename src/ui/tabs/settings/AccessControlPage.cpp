@@ -309,6 +309,7 @@ void AccessControlPage::buildUi()
 
     root->addWidget(tabs, 1);
     m_status = new QLabel(this);
+    m_status->setObjectName("accessControlStatus");
     m_status->setMinimumHeight(22);
     m_status->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     m_status->setWordWrap(true);

@@ -4,6 +4,9 @@
 #include "CashMovementForm.h"
 #include "CashOperationsWidget.h"
 #include <QMenu>
+#include <QResizeEvent>
+#include <QGridLayout>
+#include <QScrollArea>
 #include "core/services/orders/CashShiftService.h"
 #include "core/services/orders/CashOutflow.h"
 #include "core/services/orders/CashAdvanceService.h"
@@ -27,13 +30,16 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
         "#cashJournalPage QLabel{color:#203445;background:transparent;}"
         "#cashJournalPage QTableWidget,#cashJournalPage QDateEdit{background:white;color:#203445;}"
         "#cashJournalPage QLabel#cashTotal{background:#293e4a;color:white;border-radius:6px;padding:11px;}"
+        "#cashJournalPage QTabBar::tab{background:#f4f7f8;color:#314454;border:1px solid #bfced5;padding:4px;border-radius:3px;}"
+        "#cashJournalPage QTabBar::tab:selected{background:white;color:#17495e;border-bottom:2px solid #3893a1;}"
         "#cashJournalPage QLabel#cashTitle{font-size:22px;font-weight:bold;}"));
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(6,8,6,8);
     layout->setSpacing(4);
     auto* title = new QLabel(tr("Кошти клієнтів"),this);
     title->setObjectName("cashTitle");
-    layout->addWidget(title);
+    auto* heading=new QHBoxLayout;
+    heading->setSpacing(4);heading->addWidget(title,1);layout->addLayout(heading);
     auto* actions = new QHBoxLayout;
     auto* receive = new QPushButton(tr("Прийняти аванс"),this);
     receive->setObjectName("receiveAdvance");
@@ -73,7 +79,7 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     }
     connect(receive,&QPushButton::clicked,this,[this]{openCashAdvanceDialog(this,false);});
     connect(allocate,&QPushButton::clicked,this,[this]{openCashAdvanceDialog(this,true);});
-    layout->addLayout(actions);
+    heading->addLayout(actions);
     auto* range = new QHBoxLayout;
     firstDay = new QDateEdit(QDate::currentDate(),this);
     lastDay = new QDateEdit(firstDay->date(),this);
@@ -89,7 +95,8 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     range->addWidget(refreshButton);
     range->addStretch();
     layout->addLayout(range);
-    auto* metrics=new QHBoxLayout;
+    metrics=new QGridLayout;
+    metrics->setSpacing(4);metrics->setContentsMargins(0,0,0,0);
     const QStringList names{tr("Отримано за період"),tr("Повернено за період"),tr("Чистий рух за період"),tr("Вільні аванси")};
     for(const auto& name:names){
         auto* card=new QFrame(this);
@@ -98,10 +105,10 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
         content->addWidget(new QLabel(name,card));
         auto* value=new QLabel(card);
         value->setStyleSheet("font-size:17px;font-weight:bold;");
-        content->addWidget(value);metricValues.append(value);metrics->addWidget(card,1);
+        content->addWidget(value);metricValues.append(value);metrics->addWidget(card,0,metricValues.size()-1);
     }
-    layout->addLayout(metrics);
-    auto* body = new QHBoxLayout;
+    metricsPanel=new QWidget(this);metricsPanel->setLayout(metrics);
+    body=new QGridLayout;body->setSpacing(4);body->addWidget(metricsPanel,0,0);
     table = new QTableWidget(0,5,this);
     table->setObjectName("directCashPayments");
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -111,7 +118,7 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     table->setColumnWidth(1,145);
     table->horizontalHeader()->setStretchLastSection(true);
-    auto* tabs=new QTabWidget(this);
+    tabs=new QTabWidget(this);
     tabs->addTab(table,tr("Прямі оплати"));
     auto* advanceTab=new QWidget(tabs);
     auto* advanceLayout=new QVBoxLayout(advanceTab);
@@ -130,8 +137,11 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     outflowTable->setHorizontalHeaderLabels({tr("Дата"),tr("Операція"),tr("Сума"),tr("Спосіб"),tr("Причина"),tr("Автор")});
     outflowTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     tabs->addTab(outflowTable,tr("Повернення й видатки"));
-    tabs->addTab(cashBankForm(tabs,false),tr("Банківська звірка"));
-    tabs->addTab(cashMovementForm(tabs),tr("Переміщення"));
+    auto scrollTab=[this](QWidget* content,const QString& title){
+        auto* scroll=new QScrollArea(tabs);scroll->setFrameShape(QFrame::NoFrame);scroll->setWidgetResizable(true);scroll->setWidget(content);tabs->addTab(scroll,title);
+    };
+    scrollTab(cashBankForm(tabs,false),tr("Банківська звірка"));
+    scrollTab(cashMovementForm(tabs),tr("Переміщення"));
     auto* refund=new QPushButton(tr("Повернення"),this);
     auto* expense=new QPushButton(tr("Видаток"),this);
     refund->setObjectName("refundReceipt");
@@ -141,7 +151,7 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     actions->addWidget(refund);
     actions->addWidget(expense);
     connect(expense,&QPushButton::clicked,this,[this]{openOutflowDialog(this,"expense",{},tr("Готівка"));});
-    connect(refund,&QPushButton::clicked,this,[this,tabs,advanceTab]{
+    connect(refund,&QPushButton::clicked,this,[this,advanceTab]{
         const bool advance=tabs->currentWidget()==advanceTab;
         auto* source=advance?advanceTable:table;
         auto* entry=source->item(source->currentRow(),0);
@@ -156,7 +166,7 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     reverse->setObjectName("reverseRefund");
     reverse->setEnabled(CashOutflow::canReverse());
     actions->addWidget(reverse);
-    connect(reverse,&QPushButton::clicked,this,[this,tabs,advanceTab]{
+    connect(reverse,&QPushButton::clicked,this,[this,advanceTab]{
         if(tabs->currentWidget()==table || tabs->currentWidget()==advanceTab){
             const bool advance=tabs->currentWidget()==advanceTab;
             auto* source=advance?advanceTable:table;
@@ -176,13 +186,16 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
     tabs->addTab(operations,tr("Операції"));
     tabs->tabBar()->moveTab(tabs->indexOf(operations),0);
     tabs->setCurrentWidget(operations);
-    body->addWidget(tabs,1);
+    tabs->setUsesScrollButtons(true);
+    tabs->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Expanding);
+    body->addWidget(tabs,1,0);
     summary = new QLabel(this);
     summary->setObjectName("cashTotal");
     summary->setWordWrap(true);
-    summary->setMaximumWidth(250);
+    summary->setFixedWidth(215);
+    summary->setSizePolicy(QSizePolicy::Preferred,QSizePolicy::Minimum);
     summary->setTextFormat(Qt::PlainText);
-    body->addWidget(summary,0,Qt::AlignTop);
+    body->addWidget(summary,0,1,2,1,Qt::AlignTop);
     layout->addLayout(body,1);
     // Keep every financial action accessible on narrow windows through the same handlers.
     auto* receiptMenu=new QMenu(this);auto* serviceMenu=new QMenu(this);
@@ -198,12 +211,33 @@ CashJournalPage::CashJournalPage(QWidget* parent) : QWidget(parent)
         auto* button=new QPushButton(menu==receiptMenu?tr("Додати надходження"):tr("Касові дії"),this);
         button->setMenu(menu);actions->addWidget(button);
     }
-    actions->addStretch();
+
     connect(refreshButton,&QPushButton::clicked,this,&CashJournalPage::refresh);
     connect(firstDay,&QDateEdit::dateChanged,this,&CashJournalPage::refresh);
     connect(lastDay,&QDateEdit::dateChanged,this,&CashJournalPage::refresh);
 }
 
+void CashJournalPage::resizeEvent(QResizeEvent* event)
+{
+    QWidget::resizeEvent(event);
+    const int width=event->size().width();
+    const bool narrow=window()->width()<=1100 || width<780;
+    body->removeWidget(tabs);body->removeWidget(summary);
+    if(narrow){
+        summary->setMinimumWidth(0);summary->setMaximumWidth(QWIDGETSIZE_MAX);
+        body->addWidget(summary,1,0);body->addWidget(tabs,2,0);
+    }else{
+        summary->setFixedWidth(qBound(190,width/5,265));
+        body->addWidget(summary,0,1,2,1,Qt::AlignTop);body->addWidget(tabs,1,0);
+    }
+    body->setColumnStretch(0,1);
+    body->setRowStretch(1,narrow?0:1);body->setRowStretch(2,narrow?1:0);
+    const int columns=width<=390?1:width<=760?2:4;
+    for(int i=0;i<metricValues.size();++i){
+        auto* card=metricValues[i]->parentWidget();
+        metrics->removeWidget(card);metrics->addWidget(card,i/columns,i%columns);
+    }
+}
 void CashJournalPage::refresh()
 {
     const auto totals=CashOutflow::totals(firstDay->date(),lastDay->date());
@@ -249,7 +283,7 @@ void CashJournalPage::refresh()
         return;
     }
     summary->setText(totals.error.isEmpty()
-        ?tr("Кошти клієнтів за всім локальним журналом\n%1\n\nПрямі оплати за період\n%2")
+        ?tr("Баланс каси\n\nКошти клієнтів за всім локальним журналом\n%1\n\nПрямі оплати за період\n%2")
             .arg(ClientReceiptReader::money(totals.allNet),ClientReceiptReader::money(journal.directPaymentsCents))
         :totals.error);
     qint64 drawerCents=0;

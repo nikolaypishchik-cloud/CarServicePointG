@@ -340,7 +340,25 @@ private slots:
         std::unique_ptr<QWidget> page(SettingsDetailUiSupport::wrapDetailWithBack(new AccessControlPage));
         page->resize(1500,900);page->show();QTest::qWait(150);
         auto* table=page->findChild<QTableWidget*>("accessAccountsTable");QVERIFY(table);
-        auto* combo=table->cellWidget(table->rowCount()-1,1)->findChild<QComboBox*>();QVERIFY(combo);
+        const QString accountId = QStringLiteral("qa-admin");
+        int accountRow = -1;
+        for (int row = 0; row < table->rowCount(); ++row) {
+            auto* item = table->item(row, 0);
+            if (item && item->data(Qt::UserRole).toString() == accountId) {
+                accountRow = row;
+                break;
+            }
+        }
+        QString accountError;
+        const auto accounts = AccessControlService::accounts(&accountError);
+        QStringList accountIds;
+        for (const auto& account : accounts) accountIds << account.id;
+        QVERIFY2(accountRow >= 0, qPrintable(QString("rows=%1 accounts=%2 error=%3")
+            .arg(table->rowCount()).arg(accountIds.join(',')).arg(accountError + " " + page->findChild<QLabel*>("accessControlStatus")->text())));
+        auto* roleCell = table->cellWidget(accountRow, 1);
+        QVERIFY(roleCell);
+        auto* combo = roleCell->findChild<QComboBox*>();
+        QVERIFY(combo);
         QVERIFY(combo->isEnabled());QVERIFY(combo->count()>=6);QVERIFY(!combo->currentText().isEmpty());
         combo->showPopup();QApplication::processEvents();QVERIFY(combo->view()->isVisible());
         const QString roleOutput=qEnvironmentVariable("CS_SETTINGS_QA_DIR");
@@ -357,19 +375,23 @@ private slots:
         };
         const auto initial=widths();
         const int chosen=combo->findData("manager");QVERIFY(chosen>=0);
-        const QString accountId=table->item(table->rowCount()-1,0)->data(Qt::UserRole).toString();
         combo->setFocus();combo->setCurrentIndex(chosen-1);QTest::keyClick(combo,Qt::Key_Down);
         QCOMPARE(combo->currentData().toString(),QString("manager"));
         save->click();QTest::qWait(100);
         QSqlQuery roleQuery(Database::db());roleQuery.prepare("SELECT role FROM staff_accounts WHERE id=?");roleQuery.addBindValue(accountId);
         QVERIFY(roleQuery.exec());QVERIFY(roleQuery.next());QCOMPARE(roleQuery.value(0).toString(),QString("manager"));
+        QVERIFY(table->cellWidget(0,4));
         auto* reset=table->cellWidget(0,4)->findChild<QPushButton*>();
         QVERIFY(reset);
         const QString style=reset->styleSheet();
         const int height=table->rowHeight(0);
         for(int iteration=0;iteration<3;++iteration) {
             save->click();QTest::qWait(100);
-            QCOMPARE(table->cellWidget(0,4)->findChild<QPushButton*>()->styleSheet(),style);
+            auto* cell = table->cellWidget(0,4);
+            QVERIFY(cell);
+            auto* resetAfterSave = cell->findChild<QPushButton*>();
+            QVERIFY(resetAfterSave);
+            QCOMPARE(resetAfterSave->styleSheet(),style);
             QCOMPARE(widths(),initial);
             QCOMPARE(table->rowHeight(0),height);
             QVERIFY(qAbs(table->horizontalHeader()->length()-table->viewport()->width())<=2);

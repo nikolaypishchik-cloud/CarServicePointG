@@ -362,6 +362,11 @@ private slots:
         QCOMPARE(adjusted.net,summary.net+1050);
         QVERIFY(q.exec("SELECT payment_uid FROM cash_payment_details") && q.next());
         const auto directUid=q.value(0).toString();q.finish();
+        const auto recordedPayment = CashOperations::read(day, day, directUid, "payment", {}, 0);
+        QVERIFY2(recordedPayment.error.isEmpty(), qPrintable(recordedPayment.error));
+        QCOMPARE(recordedPayment.rows.size(), 1);
+        QVERIFY(!recordedPayment.rows.front().name.isEmpty());
+        QCOMPARE(recordedPayment.rows.front().amount, 1050);
         auto voidPayment=CashOutflow::Command{id(),"void_payment",directUid,"Помилка оплати",day,1050};
         QVERIFY(CashOutflow::post(voidPayment).error.isEmpty());
         QVERIFY(CashOutflow::post(voidPayment).replay);

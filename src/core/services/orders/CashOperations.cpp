@@ -28,8 +28,15 @@ Page read(QDate first,QDate last,const QString& search,const QString& operation,
         result.error=QStringLiteral("Перевірте доступ та межі пошуку.");return result;
     }
     const auto tables=db.tables();QStringList sources;
-    if(tables.contains("client_payments"))
-        sources<<"SELECT paid_on,recorded_ms,payment_uid,'payment',NULL,order_uid,method,amount_cents,amount_cents,NULL,NULL,actor FROM main.client_payments WHERE method<>'advance_allocation'";
+    if(tables.contains("client_payments")) {
+        const bool details = tables.contains("cash_payment_details");
+        const QString customer = details ? "d.client_uid" : "NULL";
+        const QString note = details ? "d.note" : "NULL";
+        QString payments = "SELECT p.paid_on,p.recorded_ms,p.payment_uid,'payment'," + customer
+            + ",p.order_uid,p.method,p.amount_cents,p.amount_cents," + note + ",NULL,p.actor FROM main.client_payments p";
+        if (details) payments += " LEFT JOIN main.cash_payment_details d ON d.payment_uid=p.payment_uid";
+        sources << payments + " WHERE p.method<>'advance_allocation'";
+    }
     if(tables.contains("cash_advance_events"))
         sources<<"SELECT day,recorded_ms,uid,CASE WHEN source_uid IS NULL THEN 'advance' ELSE 'allocation' END,client_uid,order_uid,method,cents,CASE WHEN source_uid IS NULL THEN cents ELSE 0 END,note,source_uid,actor FROM main.cash_advance_events";
     if(tables.contains("cash_outflows"))
@@ -41,7 +48,11 @@ Page read(QDate first,QDate last,const QString& search,const QString& operation,
         sources<<"SELECT day,recorded_ms,uid,CASE WHEN src IS NULL THEN 'opening' ELSE 'move' END,NULL,NULL,'internal',cents,0,reason,src,actor FROM main.cash_account_moves";
     if(sources.isEmpty())return result;
     const bool orders=tables.contains("work_orders"),clients=tables.contains("crm_clients");
-    const QString client=clients?"COALESCE(c.full_name,e.client_uid,'')":"COALESCE(e.client_uid,'')";
+    QStringList identities;
+    if (clients) identities << "NULLIF(c.full_name,'')";
+    identities << "NULLIF(e.client_uid,'')";
+    if (orders) identities << "NULLIF(o.client_uid,'')";
+    const QString client = "COALESCE(" + identities.join(',') + ",'')";
     const QString vehicle=orders?"COALESCE(o.car,'')":"''";
     const QString number=orders?"CAST(o.number AS TEXT)":"''";
     QString sql="WITH e(day,ms,uid,kind,client_uid,order_uid,method,amount,net,reason,source,actor) AS ("+sources.join(" UNION ALL ")+") "
