@@ -12,16 +12,12 @@ class QPdfWriter;
 
 namespace ReportsPdfExpensesPageSupport {
 
-void renderExpensesPage(
+bool renderExpensesPage(
     QPdfWriter& pdf,
     QPainter& painter,
     const ReportsPdfLayoutSupport::PdfTheme& theme,
     const QString& fromIso,
     const QString& toIso,
-    const ReportsPdfRenderer::ExpensesFormData& data,
-    const QFont& reportTitleFont,
-    const QFont& reportSubtitleFont,
-    const QFont& rowFont,
-    const QFont& rowBoldFont);
+    const ReportsPdfRenderer::ExpensesFormData& data);
 
 } // namespace ReportsPdfExpensesPageSupport

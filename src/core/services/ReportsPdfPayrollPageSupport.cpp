@@ -44,6 +44,7 @@ void renderPayrollPages(
     using ReportsPdfPaintingSupport::wrappedHeight;
 
     bool firstPage = true;
+    int pageNumber = 0;
     QVector<int> w = { mmToPx(&pdf, 16), mmToPx(&pdf, 12), mmToPx(&pdf, 56), 0, mmToPx(&pdf, 18) };
     const int fixed = w[0] + w[1] + w[2] + w[4];
     w[3] = qMax(mmToPx(&pdf, 74), theme.contentWidth - fixed);
@@ -52,7 +53,8 @@ void renderPayrollPages(
     const int pageBottomReserve = mmToPx(&pdf, 18.0);
 
     auto drawHeader = [&](int& y) {
-        drawCenteredText(painter, QRect(theme.left, y, theme.contentWidth, 28), QStringLiteral("CarService PointG 2.1.2"), fonts.title);
+        ReportsPdfPaintingSupport::drawVersionAndPage(painter, QRect(theme.left, theme.bottom, theme.contentWidth, theme.pageHeight - theme.bottom), ++pageNumber);
+        drawCenteredText(painter, QRect(theme.left, y, theme.contentWidth, 28), QStringLiteral("CarService PointG"), fonts.title);
         y += 28;
         painter.setPen(QPen(Qt::black, kPdfTablePenWidth));
         const int lineInset = mmToPx(&pdf, 32.0);
@@ -168,6 +170,11 @@ void renderPayrollPages(
         }
     };
 
+    if (masters.isEmpty()) {
+        int y = theme.top;
+        drawHeader(y);
+        painter.drawText(QRect(theme.left, y, theme.contentWidth, tableHeaderH), Qt::AlignCenter, QStringLiteral("За вибраний період даних для нарахування немає."));
+    }
     for (const auto& m : masters) {
         if (!firstPage) pdf.newPage();
         firstPage = false;

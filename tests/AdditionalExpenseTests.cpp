@@ -625,6 +625,10 @@ private slots:
         data.elecPrev=1250.125; data.elecCurr=1252.625; data.elecKwh=2.5;
         data.elecTariff=4.3275; data.elecCost=11;
         ReportsPdfRenderer::ExportResult result;
+        QSqlQuery extra(db);
+        QVERIFY(extra.exec("CREATE TABLE IF NOT EXISTS additional_expenses(id INTEGER PRIMARY KEY,spent_on TEXT,category TEXT,description TEXT,amount_cents INTEGER)"));
+        QVERIFY(extra.exec("INSERT INTO additional_expenses(spent_on,category,description,amount_cents) VALUES"
+                           "('2026-01-11','Other','PDF inside',425),('2026-02-01','Other','PDF outside',99999)"));
         const auto render=[&]{return ReportsPdfRenderer::renderExpensesPdf(QDate(2026,1,1),QDate(2026,1,31),data,&result);};
         QVERIFY2(render(),qPrintable(result.errorText));QVERIFY(result.success);QVERIFY(result.fileSizeBytes>0);
         const auto capture = qEnvironmentVariable("CS_EXPENSES_DECIMALS_PDF");
@@ -638,6 +642,10 @@ private slots:
         QVERIFY(q.exec("DROP TABLE settings"));QVERIFY(!render());QVERIFY(!result.errorText.isEmpty());
         QVERIFY(q.exec("CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT)"));
         configureFinancialReportDirectory();QVERIFY2(render(),qPrintable(result.errorText));
+        data.meterInputs = {"1250.125", "", "4.3275"};
+        QVERIFY2(render(), qPrintable(result.errorText));
+        const auto incomplete = qEnvironmentVariable("CS_EXPENSES_INCOMPLETE_PDF");
+        if (!incomplete.isEmpty()) QVERIFY(QFile::copy(result.path, incomplete));
     }
     void materialJournalSharesQuantitiesAndOrderIdentity() {
         preparePartsPayrollPdfFixture();

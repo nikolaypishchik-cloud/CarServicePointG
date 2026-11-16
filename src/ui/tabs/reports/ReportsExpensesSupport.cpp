@@ -289,6 +289,8 @@ ReportsSyncSupport::ExpensesSavePayload buildSavePayload(const ExpensesWidgets& 
 ReportsPdfRenderer::ExpensesFormData buildPdfData(const ExpensesWidgets& widgets)
 {
     ReportsPdfRenderer::ExpensesFormData data;
+    data.meterInputs = {widgets.elecPrevEdit->text().trimmed(), widgets.elecCurrEdit->text().trimmed(),
+                       widgets.elecTariffEdit->text().trimmed()};
     data.elecPrev = parseUaNumber(widgets.elecPrevEdit->text());
     data.elecCurr = parseUaNumber(widgets.elecCurrEdit->text());
     data.elecTariff = parseUaNumber(widgets.elecTariffEdit->text());

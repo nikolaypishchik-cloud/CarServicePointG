@@ -1,3 +1,4 @@
+#include "AppVersion.h"
 #include "core/services/ReportsPdfPaintingSupport.h"
 
 #include <QFontMetrics>
@@ -16,6 +17,17 @@ int mmToPx(const QPaintDevice* dev, double mm)
 } // namespace
 
 namespace ReportsPdfPaintingSupport {
+
+void drawVersionAndPage(QPainter& painter, const QRect& area, int pageNumber)
+{
+    painter.save();
+    painter.setFont(QFont("Arial", 8));
+    painter.setPen(Qt::black);
+    painter.drawText(area, Qt::AlignRight | Qt::AlignVCenter,
+        QStringLiteral("CarService PointG %1   ·   Сторінка %2").arg(CarService::AppVersion::versionString()).arg(pageNumber));
+    painter.restore();
+}
+
 
 qreal ptToPx(const QPaintDevice* dev, double pt)
 {

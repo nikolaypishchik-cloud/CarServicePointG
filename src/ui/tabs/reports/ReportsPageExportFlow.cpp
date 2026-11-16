@@ -464,8 +464,10 @@ void ReportsPage::exportOutsourcePdf()
 
 void ReportsPage::exportExpensesPdf()
 {
-    if (!canUseExpenseForm()) return;
-    const auto data = ReportsExpensesSupport::buildPdfData({
+    const auto key = ReportsAsyncSupport::buildTabKey(static_cast<int>(ReportTab::Expenses), m_from->date(), m_to->date());
+    if (activeTab() != ReportTab::Expenses || !m_elecCurrEdit->isEnabled() ||
+        m_tabKeys.value(static_cast<int>(ReportTab::Expenses)) != key) return;
+    auto data = ReportsExpensesSupport::buildPdfData({
         m_expensesPage, m_elecPrevEdit, m_elecCurrEdit, m_elecTariffEdit, m_elecKwhEdit, m_elecCostEdit,
         m_cleaningEdit, m_cleaningNoteEdit, m_softwareEdit, m_softwareNoteEdit,
         m_heatingEdit, m_heatingNoteEdit, m_amortizationEdit, m_amortizationNoteEdit,
@@ -474,6 +476,7 @@ void ReportsPage::exportExpensesPdf()
     });
     const QDate fromDate = m_from->date();
     const QDate toDate = m_to->date();
+    if (!m_expensesSaveButton->isEnabled()) data.inputWarning = m_expenseValidation->text();
     runPdfExportTask(QString::fromUtf8("Формування PDF звіту по витратах..."), [fromDate, toDate, data]() {
         ReportsPdfRenderer::ExportResult result;
         ReportsPdfRenderer::renderExpensesPdf(fromDate, toDate, data, &result);

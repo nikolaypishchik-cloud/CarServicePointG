@@ -4,6 +4,7 @@
 
 #include <QDate>
 #include <QString>
+#include <QStringList>
 #include <QtGlobal>
 
 
@@ -19,6 +20,9 @@ struct ExportResult {
 };
 
 struct ExpensesFormData {
+    QStringList meterInputs;
+    QString inputWarning;
+    qint64 additionalCents = 0;
     double elecPrev = 0.0;
     double elecCurr = 0.0;
     double elecTariff = 0.0;

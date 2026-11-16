@@ -1,4 +1,5 @@
 #include "core/services/ReportsPdfRenderer.h"
+#include "core/services/ReportsDataLoader.h"
 
 #include "core/services/ReportsPdfSupport.h"
 #include "core/services/ReportsPdfExpenseSupport.h"
@@ -449,6 +450,13 @@ bool renderExpensesPdf(const QDate& fromDate, const QDate& toDate, const Expense
     const QString dt = toDate.toString(QStringLiteral("yyyy-MM-dd"));
     QString readError;
     if(!ReportsPdfSupport::validateExpensesPdfSource(fromDate,toDate,&readError)){if(result){*result={};result->reportKind="expenses";result->recordCount=0;result->errorText=readError;}return false;}
+    auto captured = data;
+    const auto totals = ReportsDataLoader::buildTotalExpensesSnapshot(QSqlDatabase::database(currentConnectionName(),false).databaseName(), df, dt);
+    if (!totals.error.isEmpty()) {
+        if (result) { *result = {}; result->reportKind = "expenses"; result->errorText = totals.error; result->recordCount = 0; }
+        return false;
+    }
+    captured.additionalCents = totals.additionalCents;
     const QString path = makeReportPdfPath(QString::fromUtf8("Витрати"), reportDateRangeStem(fromDate, toDate));
     QString pathError;
     if (!ensurePdfOutputPath(path, &pathError)) {
@@ -468,31 +476,24 @@ bool renderExpensesPdf(const QDate& fromDate, const QDate& toDate, const Expense
         result->recordCount = 6;
     }
     if (RuntimeLoggingControl::deepDebugEnabled()) qInfo() << "Report PDF export started:" << QStringLiteral("expenses") << path << "records" << 6;
-    QPdfWriter pdf(path);
-    pdf.setPageSize(QPageSize(QPageSize::A4));
-    pdf.setResolution(144);
-    QPainter p(&pdf);
-    p.setRenderHint(QPainter::Antialiasing, false);
-    const PdfTheme th = buildTheme(pdf);
-
-    const QFont reportTitleF = titleFont(28);
-    const QFont reportSubtitleF = titleFont(16);
-    const QFont rowFont = bodyFont(11, false);
-    const QFont rowBoldFont = bodyFont(11, true);
-
-    ReportsPdfExpensesPageSupport::renderExpensesPage(
-        pdf,
-        p,
-        th,
-        df,
-        dt,
-        data,
-        reportTitleF,
-        reportSubtitleF,
-        rowFont,
-        rowBoldFont);
-
-    const bool ok = finalizePdf(p, path, result);
+    QSaveFile file(path);
+    const auto write = [&] {
+        QPdfWriter pdf(&file);
+        pdf.setPageSize(QPageSize(QPageSize::A4));
+        pdf.setResolution(144);
+        QPainter painter(&pdf);
+        if (!painter.isActive()) return false;
+        const bool rendered = ReportsPdfExpensesPageSupport::renderExpensesPage(
+            pdf, painter, buildTheme(pdf), df, dt, captured);
+        return painter.end() && rendered;
+    };
+    const bool ok = file.open(QIODevice::WriteOnly) && write() && file.commit();
+    if (result) {
+        result->path = path;
+        result->success = ok;
+        result->fileSizeBytes = ok ? QFileInfo(path).size() : -1;
+        if (!ok) { result->recordCount = 0; result->errorText = file.errorString(); }
+    }
     if (ok) {
         if (RuntimeLoggingControl::deepDebugEnabled()) qInfo() << "Report PDF export finished:" << QStringLiteral("expenses") << path << "records" << 6 << "bytes" << QFileInfo(path).size() << "elapsed_ms" << timer.elapsed();
     } else {

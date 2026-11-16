@@ -11,6 +11,7 @@ class QPainter;
 
 namespace ReportsPdfPaintingSupport {
 
+void drawVersionAndPage(QPainter& painter, const QRect& area, int pageNumber);
 qreal ptToPx(const QPaintDevice* dev, double pt);
 void drawIssueTextWithUnderline(QPainter& p, const QRect& rect, const QString& text, const QFont& font, qreal underlineWidth);
 void drawSingleLineFittedCell(QPainter& p, const QRect& rect, const QString& text, const QFont& font,

@@ -223,13 +223,20 @@ void renderPartsPages(
         }
     };
 
+    int pageNumber = 0;
     bool firstPage = true;
     auto startPageForStore = [&](const QString& storeTitle, int& y) {
         if (!firstPage) pdf.newPage();
         firstPage = false;
+        ReportsPdfPaintingSupport::drawVersionAndPage(painter, QRect(theme.left, theme.bottom, theme.contentWidth, theme.pageHeight - theme.bottom), ++pageNumber);
         drawStoreHeader(storeTitle, y);
     };
 
+    if (groups.isEmpty()) {
+        int y = theme.top;
+        startPageForStore(QStringLiteral("Усі постачальники"), y);
+        painter.drawText(QRect(theme.left, y, theme.contentWidth, tableHeaderH), Qt::AlignCenter, QStringLiteral("За вибраний період запчастин немає."));
+    }
     const QString motorOilTitle = QString::fromUtf8("Моторне мастило");
 
     for (auto it = groups.begin(); it != groups.end(); ++it) {
