@@ -93,15 +93,21 @@ Choices advances(const QString& client)
                    "WHERE b.source_uid=a.uid),0) AS remaining FROM main.cash_advance_events a "
                    "WHERE a.source_uid IS NULL AND a.client_uid=?) WHERE remaining>0 ORDER BY day,uid",{client});
 }
+QString postingAuthorityError()
+{
+    const auto db=Database::db();
+    if (!authorized(db)) return QStringLiteral("Немає прав на проведення.");
+    const auto key=binding(db);
+    if (!CloudSyncSettings::localBackendEnabled() || key.isEmpty() || Database::getSetting("cash.single_station",QString()).toString()!=key)
+        return QStringLiteral("Для проведення потрібен підтверджений єдиний ПК або відповідь сервера.");
+    return {};
+}
 Result post(const Command& c)
 {
     auto fail=[](const QString& error){return Result{{},error,false};};
     auto db=Database::db();
     const auto actor=ActivityAuditService::currentActor().accountId;
-    if (!authorized(db)) return fail(QStringLiteral("Немає прав на проведення авансу."));
-    const auto key=binding(db);
-    if (!CloudSyncSettings::localBackendEnabled() || key.isEmpty() || Database::getSetting("cash.single_station",QString()).toString()!=key)
-        return fail(QStringLiteral("Для проведення потрібен підтверджений єдиний ПК або відповідь сервера."));
+    if (const auto error=postingAuthorityError(); !error.isEmpty()) return fail(error);
     if (QUuid(c.requestUid).isNull() || c.cents<=0 || c.cents>9000000000000000LL || c.clientUid.trimmed().isEmpty() || !c.day.isValid())
         return fail(QStringLiteral("Некоректні реквізити авансу."));
     const bool allocation=!c.advanceUid.isEmpty();

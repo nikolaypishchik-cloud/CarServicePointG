@@ -15,6 +15,7 @@
 #include "core/services/AccessControlService.h"
 #include "core/services/ActivityAuditService.h"
 #include "core/services/orders/CashAdvanceService.h"
+#include "core/services/orders/CashOpeningService.h"
 #include "core/services/orders/ClientReceiptReader.h"
 #include "core/services/orders/OrderClosureJournal.h"
 #include "infrastructure/db/sqlite/Db.h"
@@ -58,7 +59,7 @@ private slots:
         QVERIFY2(designated.isEmpty(),qPrintable(designated));
         CashJournalPage page(nullptr);
         page.show();
-        auto operate=[&](bool allocation) {
+        auto operate=[&](bool allocation,bool useCash=false) {
             page.findChild<QPushButton*>(allocation?"allocateAdvance":"receiveAdvance")->click();
             auto* form=page.findChild<QDialog*>("cashAdvanceForm");
             QVERIFY(form);
@@ -66,7 +67,7 @@ private slots:
             if(allocation) {
                 form->findChild<QComboBox*>("advanceSource")->setCurrentIndex(1);
                 form->findChild<QComboBox*>("advanceOrder")->setCurrentIndex(1);
-            } else form->findChild<QComboBox*>("advanceMethod")->setCurrentIndex(3);
+            } else form->findChild<QComboBox*>("advanceMethod")->setCurrentIndex(useCash?1:3);
             form->findChild<QLineEdit*>("advanceAmount")->setText(allocation?"40,01":"100,00");
             auto* post=form->findChild<QPushButton*>("advancePost");
             auto* status=form->findChild<QLabel*>("advanceStatus");
@@ -132,6 +133,28 @@ private slots:
         const auto direct=ClientReceiptReader::readJournal(db,day,day);
         QVERIFY(direct.available && direct.error.isEmpty());
         QCOMPARE(direct.directPaymentsCents,0);
+        using Action=CashOpeningService::Action;
+        auto shift=[&](Action action,qint64 amount,QString reason={}) {
+            return CashOpeningService::apply({QUuid::createUuid().toString(QUuid::WithoutBraces),action,day,amount,reason});
+        };
+        QVERIFY(shift(Action::Initial,50000).recorded);
+        QVERIFY(!shift(Action::Initial,50000).recorded);
+        const auto mismatch=shift(Action::Count,49000,"перераховано");
+        QVERIFY(mismatch.recorded && !mismatch.opened);
+        QVERIFY(!CashAdvanceService::post(cash).error.isEmpty());
+        QVERIFY(q.exec("SELECT SUM(delta) FROM cash_opening_events") && q.next());
+        QCOMPARE(q.value(0).toLongLong(),50000);
+        q.finish();
+        QVERIFY(!shift(Action::Adjustment,49000).recorded);
+        QVERIFY(shift(Action::Adjustment,49000,"рішення після перевірки").recorded);
+        QVERIFY(shift(Action::Count,49000).opened);
+        operate(false,true);
+        auto firstCash=CashAdvanceService::post(cash);
+        QVERIFY2(firstCash.error.isEmpty(),qPrintable(firstCash.error));
+        QVERIFY(CashAdvanceService::post(cash).replay);
+        QVERIFY(q.exec("SELECT COUNT(*),SUM(cents) FROM cash_advance_events WHERE method='cash' AND shift_uid IS NOT NULL") && q.next());
+        QCOMPARE(q.value(0).toInt(),2);
+        QCOMPARE(q.value(1).toLongLong(),10001);
     }
 };
 QTEST_MAIN(CashAdvanceScreenTests)
