@@ -6620,8 +6620,12 @@ private slots:
                 QTest::qWait(50);
                 const QRect cell = table->visualRect(table->model()->index(0, 0));
                 const auto pixels = table->viewport()->grab().toImage();
-                QCOMPARE(pixels.pixelColor(cell.left()+12, cell.top()+5), expected);
+                const qreal dpr=pixels.devicePixelRatio();
+                QCOMPARE(pixels.pixelColor(qRound((cell.left()+6)*dpr),qRound((cell.top()+10)*dpr)),expected);
+                QCOMPARE(pixels.pixelColor(qRound((cell.right()-10)*dpr),qRound((cell.top()+5)*dpr)),QColor("#ffffff"));
                 QVERIFY(page.grab().save(dir.filePath(QStringLiteral("invoice-aging-%1.png").arg(days))));
+                const auto capture=qEnvironmentVariable("CS_INVOICE_APPEARANCE");
+                if(!capture.isEmpty()) QVERIFY(page.grab().save(capture+QString("-%1.png").arg(days)));
             }
         }
         QString error; const auto debts = PurchasePaymentService::orderPartDebts(db, 1, &error);
@@ -6629,6 +6633,10 @@ private slots:
         page.refresh(); QTRY_VERIFY_WITH_TIMEOUT(table->isEnabled(), 10000);
         QVERIFY(!table->model()->index(0, 0).data(Qt::BackgroundRole).isValid());
         QCOMPARE(table->model()->index(0, 5).data().toString(), QString::fromUtf8("Сплачена"));
+        auto* footer=page.findChild<QLabel*>("invoiceTableFooter");QVERIFY(footer);
+        QVERIFY(footer->text().contains("1"));
+        const auto capture=qEnvironmentVariable("CS_INVOICE_APPEARANCE");
+        if(!capture.isEmpty()) QVERIFY(page.grab().save(capture+"-paid.png"));
     }
     void dispatchMovesTimeWithoutChangingBookingIdentity() {
         using namespace PlanningDispatch;

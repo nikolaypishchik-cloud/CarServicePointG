@@ -56,18 +56,45 @@ class InvoiceAgingDelegate final : public QStyledItemDelegate {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
     void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
-        const auto background = index.data(Qt::BackgroundRole);
-        if (!background.isValid()) { QStyledItemDelegate::paint(painter, option, index); return; }
-        QStyleOptionViewItem opt(option); initStyleOption(&opt, index);
+        QStyleOptionViewItem opt(option); initStyleOption(&opt,index);
+        const QString text=index.data().toString();
         painter->save(); painter->setClipRect(opt.rect);
-        painter->fillRect(opt.rect, background.value<QBrush>());
-        painter->setFont(opt.font); painter->setPen(Qt::black);
-        const QRect textRect = opt.rect.adjusted(8, 0, -8, 0);
-        painter->drawText(textRect, opt.displayAlignment, opt.fontMetrics.elidedText(opt.text, Qt::ElideRight, textRect.width()));
-        painter->setPen(QColor("#cfd6de")); painter->drawLine(opt.rect.bottomLeft(), opt.rect.bottomRight());
-        if (opt.state & QStyle::State_Selected) {
-            painter->setPen(QPen(QColor("#306aa1"), 2)); painter->drawRect(opt.rect.adjusted(1, 1, -1, -1));
+        painter->fillRect(opt.rect, opt.state & QStyle::State_Selected ? QColor("#e5eef8") : QColor("#ffffff"));
+        painter->setRenderHint(QPainter::Antialiasing);
+        QRect bounds=opt.rect.adjusted(12,4,-12,-4);
+        painter->setFont(opt.font); painter->setPen(QColor("#172337"));
+        if(index.column()==0) {
+            const auto aging=index.data(Qt::BackgroundRole);
+            if(aging.isValid()) painter->fillRect(opt.rect.adjusted(4,6,-opt.rect.width()+10,-6),aging.value<QBrush>());
+            bounds.adjust(8,0,0,0);
         }
+        if(index.column()==5) {
+            const bool paid=text==QString::fromUtf8("Сплачена");
+            const bool unpaid=text==QString::fromUtf8("Не сплачена") || text==QString::fromUtf8("Частково сплачена");
+            QFont font=opt.font; font.setBold(true);font.setUnderline(paid);painter->setFont(font);
+            const QFontMetrics fm(font);
+            const int badgeWidth=qMin(bounds.width(),fm.horizontalAdvance(text)+28);
+            QRect badge(0,0,badgeWidth,qMin(bounds.height(),fm.height()+10));badge.moveCenter(bounds.center());
+            if(paid) {
+                painter->setBrush(QColor("#16812c"));painter->setPen(Qt::NoPen);
+                const QPoint point(badge.left()+9,badge.center().y());
+                painter->drawEllipse(point,9,9);painter->setPen(QPen(Qt::white,2));
+                painter->drawLine(point+QPoint(-5,0),point+QPoint(-1,4));painter->drawLine(point+QPoint(-1,4),point+QPoint(5,-4));
+                painter->setPen(QColor("#146723"));badge.adjust(23,0,0,0);
+            } else {
+                painter->setPen(QColor(unpaid?"#c57a00":"#65788b"));
+                painter->setBrush(QColor(unpaid?"#fff0d3":"#eaf0f5"));
+                painter->drawRoundedRect(badge,12,12);
+                painter->setPen(QColor(unpaid?"#804400":"#304050"));badge.adjust(7,0,-7,0);
+            }
+            painter->drawText(badge,Qt::AlignCenter,fm.elidedText(text,Qt::ElideRight,badge.width()));
+        } else {
+            QString shown=text;
+            if(shown.isEmpty() && (index.column()==3 || index.column()==6)) shown=QString::fromUtf8("—");
+            if(index.column()==6 && text==QString::fromUtf8("Не зафіксовано")) shown=QString::fromUtf8("⚠ Не зафіксовано");
+            painter->drawText(bounds,opt.displayAlignment,opt.fontMetrics.elidedText(shown,Qt::ElideRight,bounds.width()));
+        }
+        painter->setPen(QColor("#d3dce5"));painter->drawLine(opt.rect.bottomLeft(),opt.rect.bottomRight());
         painter->restore();
     }
 };
@@ -114,6 +141,13 @@ InvoicesPage::InvoicesPage(QWidget* parent) : QWidget(parent) {
     m_model = new ReportsTableSupport::ReportsSnapshotTableModel(this);
     m_table->setModel(m_model); ReportsTableSupport::setTableBaseStyle(m_table);
     m_table->setItemDelegate(new InvoiceAgingDelegate(m_table));
+    m_table->horizontalHeader()->setStyleSheet(
+        "QHeaderView::section {color:#fff;font-weight:bold;padding:9px 10px;border:1px solid #bccbd6;"
+        "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #708797,stop:1 #4d606e);}");
+    auto* title=new QLabel(tr("Накладні за період"),this);
+    title->setObjectName("invoiceTableTitle");
+    title->setStyleSheet("background:#e4ebf2;color:#172337;font-weight:bold;padding:10px;border:1px solid #bccbd6;");
+    layout->addWidget(title);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Fixed);
@@ -121,6 +155,9 @@ InvoicesPage::InvoicesPage(QWidget* parent) : QWidget(parent) {
     m_table->horizontalHeader()->setSectionsMovable(true);
     m_table->verticalHeader()->setDefaultSectionSize(46);
     layout->addWidget(m_table, 1);
+    m_footer=new QLabel(this);m_footer->setObjectName("invoiceTableFooter");
+    m_footer->setStyleSheet("background:#eef2f6;color:#172337;padding:8px;border:1px solid #ccd6df;");
+    layout->addWidget(m_footer);
     connect(refreshButton, &QPushButton::clicked, this, [this] { refresh(); });
     connect(m_search, &QLineEdit::textChanged, this, [this] { render(); });
     connect(m_statusFilter, &QComboBox::currentIndexChanged, this, [this] { render(); });
@@ -146,7 +183,7 @@ bool InvoicesPage::eventFilter(QObject* watched, QEvent* event) {
     return QWidget::eventFilter(watched,event);
 }
 void InvoicesPage::fitColumns() {
-    const QList<int> weights{9,24,13,10,17,15,12};
+    const QList<int> weights{11,18,12,10,18,17,14};
     auto* header=m_table->horizontalHeader();
     const int width=m_table->viewport()->width();
     if(header->count()!=weights.size() || width<=0) return;
@@ -275,6 +312,7 @@ void InvoicesPage::render() {
     if(!m_selectedInvoice.isEmpty())for(int row=0;row<m_visible.size();++row)if(m_visible[row].key==m_selectedInvoice) {
         m_table->selectRow(row);m_table->scrollTo(m_model->index(row,0));m_selectedInvoice.clear();break;
     }
+    m_footer->setText(tr("Показано накладних: %1").arg(m_visible.size()));
     if(metricsChanged)metricsChanged(m_visible.size(),paidCount,unpaidCount,remaining);
     m_status->setText(m_visible.isEmpty() ? QString::fromUtf8("Накладних за вибраними умовами немає.")
         : QString::fromUtf8("Накладних: %1 | Сплачено: %2 | Не сплачено: %3 | До сплати: %4 грн").arg(m_visible.size()).arg(paidCount).arg(unpaidCount).arg(FormatUtils::money(remaining / 100.0, 2)));

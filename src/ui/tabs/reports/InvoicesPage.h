@@ -36,6 +36,7 @@ private:
     QComboBox* m_statusFilter;
     QComboBox* m_sort;
     QLabel* m_status;
+    QLabel* m_footer;
     QVector<RegisteredInvoice> m_invoices, m_visible;
     std::shared_ptr<std::atomic_bool> m_cancel;
     quint64 m_generation = 0;
