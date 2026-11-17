@@ -75,7 +75,9 @@ void checkFinanceHeaderActions(QSqlDatabase db) {
                 return logo->mapToGlobal(logo->rect().topRight()).x() -
                        tile->mapToGlobal(tile->rect().topRight()).x();
             };
-            QTRY_VERIFY2(qAbs(difference()) <= 1,qPrintable(QString::number(difference())));
+            QTRY_VERIFY2(qAbs(difference()) <= 1,qPrintable(QString("offset %1 header %2 tileX %3 iconArea %4 brand %5")
+                .arg(difference()).arg(header->width()).arg(tile->mapToGlobal(tile->rect().topRight()).x())
+                .arg(rate->parentWidget()->width()).arg(logo->width())));
             const auto captures = qEnvironmentVariable("CS_HEADER_SIZE_CAPTURES");
             if (!captures.isEmpty()) QVERIFY(window.grab().save(QDir(captures).filePath("orders.png")));
         }

@@ -430,7 +430,11 @@ void MainWindow::buildUi()
     cL->addWidget(m_stack, 1);
 
     rootL->addWidget(m_sidebar);
-    rootL->addWidget(m_content, 1);
+    auto* contentScroll = new QScrollArea(m_root);
+    contentScroll->setFrameShape(QFrame::NoFrame);
+    contentScroll->setWidgetResizable(true);
+    contentScroll->setWidget(m_content);
+    rootL->addWidget(contentScroll, 1);
 
     applyAdaptiveShellMetrics();
 

@@ -4629,10 +4629,14 @@ private slots:
         auto* scroll = window.findChild<QScrollArea*>("sidebar_top_scroll");
         QVERIFY(banner && scroll);
         QCOMPARE(banner->parentWidget(), window.findChild<QFrame*>("sidebar"));
-        QCOMPARE(banner->height(), qRound(28.0 * banner->logicalDpiY() / 25.4));
+        auto* tile = window.findChild<QWidget*>("currentOrderActionTile0");
+        auto* table = window.findChild<QTableView*>("premiumCurrentOrdersTable");
+        QVERIFY(tile && table);
+        QCOMPARE(banner->mapTo(&window,banner->rect().bottomLeft()).y(), tile->mapTo(&window,tile->rect().bottomLeft()).y());
+        QCOMPARE(scroll->mapTo(&window,QPoint()).y(), table->mapTo(&window,QPoint()).y());
         const auto origin = banner->mapTo(&window, QPoint());
         QCOMPARE(scroll->mapTo(&window, QPoint()).y() - origin.y() - banner->height(),
-                 qRound(10.0 * banner->logicalDpiY() / 25.4));
+                 qRound(1.5 * banner->logicalDpiY() / 25.4));
         QCOMPARE(banner->width(), scroll->width());
         scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
         banner->setDebt(false, "0", "0");

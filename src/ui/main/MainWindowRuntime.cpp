@@ -592,8 +592,11 @@ void MainWindow::alignShellRows()
     const int gap = qRound(2.0 * logicalDpiY() / 25.4);
     auto* page = m_stack->currentWidget();
     auto* tile = page ? page->findChild<QWidget*>("currentOrderActionTile3") : nullptr;
-    const int actionHeight = tile && tile->isVisible() ? tile->height() : 52;
-    m_banner->setFixedHeight(m_topPill->height() + gap + actionHeight);
+    auto* firstTile = page ? page->findChild<QWidget*>("currentOrderActionTile0") : nullptr;
+    const int bannerHeight = firstTile && firstTile->isVisible()
+        ? firstTile->mapToGlobal(QPoint(0,firstTile->height())).y() - m_banner->mapToGlobal(QPoint()).y()
+        : m_topPill->height() + gap + 52;
+    m_banner->setFixedHeight(qMax(1,bannerHeight));
     if (tile && tile->isVisible() && m_topRightSpacer) {
         auto* layout = m_topPill->layout();
         const auto frame = m_topPill->contentsRect();
