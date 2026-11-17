@@ -3,6 +3,7 @@
 #include "ui/tabs/reports/ReportsTableSupport.h"
 #include "core/services/PartsRegisterPdf.h"
 #include <optional>
+#include "ui/tabs/reports/PartsReportVisuals.h"
 #include <algorithm>
 #include "core/util/FormatUtils.h"
 #include <QListWidget>
@@ -25,6 +26,7 @@ public:
         setStyleSheet(QStringLiteral("#partsRegisterView { background: #edf2f6; } #partsRegisterView QLabel { color: #203447; background: transparent; }"));
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(qRound(logicalDpiY()/25.4));
         auto* filters = new QHBoxLayout;
         store = new QComboBox(this);
         payment = new QComboBox(this);
@@ -53,14 +55,26 @@ public:
         model = new ReportsTableSupport::ReportsSnapshotTableModel(table);
         table->setModel(model);
         ReportsTableSupport::setTableBaseStyle(table);
+        table->setHorizontalHeader(new PartsWrappedHeader(table));
+        table->setItemDelegate(new PartsRegisterDelegate(table));
+        table->verticalHeader()->setDefaultSectionSize(table->fontMetrics().height()*2+22);
+        table->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
         table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
         auto* split = new QSplitter(Qt::Horizontal, this);
         orders = new QListWidget(split);
         orders->setObjectName("partsRegisterOrders");
+        orders->setStyleSheet("QListWidget {background:white;color:#203442;border:1px solid #d2dfe7;} QListWidget::item {padding:12px;border-bottom:1px solid #dbe3e9;} QListWidget::item:selected {background:#dff4f4;color:#123c46;border-left:4px solid #13b8b1;}");
+        orders->setMinimumWidth(320);
+        orders->setWordWrap(true);
+        orders->setTextElideMode(Qt::ElideNone);
         orders->setAccessibleName(tr("Наряди з придбаними запчастинами"));
         auto* details = new QWidget(split);
+        details->setObjectName("partsRegisterDetails");
+        details->setAttribute(Qt::WA_StyledBackground);
+        details->setStyleSheet("#partsRegisterDetails {background:white;}");
         auto* detailsLayout = new QVBoxLayout(details);
         detailsLayout->setContentsMargins(0, 0, 0, 0);
+        detailsLayout->setSpacing(qRound(logicalDpiY()/25.4));
         orderLink = new QPushButton(details);
         orderLink->setObjectName("partsRegisterOpenOrder");
         detailsLayout->addWidget(orderLink, 0, Qt::AlignLeft);
@@ -68,15 +82,21 @@ public:
         orderDates->setObjectName("partsRegisterOrderDates");
         orderDates->setTextFormat(Qt::PlainText);
         orderDates->setWordWrap(true);
+        orderDates->setStyleSheet("background:#eaf2f7;color:#203442;padding:6px;border:1px solid #d8e3ec;");
         detailsLayout->addWidget(orderDates);
         detailsLayout->addWidget(table, 1);
         split->addWidget(orders);
         split->addWidget(details);
-        split->setStretchFactor(1, 1);
+        split->setStretchFactor(0,1);
+        split->setStretchFactor(1,3);
+        split->setSizes({380,1100});
         layout->addWidget(split, 1);
         orders->hide();
         orderLink->hide();
         connect(orders, &QListWidget::currentRowChanged, this, [this] { displayOrder(); });
+        connect(table,&QTableView::clicked,this,[this](const QModelIndex& index) {
+            if(index.column()==2) ReportsInteractionSupport::openOrderFromReportTable(this,table,2,index.row(),orderEdited);
+        });
         connect(orderLink, &QPushButton::clicked, this, [this] {
             if (selectedRows.isEmpty()) return;
             ReportsInteractionSupport::openOrderFromReportTable(this, table, 2, selectedRows.first(), orderEdited);
@@ -84,14 +104,9 @@ public:
         connect(store, &QComboBox::currentIndexChanged, this, [this] { filter(); if (storeChanged) storeChanged(); });
         connect(payment, &QComboBox::currentIndexChanged, this, [this] { filter(); });
         buildRows({});
-        const auto metrics = table->horizontalHeader()->fontMetrics();
-        for (int c = 0; c < model->columnCount(); ++c) {
-            const auto title = model->headerData(c, Qt::Horizontal).toString();
-            table->setColumnWidth(c, qMax(table->columnWidth(c), metrics.horizontalAdvance(title) + 28));
-        }
-        table->setColumnWidth(5, qMax(160, table->columnWidth(5)));
-        table->setColumnWidth(11, qMax(table->columnWidth(11),
-            metrics.horizontalAdvance(tr("Немає підтверджених даних")) + 24));
+        for(int c : {0,2,4,5,8,9,10,11}) table->setColumnWidth(c,c==5?300:c==2?230:c==0?160:c==4?150:120);
+        table->setColumnWidth(11,190);
+        table->horizontalHeader()->setStretchLastSection(true);
     }
 
     void setTabOrderAfter(QWidget* previous) {
@@ -155,6 +170,9 @@ public:
 
     void setActive(bool value, bool groupByOrder = false) {
         byOrder = groupByOrder;
+        auto* header=table->horizontalHeader();
+        if((header->visualIndex(5)<header->visualIndex(4))!=byOrder)
+            header->swapSections(header->visualIndex(4),header->visualIndex(5));
         orders->setVisible(byOrder);
         active = value;
         if (active && pending) {
@@ -201,6 +219,10 @@ private:
                 cell.text = known(value);
                 row.cells.append(cell);
             }
+            for(auto& cell:row.cells)cell.tooltip=cell.text;
+            row.cells[0].tooltip=tr("Дата: %1 · Встановлено: %2").arg(values[0],values[1]);
+            row.cells[2].tooltip=tr("№ %1 · %2").arg(values[2],values[3]);
+            row.cells[5].tooltip=tr("%1 · OEM %2 · %3").arg(values[5],values[6],values[7]);
             row.cells[2].userValue = part.internalOrderNumber;
             row.cells[2].extraRoles[ReportsTableSupport::OrderUidRole] = part.orderUid;
             if (part.supplierPayment == tr("Сплачено")) row.cells.last().foreground = QColor("#218746");
@@ -278,7 +300,8 @@ private:
         }
         orderLink->hide();
         orderDates->hide();
-        for (int column = 0; column < 4; ++column) table->showColumn(column);
+        for(int column : {0,2,4,5,8,9,10,11})table->showColumn(column);
+        for(int column : {1,3,6,7})table->hideColumn(column);
         message->setText(state.isEmpty() ? tr("За вибраними умовами позицій немає") : state);
         message->setVisible(visible == 0);
     }
@@ -311,6 +334,11 @@ private:
             orderLink->setText({});
             orderDates->clear();
         }
+        if(!selectedRows.isEmpty()) {
+            table->setColumnHidden(0,table->isColumnHidden(0) && table->isColumnHidden(1));
+            table->setColumnHidden(2,table->isColumnHidden(2) && table->isColumnHidden(3));
+        }
+        for(int column : {1,3,6,7})table->hideColumn(column);
         orderDates->setVisible(!selectedRows.isEmpty());
         orderLink->setVisible(!selectedRows.isEmpty());
         message->setText(!state.isEmpty() ? state : (orders->count() ? tr("Виберіть наряд") : tr("За вибраними умовами нарядів немає")));

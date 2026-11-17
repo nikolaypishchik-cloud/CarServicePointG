@@ -369,6 +369,9 @@ void applyPartsSnapshot(QTableView* table, ReportsSnapshotTableModel* model, con
                                         .arg(row.store, row.qty, row.purchase),
                                     int(Qt::AlignLeft | Qt::AlignVCenter), QVariant(), QString(), true);
             out.spanAllColumns = true;
+            out.cells[0].extraRoles[Qt::UserRole+100]=QStringList{row.store,row.qty,row.purchase};
+            out.background=QColor("#bdd8e4");
+            out.cells[0].foreground=QColor("#183844");
             rows.push_back(out);
             continue;
         }

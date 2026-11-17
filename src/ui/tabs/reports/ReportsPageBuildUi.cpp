@@ -358,6 +358,11 @@ void ReportsPage::buildUi()
     };
     auto* partsPage = makeTab(m_partsTable, m_partsModel);
     auto* partsLayout = qobject_cast<QVBoxLayout*>(partsPage->layout());
+    const int partsGap=qRound(logicalDpiY()/25.4);
+    partsLayout->setContentsMargins(0,partsGap,0,0);
+    partsLayout->setSpacing(partsGap);
+    m_partsTable->setHorizontalHeader(new PartsWrappedHeader(m_partsTable));
+    m_partsTable->setItemDelegate(new PartsStoreGroupDelegate(m_partsTable));
     auto* groupActions = new QHBoxLayout;
     auto* collapse = new QPushButton(tr("Згорнути всі"), partsPage);
     auto* expand = new QPushButton(tr("Розгорнути всі"), partsPage);

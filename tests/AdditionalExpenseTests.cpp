@@ -306,7 +306,7 @@ private slots:
         auto* table = view.findChild<QTableView*>("partsRegisterTable");
         QVERIFY(dates && table);
         QVERIFY(dates->text().contains(QStringLiteral("Встановлено: див. позиції")));
-        QVERIFY(!table->isColumnHidden(1));
+        QVERIFY(!table->isColumnHidden(0));
         QCOMPARE(table->model()->index(0,1).data().toString(), QString("2026-01-01"));
         QCOMPARE(table->model()->index(1,1).data().toString(), QString("2026-01-02"));
         QVERIFY(orders->item(0)->text().contains(QStringLiteral("Різні стани оплати")));
@@ -330,7 +330,8 @@ private slots:
         QCOMPARE(view.exportSelection().rows.size(),2);
         view.setActive(true,false);
         QVERIFY(dates->isHidden());
-        for (int column = 0; column < 4; ++column) QVERIFY(!table->isColumnHidden(column));
+        for (int column : {0,2}) QVERIFY(!table->isColumnHidden(column));
+        for (int column : {1,3,6,7}) QVERIFY(table->isColumnHidden(column));
         QCOMPARE(view.exportSelection().rows.size(),2);
     }
 
@@ -390,6 +391,7 @@ private slots:
         q.addBindValue(today);
         QVERIFY(q.exec());
         ReportsPage page;
+        page.resize(1550,850);
         auto* mode = page.findChild<QTabBar*>("partsReportMode");
         auto* search = page.findChild<QLineEdit*>("partsReportSearch");
         auto* table = page.findChild<QTableView*>("partsRegisterTable");
@@ -434,6 +436,8 @@ private slots:
         if (!modeCapture.isEmpty()) QVERIFY(mode->grab().save(modeCapture));
         const QString capture = qEnvironmentVariable("CS_FLAT_REPORT_CAPTURE");
         if (!capture.isEmpty()) QVERIFY(page.grab().save(capture));
+        const auto* details=view->findChild<QWidget*>("partsRegisterDetails");
+        qInfo()<<"PARTS_GEOMETRY"<<table->geometry()<<details->geometry()<<view->geometry();
         auto* title = view->findChild<QLabel*>("partsRegisterTitle");
         QVERIFY(title);
         QCOMPARE(title->text(), QStringLiteral("Усі позиції · Показано 2 із 2"));
@@ -451,6 +455,9 @@ private slots:
         QCOMPARE(view->exportSelection().rows.first()[6], QStringLiteral("OEM-71"));
         auto* link = view->findChild<QPushButton*>("partsRegisterOpenOrder");
         QVERIFY(link && link->isVisible());
+        search->clear();
+        QTest::qWait(80);
+        if(!capture.isEmpty()) QVERIFY(page.grab().save(capture+"-orders.png"));
         payment->setFocus();
         for (QWidget* next : QList<QWidget*>{orders, link, table}) {
             QTest::keyClick(page.focusWidget(), Qt::Key_Tab);
@@ -460,6 +467,8 @@ private slots:
         QTest::keyClick(mode, Qt::Key_Left);
         QCOMPARE(mode->currentIndex(), 0);
         QVERIFY(view->isHidden());
+        QTest::qWait(80);
+        if(!capture.isEmpty()) QVERIFY(page.grab().save(capture+"-grouped.png"));
         auto* collapse = page.findChild<QPushButton*>("partsCollapseAll");
         QVERIFY(collapse && collapse->isEnabled());
         search->setFocus();
