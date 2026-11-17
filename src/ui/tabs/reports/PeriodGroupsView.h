@@ -2,7 +2,27 @@
 
 #include "core/services/ReportsDataLoader.h"
 #include <QHeaderView>
+#include "core/services/settings/UiSettingsService.h"
+#include <QSettings>
 #include <QTreeWidget>
+
+namespace PeriodReportPresentation {
+inline void configure(QAbstractItemView* view, QHeaderView* header, const QString& key)
+{
+    const auto fonts = UiSettingsService::loadFontSettings();
+    view->setStyleSheet(view->styleSheet() + QStringLiteral(
+        "QTreeWidget,QTableView {font-size:%1pt;}"
+        "QHeaderView::section {font-size:%2pt;}"
+        "QAbstractItemView::item:selected {background:#c9dfe6;color:#142631;}")
+        .arg(fonts.tableFontSize + 3).arg(fonts.headingFontSize + 3));
+    header->setSectionsMovable(true);
+    header->setFirstSectionMovable(true);
+    header->restoreState(QSettings().value(key).toByteArray());
+    QObject::connect(header, &QHeaderView::sectionMoved, header, [header,key] {
+        QSettings().setValue(key, header->saveState());
+    });
+}
+}
 
 class PeriodGroupsView final : public QTreeWidget {
 public:
@@ -11,12 +31,13 @@ public:
         setHeaderLabels({tr("Період / наряд"), tr("Нарядів"), tr("Автомобіль"), tr("Майстер"),
                          tr("Роботи, грн"), tr("Запчастини, грн"), tr("Разом, грн")});
         setStyleSheet(QStringLiteral("QTreeWidget { background:#fafbfd; alternate-background-color:#edf2f6;"
-                                     "color:#182632; selection-background-color:#226678; selection-color:white; }"));
+                                     "color:#182632; selection-background-color:#c9dfe6; selection-color:#142631; }"));
         setUniformRowHeights(true);
         setAlternatingRowColors(true);
         header()->setStretchLastSection(false);
         header()->setSectionResizeMode(QHeaderView::ResizeToContents);
         header()->setSectionResizeMode(2,QHeaderView::Stretch);
+        PeriodReportPresentation::configure(this, header(), QStringLiteral("reports/period/groupedColumns"));
         hide();
     }
 
@@ -59,9 +80,9 @@ public:
             for (auto it=byMaster.cbegin();it!=byMaster.cend();++it) {
                 const auto& key=it.key();
                 QString name=key.first.isEmpty()?tr("Майстра не вказано"):key.first;
-                if (!key.second.isEmpty()) name+=tr(" (№%1)").arg(key.second);
-                else if (!key.first.isEmpty()) name+=tr(" (за іменем)");
-                showTotals(new QTreeWidgetItem(summary,{name}),it.value());
+                auto* master = new QTreeWidgetItem(summary,{name});
+                master->setData(0, Qt::UserRole + 1, key.second);
+                showTotals(master,it.value());
             }
             summary->setExpanded(true);
         }

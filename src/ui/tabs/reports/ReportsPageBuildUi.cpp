@@ -16,6 +16,11 @@
 #include "ui/tabs/reports/ReportDashboard.h"
 
 namespace {
+class ReportPdfButton final : public QPushButton {
+public:
+    using QPushButton::QPushButton;
+    QSize sizeHint() const override { return QPushButton::sizeHint().expandedTo(minimumSize()); }
+};
 class DebtTabBar final : public QTabBar {
 public:
     explicit DebtTabBar(QWidget* parent) : QTabBar(parent) {}
@@ -182,7 +187,7 @@ void ReportsPage::buildUi()
     top->addWidget(bannersHost, 2);
 
 
-    m_pdfButton = new QPushButton(QString::fromUtf8("PDF"), this);
+    m_pdfButton = new ReportPdfButton(QString::fromUtf8("PDF"), this);
     m_pdfButton->setObjectName("reportsPdfButton");
     m_pdfButton->setMinimumWidth(AdaptiveUi::px(m_pdfButton, 92));
     m_pdfButton->setMinimumHeight(AdaptiveUi::px(m_pdfButton, 34));
@@ -238,6 +243,9 @@ void ReportsPage::buildUi()
     auto* periodPage = makeTab(m_periodTable, m_periodModel);
     m_periodGroups = new PeriodGroupsView(periodPage);
     auto* periodLayout=static_cast<QVBoxLayout*>(periodPage->layout());
+    const int gap = qRound(periodPage->logicalDpiY() / 25.4);
+    periodLayout->setContentsMargins(0,gap,0,0);
+    periodLayout->setSpacing(gap);
     periodLayout->addWidget(m_periodGroups,1);
     m_periodGrouping = new QComboBox(periodPage);
     m_periodGrouping->setObjectName("periodGrouping");
@@ -267,7 +275,7 @@ void ReportsPage::buildUi()
     m_weekComparison->setWordWrap(true);
     m_weekComparison->setStyleSheet(QStringLiteral("background:#202c38;color:#f2f6fa;padding:5px 8px;"));
     m_weekComparison->hide();
-    static_cast<QVBoxLayout*>(periodPage->layout())->insertWidget(0, m_weekComparison);
+    periodLayout->addWidget(m_weekComparison);
     m_tabs->addTab(periodPage, QString::fromUtf8("Звіт за період"));
     auto* ordersPage = makeTab(m_ordersTable, m_ordersModel);
     m_orderPager = new OrderReportPager(m_ordersTable, m_ordersModel, ordersPage);
@@ -595,6 +603,7 @@ void ReportsPage::buildUi()
     m_periodTable->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
     m_periodTable->horizontalHeader()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
     m_periodTable->horizontalHeader()->setSectionResizeMode(6, QHeaderView::ResizeToContents);
+    PeriodReportPresentation::configure(m_periodTable, m_periodTable->horizontalHeader(), QStringLiteral("reports/period/listColumns"));
 
     m_ordersTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     m_ordersTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);

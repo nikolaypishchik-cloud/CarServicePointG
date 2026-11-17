@@ -50,7 +50,10 @@ void checkFinanceHeaderActions(QSqlDatabase db) {
             QCOMPARE(button->isEnabled(), button == statements);
             QVERIFY(!button->icon().isNull());
             QVERIFY(button->toolTip().contains(button->text()));
-            QVERIFY(header->rect().contains(QRect(button->mapTo(header,QPoint()),button->size())));
+            QTRY_VERIFY2(header->rect().contains(QRect(button->mapTo(header,QPoint()),button->size())),
+                         qPrintable(QString("%1 in %2x%3 at %4,%5 size %6x%7").arg(button->text()).arg(header->width())
+                         .arg(header->height()).arg(button->mapTo(header,QPoint()).x()).arg(button->mapTo(header,QPoint()).y())
+                         .arg(button->width()).arg(button->height())));
             button->click();
             QCOMPARE(pages->currentIndex(), index);
         }
@@ -62,7 +65,20 @@ void checkFinanceHeaderActions(QSqlDatabase db) {
         QVERIFY(logo->isVisibleTo(&window));
         const QRect brand(logo->mapTo(header, QPoint()), logo->size());
         QVERIFY(header->rect().contains(brand));
-        QVERIFY(brand.left() < header->width() / 10);
+        QVERIFY(brand.width() > 0);
+        if (index == 1) {
+            auto* title = header->findChild<QLabel*>("shellPageTitle");
+            QVERIFY(title && title->isVisible() && title->text() == QStringLiteral("Поточні наряди"));
+            auto* tile = pages->currentWidget()->findChild<QWidget*>("currentOrderActionTile3");
+            QVERIFY(tile);
+            const auto difference = [&] {
+                return logo->mapToGlobal(logo->rect().topRight()).x() -
+                       tile->mapToGlobal(tile->rect().topRight()).x();
+            };
+            QTRY_VERIFY2(qAbs(difference()) <= 1,qPrintable(QString::number(difference())));
+            const auto captures = qEnvironmentVariable("CS_HEADER_SIZE_CAPTURES");
+            if (!captures.isEmpty()) QVERIFY(window.grab().save(QDir(captures).filePath("orders.png")));
+        }
         QVERIFY(brand.right() < rate->mapTo(header, QPoint()).x());
         QVERIFY(rate->mapTo(header, rate->rect().topRight()).x() < statements->mapTo(header,QPoint()).x());
     }

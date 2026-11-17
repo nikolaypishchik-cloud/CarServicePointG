@@ -34,7 +34,7 @@ void CurrentOrdersPage::buildUi()
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0,0,0,0);
-    root->setSpacing(10);
+    root->setSpacing(qRound(1.5 * logicalDpiY() / 25.4));
 
     // Toolbar
     auto* bar = new QHBoxLayout();
@@ -85,6 +85,12 @@ void CurrentOrdersPage::buildUi()
         field->setMinimumWidth(symbol==0?120:field->fontMetrics().horizontalAdvance(qobject_cast<QToolButton*>(field)->text())+26);
         field->setMaximumWidth(QWIDGETSIZE_MAX);field->setFixedHeight(38);
         if(symbol!=0)field->setStyleSheet("QToolButton {color:white;font-family:'Times New Roman';font-weight:bold;border:1px solid #74808b;border-radius:14px;padding:3px 10px;background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #66717e,stop:0.16 #414b58,stop:1 #1d242c);} QToolButton:hover {border-color:#9ddfee;} QToolButton:pressed {background:#253b49;} QToolButton:disabled {color:#9b9fa4;}");
+        field->ensurePolished();
+        if (symbol == 0) {
+            field->setMinimumWidth(field->fontMetrics().horizontalAdvance(m_search->placeholderText()) + 20);
+        } else {
+            field->setMinimumWidth(qMax(field->minimumWidth(), field->sizeHint().width()));
+        }
         bar->addWidget(card,stretch);
         if((field==btnPdf || field==m_btnImportInvoice) && AccessControlService::currentActorIsMaster())card->hide();
     };

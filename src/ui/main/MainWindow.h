@@ -75,6 +75,7 @@ private:
     void buildUi();
     void applyStyle();
     void applyAdaptiveShellMetrics();
+    void alignShellRows();
     void scheduleGeometryLock(int delayMs = 0);
     QWidget* ensurePage(int idx);
     void connectPageSignals(QWidget* page);

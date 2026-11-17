@@ -80,7 +80,6 @@ PeriodSnapshot buildPeriodSnapshot(const QString& dbPath, const QString& df, con
                     const QString master=id.isEmpty()?"name:"+name:"id:"+id;
                     if (day>=first && !snapshot.masters.contains(master)) {
                         QString label=name.isEmpty()?QStringLiteral("Майстра не вказано"):name;
-                        if (!id.isEmpty()) label+=QStringLiteral(" (№%1)").arg(id);
                         snapshot.masters.insert(master,label);
                     }
                     if (!filter.master.isEmpty() && master!=filter.master) continue;

@@ -7350,7 +7350,15 @@ private slots:
         }
         // UI workers must open the same prepared runtime as the main thread.
         // Each scenario still starts with an independent empty fixture.
-        QCoreApplication::setApplicationName("Safety-Purchase-" + QUuid::createUuid().toString(QUuid::Id128));
+        const auto restartSettings = qEnvironmentVariable("CS_PERIOD_RESTART_SETTINGS");
+        if (!restartSettings.isEmpty() && QByteArray(QTest::currentTestFunction())=="periodReportShowsFourWeeklyComparisons") {
+            const QDir root(qEnvironmentVariable("CS_TEST_DATA_ROOT"));
+            QCOMPARE(QFileInfo(restartSettings).canonicalFilePath(), root.canonicalPath()+"/settings");
+            QCoreApplication::setApplicationName("Safety-Period-" + root.dirName());
+            QSettings::setPath(QSettings::IniFormat,QSettings::UserScope,restartSettings);
+        } else {
+            QCoreApplication::setApplicationName("Safety-Purchase-" + QUuid::createUuid().toString(QUuid::Id128));
+        }
         isolatedRuntimeProfiles.append(App::dataDir());
         QString runtimeError;
         QVERIFY2(Database::prepareRuntime(&runtimeError),qPrintable(runtimeError));

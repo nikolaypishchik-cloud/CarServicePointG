@@ -7,6 +7,7 @@
 #include "runtime/AsyncThreadScope.h"
 #include "core/services/AppRuntimeService.h"
 #include <QMessageBox>
+#include <QLineEdit>
 
 void MainWindow::applyStyle()
 {
@@ -432,7 +433,14 @@ QString MainWindow::pageTitleForIndex(int idx) const
 
 void MainWindow::updateTopTitleForPage(int idx)
 {
-    if (m_topPill) m_topPill->setAccessibleDescription(pageTitleForIndex(idx));
+    if (!m_topPill) return;
+    const QString title = pageTitleForIndex(idx);
+    m_topPill->setAccessibleDescription(title);
+    if (auto* label = m_topPill->findChild<QLabel*>("shellPageTitle")) {
+        label->setText(title);
+        label->setVisible(idx == 1);
+    }
+    QTimer::singleShot(0, this, &MainWindow::alignShellRows);
 }
 
 void MainWindow::applyFrozenPageMode(int activeIndex)
@@ -565,7 +573,7 @@ void MainWindow::applyAdaptiveShellMetrics()
         m_sidebar->setFixedWidth(target);
     }
     if (m_topPill) {
-        const int h = qBound(46, AdaptiveUi::px(this, 52), 76);
+        const int h = qMax(qBound(46, AdaptiveUi::px(this, 52), 76), m_topPill->layout()->minimumSize().height());
         m_topPill->setMinimumHeight(h);
         m_topPill->setMaximumHeight(h);
     }
@@ -574,6 +582,33 @@ void MainWindow::applyAdaptiveShellMetrics()
                            qBound(180, qRound(avail.width() * 0.19), AdaptiveUi::px(this, 360)));
         m_topRightSpacer->setMinimumWidth(w);
         m_topRightSpacer->setMaximumWidth(w);
+    }
+    QTimer::singleShot(0, this, &MainWindow::alignShellRows);
+}
+
+void MainWindow::alignShellRows()
+{
+    if (!m_topPill || !m_banner || !m_stack) return;
+    const int gap = qRound(2.0 * logicalDpiY() / 25.4);
+    auto* page = m_stack->currentWidget();
+    auto* tile = page ? page->findChild<QWidget*>("currentOrderActionTile3") : nullptr;
+    const int actionHeight = tile && tile->isVisible() ? tile->height() : 52;
+    m_banner->setFixedHeight(m_topPill->height() + gap + actionHeight);
+    if (tile && tile->isVisible() && m_topRightSpacer) {
+        auto* layout = m_topPill->layout();
+        const auto frame = m_topPill->contentsRect();
+        const int frameLeft = m_topPill->mapToGlobal(frame.topLeft()).x();
+        const int frameEnd = frameLeft + frame.width();
+        auto margins = layout->contentsMargins();
+        if (auto* searchTile = page->findChild<QWidget*>("currentOrderActionTile0")) {
+            if (auto* search = searchTile->findChild<QLineEdit*>()) {
+                margins.setLeft(qMax(0, search->mapToGlobal(QPoint()).x() - frameLeft));
+                layout->setContentsMargins(margins);
+            }
+        }
+        const int tileEnd = tile->mapToGlobal(QPoint(tile->width(),0)).x();
+        const int available = frameEnd - tileEnd - margins.right() - layout->spacing();
+        m_topRightSpacer->setFixedWidth(qMax(m_topRightSpacer->layout()->sizeHint().width(), available));
     }
 }
 

@@ -8,6 +8,23 @@
 #include <QPainter>
 
 namespace {
+class OrderRowAlignment final : public QObject {
+public:
+    OrderRowAlignment(QWidget* tile, std::function<void()> align) : QObject(tile) {
+        m_update.setSingleShot(true);
+        connect(&m_update, &QTimer::timeout, this, std::move(align));
+        tile->installEventFilter(this);
+    }
+protected:
+    bool eventFilter(QObject*, QEvent* event) override {
+        if (event->type() == QEvent::Move || event->type() == QEvent::Resize || event->type() == QEvent::Show)
+            m_update.start(0);
+        return false;
+    }
+private:
+    QTimer m_update;
+};
+
 class HeaderModuleButton final : public QToolButton {
 public:
     using QToolButton::QToolButton;
@@ -69,7 +86,8 @@ void MainWindow::buildUi()
     m_sidebar->setMinimumWidth(190);
     m_sidebar->setMaximumWidth(320);
     auto* sbL = new QVBoxLayout(m_sidebar);
-    sbL->setContentsMargins(14,14,14,24);
+    const int topGap = qRound(2.0 * logicalDpiY() / 25.4);
+    sbL->setContentsMargins(14,topGap,14,24);
     sbL->setSpacing(10);
 
     auto* topMenuScroll = new QScrollArea(m_sidebar);
@@ -118,7 +136,7 @@ void MainWindow::buildUi()
     });
     // Keep the banner outside the scrolling menu, aligned with its buttons.
     sbL->addWidget(m_banner);
-    sbL->addSpacing(qMax(0, qRound(10.0 * logicalDpiY() / 25.4) - sbL->spacing()));
+    sbL->setSpacing(qRound(1.5 * logicalDpiY() / 25.4));
 
     // Menu
     m_menu = new QButtonGroup(this);
@@ -143,8 +161,6 @@ void MainWindow::buildUi()
         "QPushButton#sb_btn_orders:checked{border-color:#fff3a0;border-radius:6px;}"
         "QPushButton#sb_btn_orders:pressed{background:#ecb800;border-color:white;}"));
     auto* btnHistory = mkMenuButton(QString::fromUtf8("Завершені наряди"), m_menu, topMenuContent);
-    auto* btnParts   = mkMenuButton(QString::fromUtf8("Замовлення запчастин"), m_menu, topMenuContent);
-    auto* btnCash = mkMenuButton(tr("Каса"), m_menu, topMenuContent);
     auto* btnReports = mkMenuButton(QString::fromUtf8("Звіти"), m_menu, topMenuContent);
     auto* btnCrm     = mkMenuButton(QString::fromUtf8("Клієнти"), m_menu, topMenuContent);
     auto* btnWorkshopInventory = mkMenuButton(QString::fromUtf8("Склад СТО"), m_menu, bottomMenu);
@@ -172,8 +188,6 @@ void MainWindow::buildUi()
     topMenuL->addWidget(btnNewOrder);
     topMenuL->addWidget(btnCurrent);
     topMenuL->addWidget(btnHistory);
-    topMenuL->addWidget(btnParts);
-    topMenuL->addWidget(btnCash);
     topMenuL->addWidget(btnReports);
     topMenuL->addWidget(btnCrm);
     topMenuL->addStretch(1);
@@ -193,8 +207,9 @@ void MainWindow::buildUi()
     m_content = new QWidget(m_root);
     m_content->setObjectName("content");
     auto* cL = new QVBoxLayout(m_content);
-    cL->setContentsMargins(14,14,14,14);
-    cL->setSpacing(12);
+    const int side = qRound(1.5 * logicalDpiX() / 25.4);
+    cL->setContentsMargins(side,topGap,side,14);
+    cL->setSpacing(qRound(2.0*logicalDpiY()/25.4));
 
     // Top header pill
     auto* top = new QFrame(m_content);
@@ -203,7 +218,7 @@ void MainWindow::buildUi()
     top->setMinimumHeight(46);
     top->setMaximumHeight(78);
     auto* topL = new QHBoxLayout(top);
-    topL->setContentsMargins(18,2,18,2);
+    topL->setContentsMargins(55,2,qRound(2.0*logicalDpiX()/25.4),2);
     topL->setSpacing(10);
 
     auto* logo = new AnimatedMetalLogoWidget(top);
@@ -211,15 +226,19 @@ void MainWindow::buildUi()
     logo->setAccessibleName(QStringLiteral("CarService PointG"));
     logo->setAttribute(Qt::WA_TransparentForMouseEvents);
     logo->setMaximumWidth(logo->sizeHint().width());
-    topL->addWidget(logo, 0, Qt::AlignLeft | Qt::AlignVCenter);
+    auto* title = new QLabel(top);
+    title->setObjectName("shellPageTitle");
+    title->setStyleSheet("color:white;background:transparent;border:none;font: bold 14pt 'Times New Roman';");
+    topL->addWidget(title);
     topL->addStretch();
+    topL->addWidget(logo, 0, Qt::AlignRight | Qt::AlignVCenter);
     updateTopTitleForPage(1);
 
     m_topRightSpacer = new QWidget(top);
     m_topRightSpacer->setMinimumWidth(180);
     auto* headerActions = new QHBoxLayout(m_topRightSpacer);
     headerActions->setContentsMargins(0, 0, 0, 0);
-    headerActions->setSpacing(8);
+    headerActions->setSpacing(qRound(2.0*logicalDpiX()/25.4));
     headerActions->addStretch();
     auto makeModuleButton = [&](const QString& name, const QString& title, const QString& tip) {
         auto* button = new HeaderModuleButton(m_topRightSpacer);
@@ -231,7 +250,7 @@ void MainWindow::buildUi()
         button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
         button->setAutoRaise(true);
         button->setStyleSheet(QStringLiteral(
-            "QToolButton { background: transparent; color: #edf5fa; padding: 0 4px; border: 1px solid transparent; }"
+            "QToolButton { background: transparent; color: #edf5fa; padding: 0 2px; border: 1px solid transparent; }"
             "QToolButton:hover, QToolButton:focus { border-color: #81cad5; }"
             "QToolButton:pressed { background: #294854; border-color: #adebf2; }"
             "QToolButton:disabled { color: #aab9c5; }"));
@@ -311,8 +330,13 @@ void MainWindow::buildUi()
     safeIcon.addPixmap(safeImage, QIcon::Disabled);
     cash->setIcon(safeIcon);
     m_headerCash = cash;
+    connect(cash, &QToolButton::clicked, this, [this] {
+        if (canAccessPage(15)) {
+            gotoPage(15);
+            m_stack->currentWidget()->setFocus();
+        }
+    });
     cash->setEnabled(false);
-    connect(cash,&QToolButton::clicked,this,[this,btnCash] { if (canAccessPage(15)) btnCash->click(); });
     m_headerStatements = makeModuleButton("headerStatements", tr("Виписки"), tr("Відкрити Виписки"));
     m_headerStatements->setIcon(pendingHeaderIcon(false));
     m_headerStatements->setEnabled(false);
@@ -325,20 +349,20 @@ void MainWindow::buildUi()
 
     m_stack = new QStackedWidget(m_content);
     m_stack->setObjectName("pages");
-    connect(m_stack,&QStackedWidget::currentChanged,this,[this,cL](int index) {
+    connect(m_stack,&QStackedWidget::currentChanged,this,[this,cL,side,topGap](int index) {
         if (index == 9) {
-            cL->setContentsMargins(0, 14, 0, 0);
+            cL->setContentsMargins(side, topGap, side, 0);
             cL->setSpacing(qRound(1.5 * logicalDpiY() / 25.4));
             return;
         }
         const bool intake = index == 12;
-        cL->setContentsMargins(14, 14, 14, intake ? 0 : 14);
+        cL->setContentsMargins(side, topGap, side, intake ? 0 : 14);
         if (intake) {
             cL->setSpacing(0);
             return;
         }
         cL->setSpacing(index==5?qMax(1,qRound(0.5*logicalDpiY()/25.4)):
-                       index==6?qMax(1,qRound(logicalDpiY()/25.4)):12);
+                       index==6?qMax(1,qRound(logicalDpiY()/25.4)):qRound(2.0*logicalDpiY()/25.4));
     });
     m_stack->setAttribute(Qt::WA_StyledBackground, false);
     m_stack->setAutoFillBackground(false);
@@ -401,6 +425,8 @@ void MainWindow::buildUi()
     // prewarm of secondary tabs is scheduled later, after the shell is visible.
     ensurePage(1);
     m_stack->setCurrentIndex(1);
+    if (auto* tile = m_stack->currentWidget()->findChild<QWidget*>("currentOrderActionTile3"))
+        new OrderRowAlignment(tile, [this] { alignShellRows(); });
     cL->addWidget(m_stack, 1);
 
     rootL->addWidget(m_sidebar);
@@ -442,8 +468,6 @@ void MainWindow::buildUi()
         if (index == 1) btnCurrent->setChecked(true);
         if (index == 3) btnHistory->setChecked(true);
     });
-    connect(btnParts,    &QPushButton::clicked, this, [this]() { gotoPage(4); });
-    connect(btnCash,&QPushButton::clicked,this,[this] { gotoPage(15); if (m_stack->currentIndex()==15) m_stack->currentWidget()->setFocus(); });
     connect(btnReports,  &QPushButton::clicked, this, [this]() { gotoPage(5); });
     connect(btnCrm,      &QPushButton::clicked, this, [this]() { gotoPage(9); });
     connect(btnVehicleIntake, &QPushButton::clicked, this, [this]() { gotoPage(12); });
@@ -462,8 +486,6 @@ void MainWindow::buildUi()
         {QStringLiteral("nav.new_order"), btnNewOrder},
         {QStringLiteral("nav.current_orders"), btnCurrent},
         {QStringLiteral("nav.history"), btnHistory},
-        {QStringLiteral("nav.parts"), btnParts},
-        {QStringLiteral("cash.view"), btnCash},
         {QStringLiteral("nav.reports"), btnReports},
         {QStringLiteral("nav.clients"), btnCrm},
         {QStringLiteral("nav.inventory"), btnWorkshopInventory},

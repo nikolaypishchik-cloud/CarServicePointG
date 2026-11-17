@@ -135,7 +135,7 @@ void AnimatedMetalLogoWidget::paintEvent(QPaintEvent* event) {
     const qreal textWidth = fm.horizontalAdvance(m_text);
     const qreal ascent = fm.ascent();
     const qreal baselineY = (height() + ascent - fm.descent()) * 0.5;
-    qreal x = (width() - textWidth) * 0.5;
+    qreal x = width() - textWidth - 1.0;
 
     QRectF totalBounds(x, baselineY - ascent, textWidth, fm.height());
     const qreal sweepT = metallicSweepFactor();

@@ -1,6 +1,9 @@
 #include "ui/tabs/reports/ReportsPage.h"
 #include <QtTest>
 #include <QTreeWidget>
+#include <QHeaderView>
+#include <QSettings>
+#include <QScopeGuard>
 #include <QLineEdit>
 #include <QTableView>
 #include "ui/tabs/reports/ReportsTableSupport.h"
@@ -322,6 +325,7 @@ void checkWeeklyReportScreen(QSqlDatabase db) {
         "SELECT 9,9,'2025-01-01','','B','M',NULL,30,30,'order-9' UNION ALL "
         "SELECT 8,8,'2025-01-02','','C','M',NULL,900,900,'order-8' UNION ALL "
         "SELECT 7,7,'2024-12-25','','D','M',NULL,0,0,'order-7'"),qPrintable(q.lastError().text()));
+    const QString settingsDir = qEnvironmentVariable("CS_PERIOD_RESTART_SETTINGS");
     ReportsPage page;
     page.resize(1280,800);
     page.show();
@@ -349,6 +353,8 @@ void checkWeeklyReportScreen(QSqlDatabase db) {
     QCOMPARE(week->child(1)->text(6),groups->locale().toString(40.0,'f',2));
     const auto* masters=groups->topLevelItem(1);
     QCOMPARE(masters->childCount(),2);
+    QCOMPARE(masters->child(0)->text(0),QStringLiteral("M"));
+    QCOMPARE(masters->child(1)->text(0),QStringLiteral("N"));
     QCOMPARE(masters->child(0)->text(4),groups->locale().toString(70.13,'f',2));
     QCOMPARE(masters->child(1)->text(5),groups->locale().toString(10.13,'f',2));
     auto* grouping=page.findChild<QComboBox*>("periodGrouping");
@@ -358,6 +364,15 @@ void checkWeeklyReportScreen(QSqlDatabase db) {
     auto* list=groups->parentWidget()->findChild<QTableView*>();
     QVERIFY(list && list->isVisible());
     QCOMPARE(list->model()->index(0,1).data(ReportsTableSupport::OrderUidRole).toString(),QStringLiteral("order-10"));
+    if (!settingsDir.isEmpty()) {
+        const bool reading = qEnvironmentVariableIsSet("CS_PERIOD_RESTART_VERIFY");
+        for (auto* header : {groups->header(),list->horizontalHeader()}) {
+            QVERIFY(header->sectionsMovable());
+            QVERIFY(header->isFirstSectionMovable());
+            if (!reading) header->moveSection(header->visualIndex(0), 2);
+            QCOMPARE(header->visualIndex(0), 2);
+        }
+    }
     grouping->setCurrentIndex(0);
     QVERIFY(groups->isVisible());
     QCOMPARE(day->child(0)->text(0),QStringLiteral("Наряд №10"));
@@ -374,7 +389,17 @@ void checkWeeklyReportScreen(QSqlDatabase db) {
     QVERIFY(weeks[2].contains("18.12.2024") && weeks[2].contains("немає нарядів"));
     QVERIFY(weeks[3].contains("11.12.2024") && weeks[3].contains("немає нарядів"));
     const auto output=qEnvironmentVariable("CS_TEST_SCREENSHOTS");
-    if (!output.isEmpty()) QVERIFY(page.grab().save(QDir(output).filePath("four-weeks.png")));
+    if (!output.isEmpty()) {
+        auto* pdf = page.findChild<QPushButton*>("reportsPdfButton");
+        QVERIFY(pdf && pdf->isVisible());
+        groups->setCurrentItem(day->child(0));
+        QVERIFY(page.grab().save(QDir(output).filePath("four-weeks.png")));
+        qInfo() << "Period UI DPR" << page.devicePixelRatioF() << "PDF right"
+                << pdf->mapTo(&page,pdf->rect().topRight()).x() << "table right"
+                << groups->mapTo(&page,groups->rect().topRight()).x();
+        QVERIFY(qAbs(pdf->mapTo(&page,pdf->rect().topRight()).x() -
+                     groups->mapTo(&page,groups->rect().topRight()).x()) <= 1);
+    }
     auto* master=page.findChild<QComboBox*>("periodMaster");
     auto* search=page.findChild<QLineEdit*>("periodOrderSearch");
     QVERIFY(master && search);
