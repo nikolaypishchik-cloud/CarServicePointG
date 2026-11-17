@@ -698,6 +698,36 @@ private slots:
             QVERIFY(CashBankService::post(reconcile).replay);
             QCOMPARE(ClientReceiptReader::read(db,{"order-channel"}).centsByOrder,before.centsByOrder);
         }
+        // Reconcile the report rows with the underlying postings, including signed reversals.
+        auto report=CashReport::read(CashReport::Type::Orders,day,day);
+        QVERIFY2(report.error.isEmpty(),qPrintable(report.error));
+        int orderRows=0;
+        for(const auto& row:report.rows)if(row.at(1)=="order-channel"){
+            ++orderRows;QCOMPARE(row.at(5),ClientReceiptReader::money(300));
+            QCOMPARE(row.at(6),QStringLiteral("Потребує звірки"));
+        }
+        QCOMPARE(orderRows,1);
+        const auto adv=CashReport::read(CashReport::Type::Advances,day,day);
+        QVERIFY2(adv.error.isEmpty(),qPrintable(adv.error));
+        QVERIFY(adv.totals.contains(QStringLiteral("Зміна вільного авансу · ")+ClientReceiptReader::money(CashOutflow::totals(day,day).freeAdvances)));
+        const auto returns=CashReport::read(CashReport::Type::Refunds,day,day);
+        QVERIFY2(returns.error.isEmpty(),qPrintable(returns.error));
+        QVERIFY(q.exec("SELECT uid,cents,kind,reversed_uid FROM cash_outflows WHERE kind<>'expense'"));
+        int refundsChecked=0;
+        while(q.next()){
+            const auto uid=q.value(0).toString();
+            const auto found=std::find_if(returns.rows.cbegin(),returns.rows.cend(),[&](const auto& row){return row.at(1)==uid;});
+            QVERIFY(found!=returns.rows.cend());
+            const auto cents=q.value(1).toLongLong();
+            QCOMPARE(found->at(5),ClientReceiptReader::money(cents));
+            QCOMPARE(found->at(6),ClientReceiptReader::money(q.value(2)=="void_allocation"?0:q.value(3).isNull()?-cents:cents));
+            ++refundsChecked;
+        }
+        QCOMPARE(returns.rows.size(),refundsChecked);
+        const auto employees=CashReport::read(CashReport::Type::Employees,day,day);
+        QVERIFY2(employees.error.isEmpty(),qPrintable(employees.error));
+        QVERIFY(q.exec("SELECT COUNT(*) FROM activity_audit_events WHERE category='cash' AND date(occurred_at,'localtime')=date('now','localtime')") && q.next());
+        QCOMPARE(employees.rows.size(),q.value(0).toInt());q.finish();
         grants.remove("cash.receive");
         QVERIFY(AccessControlService::setRolePermissions(db,"manager",grants,&error));
         QVERIFY(AccessControlService::ensureSchema(db,&error));

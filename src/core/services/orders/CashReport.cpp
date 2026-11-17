@@ -1,4 +1,5 @@
 #include "CashReport.h"
+#include "core/crm/CrmFinancialService.h"
 #include "CashOperations.h"
 #include "CashBankService.h"
 #include "CashShiftService.h"
@@ -167,6 +168,38 @@ Table read(Type type,QDate first,QDate last,const QString& selector)
             if(!q.exec() || !q.next()){result.error=q.lastError().text();return result;}
             result.totals<<QStringLiteral("У дорозі на кінець періоду ")+ClientReceiptReader::money(q.value(0).toLongLong());
         }
+    } else if(type==Type::Orders){
+        result.columns={"Дата","UID наряду","Первинний документ","Операція","Нараховано","Зараховано в оплату наряду","Залишок за журналом"};
+        QStringList sources;
+        if(tables.contains("order_closure_commands"))sources<<"SELECT order_uid FROM main.order_closure_commands WHERE state='applied'";
+        if(tables.contains("client_payments"))sources<<"SELECT order_uid FROM main.client_payments WHERE paid_on BETWEEN ? AND ?";
+        if(tables.contains("cash_outflows"))sources<<"SELECT order_uid FROM main.cash_outflows WHERE kind IN ('payment','undo_payment','void_payment','void_allocation') AND day BETWEEN ? AND ?";
+        QSqlQuery orders(db);
+        if(!sources.isEmpty()){
+            const auto sql=sources.join(" UNION ")+" ORDER BY order_uid";
+            if(!orders.prepare(sql)){result.error=orders.lastError().text();return result;}
+            for(const auto& source:sources)if(source.contains("BETWEEN"))for(const auto& date:dates)orders.addBindValue(date);
+            if(!orders.exec()){result.error=orders.lastError().text();return result;}
+        }
+        QStringList orderUids;
+        while(orders.isActive() && orders.next())orderUids.append(orders.value(0).toString());
+        if(orders.lastError().isValid()){result.error=orders.lastError().text();return result;}
+        orderUids.removeDuplicates();
+        for(const auto& uid:orderUids){
+            const auto journal=CrmFinancialService::readOrderJournal(db,uid,first,last);
+            if(!journal.error.isEmpty()){result.error=journal.error;return result;}
+            for(const auto& entry:journal.entries)
+                result.rows.append({entry.day.toString(Qt::ISODate),uid,entry.sourceUid,
+                    entry.payment?QStringLiteral("Оплата / коригування"):QStringLiteral("Закриття наряду"),
+                    entry.payment?QStringLiteral("—"):ClientReceiptReader::money(entry.cents),
+                    entry.payment?ClientReceiptReader::money(entry.cents):QStringLiteral("—"),
+                    journal.closureRecorded && journal.receiptsAvailable?ClientReceiptReader::money(entry.balance):QStringLiteral("Потребує звірки")});
+            for(const int column:{4,5}){
+                const auto sum=ExactMoney::sum({sums.value(column),column==4?journal.charged:journal.paid});
+                if(auto value=std::get_if<ExactMoney::Cents>(&sum))sums[column]=*value;
+                else {result.error=QStringLiteral("Переповнення підсумку нарядів.");return result;}
+            }
+        }
     } else if(type==Type::Employees){
         result.columns={"Час UTC","Працівник","Дія","Документ","Опис"};
         if(tables.contains("activity_audit_events"))append("SELECT occurred_at,actor_name,action,entity_id,title FROM main.activity_audit_events WHERE category='cash' AND date(occurred_at,'localtime') BETWEEN ? AND ?",dates);
@@ -178,7 +211,6 @@ Table read(Type type,QDate first,QDate last,const QString& selector)
             const auto page=CashOperations::read(first,last,{},{},{},offset);
             if(!page.error.isEmpty()){result.error=page.error;return result;}
             for(const auto& row:page.rows){
-                if(type==Type::Orders && (row.order.isEmpty() || row.kind=="supplier"))continue;
                 if(type==Type::Refunds && row.kind!="refund" && row.kind!="void")continue;
                 const auto sum=ExactMoney::sum({total,row.net});
                 if(!std::holds_alternative<ExactMoney::Cents>(sum)){result.error=QStringLiteral("Переповнення підсумку.");return result;}
