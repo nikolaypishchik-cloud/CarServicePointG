@@ -142,11 +142,16 @@ Table read(Type type,QDate first,QDate last,const QString& selector)
         if(tables.contains("cash_opening_events"))append("SELECT effective_on,uid,outcome,actor,expected,counted,counted-expected,reason FROM main.cash_opening_events WHERE (outcome IN ('discrepancy','adjusted') OR source_uid IS NOT NULL) AND effective_on BETWEEN ? AND ?",dates);
         if(tables.contains("cash_shift_transitions"))append("SELECT date(recorded_ms/1000,'unixepoch','localtime'),request_uid,outcome,actor,expected,counted,counted-expected,reason FROM main.cash_shift_transitions WHERE outcome IN ('discrepancy','adjusted') AND date(recorded_ms/1000,'unixepoch','localtime') BETWEEN ? AND ?",dates);
     } else if(type==Type::Acquiring){
-        result.columns={"Дата","Документ","Операція","Підтверджено карткою","Зараховано банком","Комісія","Звірено"};money={3,4,5,6};additive=money;
-        if(tables.contains("client_payments"))append("SELECT paid_on,payment_uid,'Оплата карткою',amount_cents,NULL,NULL,NULL FROM main.client_payments WHERE method='card' AND paid_on BETWEEN ? AND ?",dates);
-        if(tables.contains("cash_advance_events"))append("SELECT day,uid,'Картковий аванс',cents,NULL,NULL,NULL FROM main.cash_advance_events WHERE method='card' AND source_uid IS NULL AND day BETWEEN ? AND ?",dates);
-        if(tables.contains("cash_outflows"))append("SELECT day,uid,reason,CASE WHEN reversed_uid IS NULL THEN -cents ELSE cents END,NULL,NULL,NULL FROM main.cash_outflows WHERE method='card' AND day BETWEEN ? AND ?",dates);
-        if(tables.contains("cash_bank_events"))append("SELECT day,reference,reason,NULL,CASE WHEN action='credit' THEN net END,CASE WHEN action='credit' THEN fee END,CASE WHEN action='match' THEN matched END FROM main.cash_bank_events WHERE action IN ('credit','match') AND day BETWEEN ? AND ?",dates);
+        result.columns={"Дата","Документ","Операція","Підтверджено карткою","Зараховано банком","Комісія","Звірено","Канал еквайрингу"};money={3,4,5,6};additive=money;
+        const bool hasChannels=tables.contains("cash_receipt_channels") && tables.contains("cash_bank_events");
+        auto receiptChannel=[&](const QString& type,const QString& uid)->QString{
+            if(!hasChannels)return "NULL";
+            return "(SELECT ch.reference FROM main.cash_receipt_channels r JOIN main.cash_bank_events ch ON ch.uid=r.channel_uid WHERE r.kind='"+type+"' AND r.receipt_uid="+uid+")";
+        };
+        if(tables.contains("client_payments"))append("SELECT paid_on,payment_uid,'Оплата карткою',amount_cents,NULL,NULL,NULL,"+receiptChannel("payment","p.payment_uid")+" FROM main.client_payments p WHERE method='card' AND paid_on BETWEEN ? AND ?",dates);
+        if(tables.contains("cash_advance_events"))append("SELECT day,uid,'Картковий аванс',cents,NULL,NULL,NULL,"+receiptChannel("advance","a.uid")+" FROM main.cash_advance_events a WHERE method='card' AND source_uid IS NULL AND day BETWEEN ? AND ?",dates);
+        if(tables.contains("cash_outflows"))append("SELECT day,uid,reason,CASE WHEN reversed_uid IS NULL THEN -cents ELSE cents END,NULL,NULL,NULL,NULL FROM main.cash_outflows WHERE method='card' AND day BETWEEN ? AND ?",dates);
+        if(tables.contains("cash_bank_events"))append("SELECT day,reference,reason,NULL,CASE WHEN action='credit' THEN net END,CASE WHEN action='credit' THEN fee END,CASE WHEN action='match' THEN matched END,(SELECT ch.reference FROM main.cash_bank_events credit JOIN main.cash_bank_events ch ON ch.uid=credit.source AND ch.action='channel' WHERE credit.action='credit' AND credit.account=e.account AND credit.reference=e.reference) FROM main.cash_bank_events e WHERE action IN ('credit','match') AND day BETWEEN ? AND ?",dates);
     } else if(type==Type::Advances){
         result.columns={"Дата","Операція","Аванс","Клієнт","Наряд","Зміна вільного авансу","Рух коштів клієнта"};money={5,6};additive=money;
         if(tables.contains("cash_advance_events"))append("SELECT day,CASE WHEN source_uid IS NULL THEN 'Отримання' ELSE 'Зарахування' END,COALESCE(source_uid,uid),client_uid,order_uid,CASE WHEN source_uid IS NULL THEN cents ELSE -cents END,CASE WHEN source_uid IS NULL THEN cents ELSE 0 END FROM main.cash_advance_events WHERE day BETWEEN ? AND ?",dates);

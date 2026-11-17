@@ -8,6 +8,7 @@ struct Command {
     QString requestUid, clientUid, orderUid, advanceUid, method, note;
     QDate day;
     qint64 cents = 0;
+    QString channelUid;
 };
 struct Result { QString operationUid, error; bool replay = false; };
 struct Choices { QList<Choice> rows; QString error; };

@@ -170,9 +170,15 @@ Result post(const Command& c)
                 "SELECT amount_cents,paid_on FROM main.client_payments WHERE payment_uid=? AND method='card'";
             if(!run(q,sql,{c.source}) || !q.next())return {QStringLiteral("Карткове надходження не знайдено.")};
             const auto gross=q.value(0).toLongLong();const auto paid=QDate::fromString(q.value(1).toString(),Qt::ISODate);
-            if(!run(q,"SELECT net+fee,day FROM main.cash_bank_events WHERE account=? AND reference=? AND action='credit'",{c.account,reference}) || !q.next())return {QStringLiteral("Банківський рядок не знайдено.")};
+            if(!run(q,"SELECT net+fee,day,source FROM main.cash_bank_events WHERE account=? AND reference=? AND action='credit'",{c.account,reference}) || !q.next())return {QStringLiteral("Банківський рядок не знайдено.")};
             const auto bankGross=q.value(0).toLongLong();
             const auto bankDay=QDate::fromString(q.value(1).toString(),Qt::ISODate);
+            const auto bankChannel=q.value(2).toString();
+            if(db.tables().contains("cash_receipt_channels")){
+                if(!run(q,"SELECT r.channel_uid,ch.account FROM main.cash_receipt_channels r LEFT JOIN main.cash_bank_events ch ON ch.uid=r.channel_uid AND ch.action='channel' WHERE r.kind=? AND r.receipt_uid=?",{c.sourceType,c.source}))return {q.lastError().text()};
+                if(q.next() && (q.value(1)!=c.account || (!bankChannel.isEmpty() && q.value(0)!=bankChannel)))
+                    return {QStringLiteral("Канал або рахунок банківського рядка не відповідає первинній картковій оплаті.")};
+            }
             if(!paid.isValid() || paid>bankDay || bankDay>c.date)return {QStringLiteral("Перевірте дати оплати, банку та звірки.")};
             if(!run(q,"SELECT COALESCE(SUM(matched),0) FROM main.cash_bank_events WHERE action='match' AND account=? AND reference=?",{c.account,reference}) || !q.next())return {q.lastError().text()};
             if(c.matched>bankGross-q.value(0).toLongLong())return {QStringLiteral("Сума перевищує незвірений залишок банківського рядка.")};

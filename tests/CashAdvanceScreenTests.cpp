@@ -385,6 +385,7 @@ private slots:
         QVERIFY(q.exec("SELECT COUNT(*),SUM(amount_cents) FROM cash_payment_details JOIN client_payments USING(payment_uid)") && q.next());
         QCOMPARE(q.value(0).toInt(),1);QCOMPARE(q.value(1).toLongLong(),1050);q.finish();
         payForm->close();
+        QTRY_VERIFY(!page.findChild<QDialog*>("cashAdvanceForm"));
         QVERIFY(!CashOutflow::post({id(),"void_advance",sourceUid,"Перевірка",day,10000}).error.isEmpty());
         auto voidAllocation=CashOutflow::Command{id(),"void_allocation",allocationUid,"Виправлення зарахування",day,4001};
         auto voided=CashOutflow::post(voidAllocation);
@@ -649,6 +650,54 @@ private slots:
             restored.close();
         }
         QSqlDatabase::removeDatabase(restoreId);
+        Bank secondChannel{id(),"channel",bank,"QA другий термінал",{},"Фактична комісія","Договір",day};
+        QVERIFY(CashBankService::post(secondChannel).error.isEmpty());
+        QVERIFY(q.exec("INSERT INTO work_orders VALUES(99,'order-channel','client','QA',0,'uah')"));
+        QVERIFY(q.exec("INSERT INTO work_order_services VALUES('order-channel',99,1,100,100)"));
+        QVERIFY(ClientReceiptReader::beginTrackingNewOrder(db,"order-channel",&error));
+        for(const bool direct:{true,false}){
+            CashAdvanceService::Command primary{id(),"client","order-channel",{},"card","QA",day,300,channel.uid};
+            auto postPrimary=[&]{return direct?CashAdvanceService::postPayment(primary):CashAdvanceService::post(primary);};
+            auto* trigger=page.findChild<QPushButton*>(direct?"receiveOrderPayment":"receiveAdvance");
+            QVERIFY(trigger && trigger->isEnabled());trigger->click();
+            auto* dialog=page.findChild<QDialog*>("cashAdvanceForm");QVERIFY(dialog);
+            auto choose=[&](const char* field,const QString& value){
+                auto* box=dialog->findChild<QComboBox*>(field);QVERIFY(box);
+                const int index=box->findData(value);QVERIFY2(index>=0,field);box->setCurrentIndex(index);
+            };
+            choose("advanceClient","client");choose("advanceOrder","order-channel");
+            choose("advanceMethod","card");choose("receiptChannel",channel.uid);
+            primary.note.clear();
+            dialog->findChild<QLineEdit*>("advanceAmount")->setText("3,00");
+            auto* submit=dialog->findChild<QPushButton*>("advancePost");
+            auto* feedback=dialog->findChild<QLabel*>("advanceStatus");QVERIFY(submit && feedback);
+            submit->click();
+            QVERIFY2(feedback->text().startsWith(QStringLiteral("Проведено")),qPrintable(feedback->text()));
+            primary.requestUid=feedback->text().section(" · ",-1);
+            submit->click();QVERIFY(feedback->text().startsWith(QStringLiteral("Уже проведено")));
+            dialog->close();QTRY_VERIFY(!page.findChild<QDialog*>("cashAdvanceForm"));
+            QVERIFY(postPrimary().replay);
+            primary.channelUid=secondChannel.uid;
+            QVERIFY(!postPrimary().error.isEmpty());
+            const auto type=direct?QStringLiteral("payment"):QStringLiteral("advance");
+            const auto wrongRef=id(),correctRef=id();
+            QVERIFY(CashBankService::post({id(),"credit",bank,wrongRef,"channel",secondChannel.uid,"Виписка",day,299,1,0}).error.isEmpty());
+            Bank reconcile{id(),"match",bank,wrongRef,type,primary.requestUid,"Звірка",day,0,0,300};
+            QVERIFY(!CashBankService::post(reconcile).error.isEmpty());
+            QVERIFY(CashBankService::post({id(),"credit",bank,correctRef,"channel",channel.uid,"Виписка",day,299,1,0}).error.isEmpty());
+            const auto byChannel=CashReport::read(CashReport::Type::Acquiring,day,day);
+            QVERIFY2(byChannel.error.isEmpty(),qPrintable(byChannel.error));
+            for(const auto& doc:{primary.requestUid,correctRef,wrongRef}){
+                const auto found=std::find_if(byChannel.rows.cbegin(),byChannel.rows.cend(),[&](const auto& row){return row.at(1)==doc;});
+                QVERIFY(found!=byChannel.rows.cend());
+                QCOMPARE(found->last(),doc==wrongRef?secondChannel.reference:channel.reference);
+            }
+            reconcile.reference=correctRef;
+            const auto before=ClientReceiptReader::read(db,{"order-channel"});
+            QVERIFY(CashBankService::post(reconcile).error.isEmpty());
+            QVERIFY(CashBankService::post(reconcile).replay);
+            QCOMPARE(ClientReceiptReader::read(db,{"order-channel"}).centsByOrder,before.centsByOrder);
+        }
         grants.remove("cash.receive");
         QVERIFY(AccessControlService::setRolePermissions(db,"manager",grants,&error));
         QVERIFY(AccessControlService::ensureSchema(db,&error));

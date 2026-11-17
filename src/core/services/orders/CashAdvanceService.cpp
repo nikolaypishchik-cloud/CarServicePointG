@@ -1,4 +1,5 @@
 #include "CashAdvanceService.h"
+#include "CashBankService.h"
 #include "core/finance/CustomerCash.h"
 #include "core/services/AccessControlService.h"
 #include "core/services/ActivityAuditService.h"
@@ -33,6 +34,27 @@ bool exec(QSqlQuery& q, const QString& sql, const QVariantList& args)
     if (!q.prepare(sql)) return false;
     for (const auto& arg : args) q.addBindValue(arg);
     return q.exec();
+}
+QString receiptChannel(QSqlDatabase db,const Command& c,const QString& type,bool replay)
+{
+    QSqlQuery q(db);
+    if(replay){
+        QString saved;
+        if(db.tables().contains("cash_receipt_channels")){
+            if(!exec(q,"SELECT channel_uid FROM main.cash_receipt_channels WHERE kind=? AND receipt_uid=?",{type,c.requestUid}))return q.lastError().text();
+            if(q.next())saved=q.value(0).toString();
+        }
+        return saved==c.channelUid?QString():QStringLiteral("Канал проведеного запиту відрізняється.");
+    }
+    if(c.channelUid.isEmpty())return {};
+    if(c.method!="card")return QStringLiteral("Канал еквайрингу можна обрати лише для карткової оплати.");
+    if(!db.tables().contains("cash_bank_events"))return QStringLiteral("Налаштуйте канал еквайрингу.");
+    if(!exec(q,"SELECT account FROM main.cash_bank_events WHERE uid=? AND action='channel'",{c.channelUid}))return q.lastError().text();
+    if(!q.next())return QStringLiteral("Канал еквайрингу не знайдено.");
+    if(auto error=CashBankService::activeAccountError(db,q.value(0).toString());!error.isEmpty())return error;
+    if(!q.exec("CREATE TABLE IF NOT EXISTS main.cash_receipt_channels(kind TEXT NOT NULL,receipt_uid TEXT NOT NULL,channel_uid TEXT NOT NULL REFERENCES cash_bank_events(uid),PRIMARY KEY(kind,receipt_uid))"))return q.lastError().text();
+    if(!exec(q,"INSERT INTO main.cash_receipt_channels VALUES(?,?,?)",{type,c.requestUid,c.channelUid}))return q.lastError().text();
+    return {};
 }
 QString advanceCorrections(QSqlDatabase db)
 {
@@ -135,8 +157,10 @@ Result postPayment(const Command& c)
     if(q.next()){
         if(q.value(0)!=c.orderUid || q.value(1).toLongLong()!=c.cents || q.value(2)!=method || q.value(3)!=day || q.value(4)!=actor || q.value(5)!=c.clientUid || q.value(6).toString()!=c.note)
             return fail(QStringLiteral("Запит має інші реквізити."));
+        if(auto err=receiptChannel(db,c,"payment",true);!err.isEmpty())return fail(err);
         return {c.requestUid,{},true};
     }
+    if(auto err=receiptChannel(db,c,"payment",false);!err.isEmpty())return fail(err);
     if(c.day!=QDate::currentDate())return fail(QStringLiteral("Для нової оплати потрібна поточна дата."));
     if(!exec(q,"SELECT client_uid FROM main.work_orders WHERE order_uid=?",{c.orderUid}) || !q.next() || q.value(0)!=c.clientUid || q.next())return fail(QStringLiteral("Перевірте клієнта наряду."));
     const auto snapshot=CrmFinancialService::readOrder(db,c.orderUid);
@@ -184,8 +208,10 @@ Result post(const Command& c)
     if (q.next()) {
         for (int i=0;i<payload.size();++i)
             if (q.value(i).toString()!=payload[i].toString()) return fail(QStringLiteral("Запит уже проведено з іншими реквізитами."));
+        if(auto err=receiptChannel(db,c,"advance",true);!err.isEmpty())return fail(err);
         return {c.requestUid,{},true};
     }
+    if(auto err=receiptChannel(db,c,"advance",false);!err.isEmpty())return fail(err);
     if (c.day!=QDate::currentDate()) return fail(QStringLiteral("Для нової операції потрібна поточна дата."));
     if (!exec(q,"SELECT COUNT(*) FROM crm_clients WHERE client_uid=?",{c.clientUid}) || !q.next() || q.value(0).toInt()!=1)
         return fail(QStringLiteral("Не підтверджено клієнта."));

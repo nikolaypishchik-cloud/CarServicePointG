@@ -1,5 +1,6 @@
 #include "CashAdvanceDialog.h"
 #include "CashJournalPage.h"
+#include "core/services/orders/CashBankService.h"
 #include "core/services/orders/CashAdvanceService.h"
 #include "core/finance/ExactMoney.h"
 #include <QComboBox>
@@ -39,6 +40,13 @@ void openCashAdvanceDialog(CashJournalPage* page,bool allocate,bool direct)
     method->addItem(QObject::tr("Готівка"),"cash");
     method->addItem(QObject::tr("Картка"),"card");
     method->addItem(QObject::tr("Переказ"),"transfer");
+    auto* channel=combo("receiptChannel",QObject::tr("Канал еквайрингу"));
+    channel->addItem(QObject::tr("Канал не вказано"),QString());
+    QString channelError;
+    for(const auto& item:CashBankService::channels(channelError))channel->addItem(item.name+" · "+item.account,item.uid);
+    channel->setToolTip(channelError);
+    form->setRowVisible(channel,false);
+    QObject::connect(method,&QComboBox::currentIndexChanged,dialog,[=]{form->setRowVisible(channel,!allocate && method->currentData()=="card");});
     form->setRowVisible(source,allocate);
     form->setRowVisible(method,!allocate);
     auto* amount=new QLineEdit(dialog);
@@ -62,10 +70,10 @@ void openCashAdvanceDialog(CashJournalPage* page,bool allocate,bool direct)
         if (!cents || *cents<=0) { status->setText(QObject::tr("Введіть додатну суму з точністю до копійки."));return; }
         Command c{request,client->currentData().toString(),order->currentData().toString(),
             allocate?source->currentData().toString():QString(),allocate?QStringLiteral("allocation"):method->currentData().toString(),
-            note->text(),date,*cents};
+            note->text(),date,*cents,method->currentData()=="card" && !allocate?channel->currentData().toString():QString()};
         const auto result=direct?postPayment(c):post(c);
         if (!result.error.isEmpty()) {status->setText(result.error);return;}
-        for(auto* box:{client,order,source,method})box->setEnabled(false);
+        for(auto* box:{client,order,source,method,channel})box->setEnabled(false);
         amount->setReadOnly(true);note->setReadOnly(true);
         status->setText((result.replay?QObject::tr("Уже проведено"):QObject::tr("Проведено"))+" · "+result.operationUid);
         postButton->setText(QObject::tr("Перевірити проведення"));
