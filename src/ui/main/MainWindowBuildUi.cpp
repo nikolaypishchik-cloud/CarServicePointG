@@ -431,8 +431,16 @@ void MainWindow::buildUi()
 
     rootL->addWidget(m_sidebar);
     auto* contentScroll = new QScrollArea(m_root);
+    contentScroll->setObjectName("orderContentScroll");
     contentScroll->setFrameShape(QFrame::NoFrame);
+    contentScroll->setStyleSheet("#orderContentScroll {border:none;padding:0px;margin:0px;background:transparent;}");
     contentScroll->setWidgetResizable(true);
+    contentScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto updateOrderScrolling = [contentScroll](int index) {
+        contentScroll->setHorizontalScrollBarPolicy(index == 1 ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
+    };
+    connect(m_stack, &QStackedWidget::currentChanged, contentScroll, updateOrderScrolling);
+    updateOrderScrolling(m_stack->currentIndex());
     contentScroll->setWidget(m_content);
     rootL->addWidget(contentScroll, 1);
 
