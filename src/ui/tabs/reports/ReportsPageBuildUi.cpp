@@ -278,6 +278,10 @@ void ReportsPage::buildUi()
     periodLayout->addWidget(m_weekComparison);
     m_tabs->addTab(periodPage, QString::fromUtf8("Звіт за період"));
     auto* ordersPage = makeTab(m_ordersTable, m_ordersModel);
+    auto* ordersLayout = static_cast<QVBoxLayout*>(ordersPage->layout());
+    const int orderGap = qRound(logicalDpiY()/25.4);
+    ordersLayout->setContentsMargins(0,orderGap,0,0);
+    ordersLayout->setSpacing(orderGap);
     m_orderPager = new OrderReportPager(m_ordersTable, m_ordersModel, ordersPage);
     auto* orderFilters = new QWidget(ordersPage);
     orderFilters->setObjectName("orderReportFilters");
@@ -657,7 +661,7 @@ void ReportsPage::buildUi()
         {3, 120, 150, 2, 260, false},
         {4, 140, 170, 2, 280, false},
         {5, 105, 120, 1, 160, false},
-        {6, 92, 104, 1, 140, false}
+        {6, 280, 300, 2, 420, false}
     }, QStringLiteral("ui.reports.orders.list.adaptive"));
     m_partsTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
     AdaptiveUi::installAdaptiveTable(m_partsTable, {

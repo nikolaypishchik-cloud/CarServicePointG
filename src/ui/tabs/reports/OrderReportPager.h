@@ -11,11 +11,100 @@
 #include <QPushButton>
 #include <QTableView>
 #include <algorithm>
+#include <QStyledItemDelegate>
+#include <QPainter>
+#include <QApplication>
+#include <QFontInfo>
+
+class OrderReportCellDelegate final : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    void paint(QPainter* painter, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        QStyleOptionViewItem cell(option);
+        initStyleOption(&cell,index);
+        const QString text = index.data(Qt::DisplayRole).toString();
+        cell.text.clear();
+        const auto* widget = option.widget;
+        (widget ? widget->style() : QApplication::style())->drawControl(QStyle::CE_ItemViewItem,&cell,painter,widget);
+        painter->save();
+        painter->setClipRect(option.rect);
+        QRect bounds = option.rect.adjusted(10,6,-10,-6);
+        QFont font = option.font;
+        const auto lines = text.split('\n');
+        if (index.column()==6) {
+            const bool paid = text == tr("Сплачено");
+            const bool unpaid = text == tr("Не сплачено повністю");
+            const QColor accent(paid ? "#16952b" : unpaid ? "#ed8b00" : "#64717d");
+            painter->setRenderHint(QPainter::Antialiasing);
+            painter->setBrush(QColor(paid ? "#dff4d6" : unpaid ? "#fff0dc" : "#edf1f4"));
+            painter->setPen(QPen(accent.lighter(155),1));
+            bounds.setHeight(qMin(bounds.height(),QFontMetrics(font).height()+24));
+            bounds.moveCenter(option.rect.center());
+            painter->drawRoundedRect(bounds,6,6);
+            painter->setPen(QPen(accent,2));
+            const QPoint center(bounds.left()+18,bounds.center().y());
+            if (paid) {
+                painter->drawLine(center+QPoint(-6,0),center+QPoint(-1,5));
+                painter->drawLine(center+QPoint(-1,5),center+QPoint(8,-6));
+            } else {
+                painter->setBrush(Qt::NoBrush);
+                painter->drawEllipse(center,7,7);
+                if (unpaid) painter->fillRect(QRect(bounds.left(),bounds.top()+3,4,bounds.height()-6),accent);
+            }
+            font.setWeight(QFont::DemiBold);
+            font.setUnderline(true);
+            painter->setFont(font);
+            painter->setPen(QColor("#142019"));
+            painter->drawText(bounds.adjusted(36,0,-8,0),Qt::AlignVCenter|Qt::AlignLeft,text);
+        } else {
+            int height=0;
+            for (int line=0;line<lines.size();++line) height+=QFontMetrics(lineFont(font,index.column(),line)).height();
+            int y=option.rect.center().y()-height/2;
+            for (int line=0;line<lines.size();++line) {
+                const QFont current=lineFont(font,index.column(),line);
+                painter->setFont(current);
+                painter->setPen(QColor("#14212c"));
+                const int h=QFontMetrics(current).height();
+                painter->drawText(QRect(bounds.left(),y,bounds.width(),h),
+                    Qt::AlignVCenter|(index.column()==4?Qt::AlignRight:Qt::AlignLeft),lines[line]);
+                y+=h;
+            }
+        }
+        painter->restore();
+    }
+    QSize sizeHint(const QStyleOptionViewItem& option,const QModelIndex& index) const override {
+        const auto lines=index.data().toString().split('\n');
+        int width=0,height=0;
+        for(int line=0;line<lines.size();++line) {
+            const QFontMetrics metrics(lineFont(option.font,index.column(),line));
+            width=qMax(width,metrics.horizontalAdvance(lines[line]));
+            height+=metrics.height();
+        }
+        if(index.column()==6) {
+            QFont font=option.font; font.setWeight(QFont::DemiBold);
+            return {QFontMetrics(font).horizontalAdvance(index.data().toString())+64,QFontMetrics(font).height()+36};
+        }
+        return {width+20,height+16};
+    }
+private:
+    static QFont lineFont(QFont font,int column,int line) {
+        const bool larger=(column==1 && line==0) || (column==2 && line>0) || column==4;
+        if(larger) font.setPointSizeF(QFontInfo(font).pointSizeF()+2);
+        if(column==1 && line==0) font.setBold(true);
+        if((column==2 && line>0) || column==4) font.setWeight(QFont::DemiBold);
+        return font;
+    }
+};
 
 class OrderReportPager final : public QWidget {
 public:
     OrderReportPager(QTableView* table, ReportsTableSupport::ReportsSnapshotTableModel* model, QWidget* parent)
         : QWidget(parent), m_table(table), m_model(model) {
+        for (int column : {1,2,4,6})
+            table->setItemDelegateForColumn(column,new OrderReportCellDelegate(table));
+        table->horizontalHeader()->setStyleSheet(
+            "QHeaderView::section {color:#fff;font-weight:bold;padding:9px 10px;border:1px solid #bccbd6;"
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #708797,stop:1 #4d606e);}");
         auto* bar = new QHBoxLayout(this);
         bar->setContentsMargins(8, 2, 8, 2);
         m_status = new QLabel(this);

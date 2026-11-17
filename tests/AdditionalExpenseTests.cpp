@@ -1168,6 +1168,55 @@ private slots:
         QVERIFY(!stats->text().contains(QStringLiteral("Не вдалося")));
     }
 
+    void ordersReportAppearance() {
+        preparePartsPayrollPdfFixture();
+        ReportsPage page;
+        page.resize(1440,850);
+        page.show();
+        auto* tabs=page.findChild<QTabWidget*>();
+        auto* pager=dynamic_cast<OrderReportPager*>(page.findChild<QWidget*>("orderReportPager"));
+        auto* pdf=page.findChild<QPushButton*>("reportsPdfButton");
+        QVERIFY(tabs && pager && pdf);
+        tabs->setCurrentIndex(1);
+        auto* table=tabs->currentWidget()->findChild<QTableView*>();
+        auto* filters=page.findChild<QWidget*>("orderReportFilters");
+        QVERIFY(table && filters);
+        QTest::qWait(600);
+        OrdersSnapshot snapshot;
+        for(int i=0;i<3;++i) {
+            OrdersSnapshotRow row;
+            row.orderNumber=QString::number(543-i);
+            row.date="08.11.26";
+            row.car=QString::fromUtf8("BI 2268 IB | Toyota Camry");
+            row.invoiceTotal=FormatUtils::money(18762.50,2);
+            row.paymentStatus=i==0 ? tr("Сплачено") : i==1 ? tr("Не сплачено повністю") : tr("Помилка звірки");
+            row.internalOrderNumber=1000+i;
+            snapshot.rows.append(row);
+        }
+        pager->setSnapshot(snapshot);
+        QTest::qWait(250);
+        const int gap=qRound(page.logicalDpiY()/25.4);
+        const QPoint filterBottom=filters->mapTo(&page,filters->rect().bottomLeft());
+        const QPoint tableTop=table->mapTo(&page,QPoint());
+        QCOMPARE(tableTop.y()-filterBottom.y()-1,gap);
+        const int tableRight=table->mapTo(&page,table->rect().topRight()).x();
+        const int pdfRight=pdf->mapTo(&page,pdf->rect().topRight()).x();
+        QVERIFY2(qAbs(tableRight-pdfRight)<=2,qPrintable(QString("table=%1 PDF=%2").arg(tableRight).arg(pdfRight)));
+        QVERIFY(pdf->width()>=pdf->minimumSizeHint().width());
+        QStyleOptionViewItem option;
+        option.initFrom(table);
+        option.font=table->font();
+        for(int row=0;row<3;++row) {
+            const auto index=table->model()->index(row,6);
+            const auto hint=table->itemDelegateForColumn(6)->sizeHint(option,index);
+            QVERIFY2(table->columnWidth(6)>=hint.width(),qPrintable(QString("badge width %1 < %2").arg(table->columnWidth(6)).arg(hint.width())));
+            QVERIFY(table->rowHeight(row)>=hint.height());
+            QCOMPARE(table->model()->index(row,0).data(Qt::UserRole).toInt(),1000+row);
+        }
+        const auto capture=qEnvironmentVariable("CS_ORDERS_APPEARANCE");
+        if(!capture.isEmpty()) QVERIFY(page.grab().save(capture));
+    }
+
     void reportsCornerActions() {
         ReportsPage page;
         auto* tabs = page.findChild<QTabWidget*>();

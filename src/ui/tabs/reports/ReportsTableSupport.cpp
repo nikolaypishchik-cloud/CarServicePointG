@@ -338,7 +338,7 @@ void applyOrdersSnapshot(QTableView* table, ReportsSnapshotTableModel* model, co
         out.cells[0].tooltip = row.closed ? QObject::tr("Закритий наряд") : QObject::tr("Відкритий наряд");
         out.cells[1].extraRoles[Qt::DisplayRole] = QStringList{row.orderNumber, row.date}.join('\n');
         out.cells[1].bold = true;
-        out.cells[2].extraRoles[Qt::DisplayRole] = row.car.split(QStringLiteral(" | "), Qt::SkipEmptyParts).join('\n');
+        out.cells[2].extraRoles[Qt::DisplayRole] = row.car.split(QStringLiteral(" | "), Qt::KeepEmptyParts).join('\n');
         out.cells[5].extraRoles[Qt::DisplayRole] = row.paymentDue.split(QStringLiteral(", "), Qt::SkipEmptyParts).join('\n');
         out.cells[3].link=!row.invoiceKeys.isEmpty();out.cells[6].link=true;
         out.cells[6].bold=row.paymentStatus.startsWith(QString::fromUtf8("Не сплачено"), Qt::CaseInsensitive);
