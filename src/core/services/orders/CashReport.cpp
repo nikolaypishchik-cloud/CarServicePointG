@@ -106,6 +106,7 @@ Table read(Type type,QDate first,QDate last,const QString& selector)
         auto readAccount=[&](const QString& accountUid){
             if(tables.contains("cash_account_moves"))
                 append("SELECT day,uid,CASE WHEN src IS NULL THEN 'Початковий залишок' ELSE 'Переміщення' END,actor,CASE WHEN dest=? THEN cents ELSE -cents END FROM main.cash_account_moves WHERE (src=? OR dest=?) AND day BETWEEN ? AND ?",QVariantList{accountUid,accountUid,accountUid}+dates);
+            if(tables.contains("cash_transit_events"))append("SELECT day,uid,CASE action WHEN 'send' THEN 'Відправлено' WHEN 'receive' THEN 'Прийнято' ELSE 'Фактично повернуто' END,actor,delta FROM main.cash_transit_events WHERE account=? AND day BETWEEN ? AND ?",QVariantList{accountUid}+dates);
             if(tables.contains("cash_treasury_entries"))
                 append("SELECT day,uid,reason,actor,delta FROM main.cash_treasury_entries WHERE account=? AND day BETWEEN ? AND ?",QVariantList{accountUid}+dates);
             if(tables.contains("cash_bank_events"))
@@ -125,6 +126,10 @@ Table read(Type type,QDate first,QDate last,const QString& selector)
                 reportAccount=account.name+" · "+account.uid;
                 readAccount(account.uid);
                 if(!result.error.isEmpty())return result;
+            }
+            if(tables.contains("cash_transit_events")){
+                reportAccount=QStringLiteral("У дорозі");
+                append("SELECT day,uid,action,actor,-delta FROM main.cash_transit_events WHERE day BETWEEN ? AND ?",dates);
             }
             result.columns={"Календарний день","Рахунок","Чистий рух за рахунком"};
             for(auto it=dailyAccounts.cbegin();it!=dailyAccounts.cend();++it)
@@ -147,8 +152,16 @@ Table read(Type type,QDate first,QDate last,const QString& selector)
         if(tables.contains("cash_advance_events"))append("SELECT day,CASE WHEN source_uid IS NULL THEN 'Отримання' ELSE 'Зарахування' END,COALESCE(source_uid,uid),client_uid,order_uid,CASE WHEN source_uid IS NULL THEN cents ELSE -cents END,CASE WHEN source_uid IS NULL THEN cents ELSE 0 END FROM main.cash_advance_events WHERE day BETWEEN ? AND ?",dates);
         if(tables.contains("cash_outflows") && tables.contains("cash_advance_events"))append("SELECT v.day,v.reason,COALESCE(a.source_uid,a.uid),a.client_uid,a.order_uid,CASE WHEN v.kind IN ('undo_advance','void_allocation') THEN v.cents ELSE -v.cents END,CASE WHEN v.kind='void_allocation' THEN 0 WHEN v.kind='undo_advance' THEN v.cents ELSE -v.cents END FROM main.cash_outflows v JOIN main.cash_advance_events a ON a.uid=v.source WHERE v.kind IN ('advance','undo_advance','void_advance','void_allocation') AND v.day BETWEEN ? AND ?",dates);
     } else if(type==Type::Transfers){
-        result.columns={"Дата","Документ","З рахунку","На рахунок","Працівник","Переміщено","Підстава"};money={5};additive={5};
-        if(tables.contains("cash_account_moves"))append("SELECT day,uid,src,dest,actor,cents,reason FROM main.cash_account_moves WHERE src IS NOT NULL AND day BETWEEN ? AND ?",dates);
+        result.columns={"Дата","Документ","З рахунку","На рахунок","Працівник","Доставлено або переміщено миттєво","Підстава","Зміна суми в дорозі"};money={5,7};additive={5};
+        if(tables.contains("cash_account_moves"))append("SELECT day,uid,src,dest,actor,cents,reason,NULL FROM main.cash_account_moves WHERE src IS NOT NULL AND day BETWEEN ? AND ?",dates);
+        if(tables.contains("cash_transit_events")){
+            append("SELECT day,uid,src,dest,actor,CASE WHEN action='receive' THEN cents ELSE NULL END,CASE action WHEN 'send' THEN 'Відправлено' WHEN 'receive' THEN 'Отримано' ELSE 'Повернуто' END || ' · ' || reason || ' · ' || COALESCE(dispatch,uid),-delta FROM main.cash_transit_events WHERE day BETWEEN ? AND ?",dates);
+            QSqlQuery q(db);
+            if(!q.prepare("SELECT COALESCE(SUM(-delta),0) FROM main.cash_transit_events WHERE day<=?")){result.error=q.lastError().text();return result;}
+            q.addBindValue(last.toString(Qt::ISODate));
+            if(!q.exec() || !q.next()){result.error=q.lastError().text();return result;}
+            result.totals<<QStringLiteral("У дорозі на кінець періоду ")+ClientReceiptReader::money(q.value(0).toLongLong());
+        }
     } else if(type==Type::Employees){
         result.columns={"Час UTC","Працівник","Дія","Документ","Опис"};
         if(tables.contains("activity_audit_events"))append("SELECT occurred_at,actor_name,action,entity_id,title FROM main.activity_audit_events WHERE category='cash' AND date(occurred_at,'localtime') BETWEEN ? AND ?",dates);

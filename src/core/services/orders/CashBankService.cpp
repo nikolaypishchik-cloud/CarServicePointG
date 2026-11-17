@@ -138,6 +138,10 @@ Result post(const Command& c)
                 if(!q.exec("SELECT 1 FROM main.cash_shifts WHERE state<>'closed' LIMIT 1"))return {q.lastError().text()};
                 if(q.next())return {QStringLiteral("Спочатку завершіть відкриту зміну або передачу каси.")};
             }
+            if(c.action!="activate" && db.tables().contains("cash_transit_events")){
+                if(!run(q,"SELECT 1 FROM main.cash_transit_events s WHERE s.dispatch IS NULL AND (s.src=? OR s.dest=?) AND NOT EXISTS(SELECT 1 FROM main.cash_transit_events f WHERE f.dispatch=s.uid) LIMIT 1",{c.account,c.account}))return {q.lastError().text()};
+                if(q.next())return {QStringLiteral("Є кошти в дорозі. Спочатку підтвердьте доставку або фактичне повернення.")};
+            }
             if(c.action=="archive"){
                 qint64 funds=0;
                 if(auto error=CashAccountMovement::balance(db,c.account,funds);!error.isEmpty())return {error};

@@ -47,6 +47,8 @@ static Page selectRows(QDate first,QDate last,const QString& search,const QStrin
                  "CASE WHEN kind IN ('expense','void_allocation') THEN 0 WHEN reversed_uid IS NOT NULL THEN cents ELSE -cents END,reason,COALESCE(reversed_uid,source),actor FROM main.cash_outflows";
     if(tables.contains("cash_bank_events"))
         sources<<"SELECT day,recorded_ms,uid,action,NULL,NULL,'bank_transfer',CASE WHEN action='credit' THEN net ELSE matched END,0,reason,reference,actor FROM main.cash_bank_events WHERE action IN ('credit','match')";
+    if(tables.contains("cash_transit_events"))
+        sources<<"SELECT day,recorded_ms,uid,'move',NULL,NULL,'internal',cents,0,CASE action WHEN 'send' THEN 'Відправлено' WHEN 'receive' THEN 'Отримано' ELSE 'Фактично повернуто' END || ' · ' || reason,COALESCE(dispatch,uid),actor FROM main.cash_transit_events";
     if(tables.contains("cash_account_moves"))
         sources<<"SELECT day,recorded_ms,uid,CASE WHEN src IS NULL THEN 'opening' ELSE 'move' END,NULL,NULL,'internal',cents,0,reason,src,actor FROM main.cash_account_moves";
     if (tables.contains("cash_treasury_entries"))
